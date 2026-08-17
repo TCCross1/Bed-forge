@@ -1,0 +1,84 @@
+{
+  "theme": "Tactical Industrial Dark Mode",
+  "typography": {
+    "headings": "Barlow",
+    "body": "IBM Plex Sans",
+    "data_and_numbers": "JetBrains Mono",
+    "instructions": "Use Barlow (uppercase, condensed styles if possible) for panel titles and critical status text. IBM Plex Sans for general body legibility. JetBrains Mono or IBM Plex Mono is MANDATORY for all numeric readouts, tensions, elongation values, and form inputs to ensure tabular alignment and precision aesthetics. Never use generic sans for data.",
+    "hierarchy": {
+      "H1": "text-4xl sm:text-5xl tracking-tight uppercase font-bold",
+      "H2": "text-2xl sm:text-3xl tracking-tight uppercase font-semibold",
+      "H3": "text-xl sm:text-2xl font-semibold",
+      "H4": "text-lg sm:text-xl font-medium tracking-[0.05em]",
+      "Body": "text-base",
+      "Data_Large": "text-3xl sm:text-4xl font-mono tracking-tighter"
+    }
+  },
+  "colors": {
+    "background": "#0A0C10",
+    "panel_background": "#12151C",
+    "border": "#222631",
+    "text_primary": "#FFFFFF",
+    "text_secondary": "#8B949E",
+    "status": {
+      "pass": "#00E676",
+      "fail": "#FF3366",
+      "warning": "#FFD600",
+      "active_info": "#2979FF"
+    },
+    "instructions": "Rely strictly on 'Tactical Minimalism'. The app must look like command-center software. Use #0A0C10 for the app background. Panels/Cards use #12151C. All interactive borders are a stark #222631. Do NOT use gradients. Use solid blocks of high-saturation status colors (Pass/Fail/Warn) to convey plant conditions instantly. When a component (like a bed) is 'Failing', use a 1px solid stroke or bold text in #FF3366, not a soft colored background."
+  },
+  "visual_enhancers": {
+    "borders": "1px solid strokes (border-border) for all containers. Remove soft drop shadows. Use inner glow (shadow-[inset_0_1px_0_rgba(255,255,255,0.1)]) for buttons.",
+    "shapes": "Sharp corners or maximum 4px radius (rounded-sm) for a rugged, precision-engineered feel. No pill-shaped buttons unless it is a primary floating action.",
+    "hover_states": "High-contrast hover. Hovering over a dark button should turn it stark white with black text, or significantly brighten the border. Focus states must use a 2px offset ring in blueprint blue (#2979FF)."
+  },
+  "layouts": {
+    "dashboard": "High Density Grid (Bento Mode B). Utilize CSS Grid with grid-cols-1 md:grid-cols-4 lg:grid-cols-8. Beds should be mapped in dense summary cards. Space must be fully utilized.",
+    "navigation": "Persistent Side or Bottom navigation. Operators wearing gloves cannot hunt for a hamburger menu. Navigation must always be visible with large icons.",
+    "spacing": "Generous internal padding (p-6 to p-8) to ensure large tap targets. Minimum touch target size for ALL interactive elements must be min-h-12 or min-h-14 (48px - 56px) for iPad/glove use."
+  },
+  "components": {
+    "buttons": "Large tap targets (min-h-12). Sharp edges. High contrast.",
+    "data_tables": "Dense, monospace numbers, stark horizontal borders only (no vertical borders). Include inline 'sparkline' trends for recent tension/strength history if applicable.",
+    "forms": "Use Shadcn components but override to use flat, dark backgrounds with stark white/gray 1px borders. Inputs must have min-h-12. No native inputs.",
+    "status_indicators": "Dot indicators or solid color tags. Always pair color with text (e.g. '[FAIL] Crack Detected') for color-blind accessibility.",
+    "instructions_to_main_agent": "Strip all Shadcn 'Vercel-like' soft aesthetics. Replace border-radius with rounded-none or rounded-sm. Use Phosphor Icons (or Lucide if Phosphor unavailable) for bold, clear symbology."
+  },
+  "motion": {
+    "philosophy": "Minimal and instant. Operators want speed, not theatrical transitions.",
+    "interactions": "0.1s ease-in-out on hover/active states. Simple opacity fade for entering elements."
+  },
+  "accessibility": {
+    "contrast": "APCA/WCAG AAA for critical data. Use text-shadow if overlaying text on 3D elements.",
+    "touch": "Absolute minimum height 48px (min-h-12) for all buttons, toggles, and inputs.",
+    "testing": "All interactive and key informational elements MUST include a `data-testid` attribute (e.g., `data-testid=\"bed-1-status\"`)."
+  },
+  "media": {
+    "image_urls": {
+      "login_background": {
+        "url": "https://images.pexels.com/photos/35678263/pexels-photo-35678263.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+        "description": "Drone shot of an organized outdoor concrete manufacturing facility. Use as a heavily darkened/desaturated background for the auth screen."
+      },
+      "structural_detail": {
+        "url": "https://images.pexels.com/photos/20496130/pexels-photo-20496130.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+        "description": "Close-up view of industrial steel/silos. Good for a decorative sidebar or empty state texture."
+      }
+    }
+  },
+  "3d_libraries": {
+    "primary": "react-three-fiber and @react-three/drei",
+    "usage": "Use for the 'Digital Twin 3D Viewer' of I-beams and Box beams. Must include <Environment> for metallic/concrete material realism, but lighting must be even and shadowless so anomalies (Crack Map) drawn on the surface are perfectly visible. Background of canvas should be #0A0C10 to blend seamlessly with UI.",
+    "interaction": "Operators must be able to rotate/zoom the beam with touch gestures to record inspections."
+  },
+  "UNIVERSAL_GUIDELINES_FOR_MAIN_AGENT": [
+    "DO NOT use generic centered layouts, simplistic gradients, or uniform soft styling.",
+    "Always apply modern, sharp, tactical button styles with interaction animations & color relevant to the industrial style.",
+    "NEVER use AI assistant Emoji characters (🤖🧠💭💡🔮🎯) for icons.",
+    "Every interaction needs instant micro-animations - hover states, active states. Static = dead.",
+    "Do NOT use complete `transparent` background in header, overlays, or any surface that has content under it.",
+    "Prioritize using pre-existing components from src/components/ui when applicable.",
+    "Use 'sonner' for toasts.",
+    "CRITICAL: Do NOT use HTML-based components for advanced interactions (e.g., use Shadcn dropdown-menu, not <select>)."
+  ]
+}

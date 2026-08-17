@@ -1,0 +1,507 @@
+from dotenv import load_dotenv
+from pathlib import Path
+
+ROOT_DIR = Path(__file__).parent
+load_dotenv(ROOT_DIR / ".env")
+
+import os
+import logging
+from fastapi import FastAPI, APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
+from starlette.middleware.cors import CORSMiddleware
+import io
+
+from db import db, client
+from models import (
+    now_iso,
+    ProductType, ProductTypeCreate, Job, JobCreate, Pour, PourCreate,
+    Bed, BedUpdate, Beam, BeamCreate, BeamUpdate,
+    Inspection, InspectionCreate, TensionReport, TensionReportCreate, TensionCalcInput,
+    CamberReading, CamberReadingCreate, Anomaly, AnomalyCreate,
+    FinishSheet, FinishSheetCreate, PreDelivery, PreDeliveryCreate,
+)
+from auth import router as auth_router, get_current_user, seed_admin
+from tension import run_tension_calc, calc_theoretical_elongation, evaluate_tension
+from seed import seed_plant
+import excel_export
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+logger = logging.getLogger(__name__)
+
+app = FastAPI(title="BedForge QC")
+api = APIRouter(prefix="/api")
+
+
+@api.get("/")
+async def root():
+    return {"message": "BedForge QC API", "status": "ok"}
+
+
+# ---------------- Product Types ----------------
+@api.get("/product-types")
+async def list_product_types(user=Depends(get_current_user)):
+    try:
+        return await db.product_types.find({}, {"_id": 0}).to_list(500)
+    except Exception:
+        logger.exception("list_product_types failed user=%s", user.get("email"))
+        raise HTTPException(status_code=500, detail="Failed to list product types")
+
+
+@api.post("/product-types")
+async def create_product_type(payload: ProductTypeCreate, user=Depends(get_current_user)):
+    try:
+        pt = ProductType(**payload.model_dump())
+        await db.product_types.insert_one(pt.model_dump())
+        logger.info("product type created id=%s by=%s", pt.id, user.get("email"))
+        return pt.model_dump()
+    except Exception:
+        logger.exception("create_product_type failed user=%s", user.get("email"))
+        raise HTTPException(status_code=500, detail="Failed to create product type")
+
+
+# ---------------- Jobs ----------------
+@api.get("/jobs")
+async def list_jobs(user=Depends(get_current_user)):
+    try:
+        return await db.jobs.find({}, {"_id": 0}).to_list(500)
+    except Exception:
+        logger.exception("list_jobs failed")
+        raise HTTPException(status_code=500, detail="Failed to list jobs")
+
+
+@api.post("/jobs")
+async def create_job(payload: JobCreate, user=Depends(get_current_user)):
+    try:
+        job = Job(**payload.model_dump())
+        await db.jobs.insert_one(job.model_dump())
+        logger.info("job created id=%s by=%s", job.id, user.get("email"))
+        return job.model_dump()
+    except Exception:
+        logger.exception("create_job failed")
+        raise HTTPException(status_code=500, detail="Failed to create job")
+
+
+# ---------------- Pours ----------------
+@api.get("/pours")
+async def list_pours(user=Depends(get_current_user)):
+    try:
+        return await db.pours.find({}, {"_id": 0}).to_list(500)
+    except Exception:
+        logger.exception("list_pours failed")
+        raise HTTPException(status_code=500, detail="Failed to list pours")
+
+
+@api.post("/pours")
+async def create_pour(payload: PourCreate, user=Depends(get_current_user)):
+    try:
+        pour = Pour(**payload.model_dump())
+        await db.pours.insert_one(pour.model_dump())
+        logger.info("pour created id=%s by=%s", pour.id, user.get("email"))
+        return pour.model_dump()
+    except Exception:
+        logger.exception("create_pour failed")
+        raise HTTPException(status_code=500, detail="Failed to create pour")
+
+
+# ---------------- Beds & Dashboard ----------------
+@api.get("/beds")
+async def list_beds(user=Depends(get_current_user)):
+    try:
+        return await db.beds.find({}, {"_id": 0}).sort("bed_number", 1).to_list(50)
+    except Exception:
+        logger.exception("list_beds failed")
+        raise HTTPException(status_code=500, detail="Failed to list beds")
+
+
+@api.patch("/beds/{bed_id}")
+async def update_bed(bed_id: str, payload: BedUpdate, user=Depends(get_current_user)):
+    try:
+        updates = {k: v for k, v in payload.model_dump().items() if v is not None}
+        updates["updated_at"] = now_iso()
+        await db.beds.update_one({"id": bed_id}, {"$set": updates})
+        bed = await db.beds.find_one({"id": bed_id}, {"_id": 0})
+        if not bed:
+            raise HTTPException(status_code=404, detail="Bed not found")
+        logger.info("bed updated id=%s by=%s", bed_id, user.get("email"))
+        return bed
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("update_bed failed id=%s", bed_id)
+        raise HTTPException(status_code=500, detail="Failed to update bed")
+
+
+@api.get("/dashboard")
+async def dashboard(user=Depends(get_current_user)):
+    try:
+        beds = await db.beds.find({}, {"_id": 0}).sort("bed_number", 1).to_list(50)
+        beams = await db.beams.find({}, {"_id": 0}).to_list(1000)
+        pours = await db.pours.find({}, {"_id": 0}).to_list(500)
+        pour_map = {p["id"]: p for p in pours}
+
+        beams_by_bed = {}
+        for b in beams:
+            beams_by_bed.setdefault(b["bed_id"], []).append(b)
+
+        bed_cards = []
+        for bed in beds:
+            bbeams = beams_by_bed.get(bed["id"], [])
+            pour = pour_map.get(bed.get("current_pour_id"))
+            bed_cards.append({
+                **bed,
+                "beam_count": len(bbeams),
+                "beams": bbeams,
+                "pour_number": pour["pour_number"] if pour else None,
+            })
+
+        total_beams = len(beams)
+        stats = {
+            "total_beds": len(beds),
+            "active_beds": len([b for b in beds if b["status"] not in ("idle", "complete")]),
+            "total_beams": total_beams,
+            "passed": len([b for b in beams if b["qc_state"] == "passed"]),
+            "in_progress": len([b for b in beams if b["qc_state"] == "in_progress"]),
+            "hold": len([b for b in beams if b["qc_state"] == "hold"]),
+            "failed": len([b for b in beams if b["qc_state"] == "failed"]),
+            "open_anomalies": await db.anomalies.count_documents({}),
+        }
+        return {"beds": bed_cards, "stats": stats}
+    except Exception:
+        logger.exception("dashboard failed user=%s", user.get("email"))
+        raise HTTPException(status_code=500, detail="Failed to load dashboard")
+
+
+# ---------------- Beams ----------------
+@api.get("/beams")
+async def list_beams(user=Depends(get_current_user)):
+    try:
+        return await db.beams.find({}, {"_id": 0}).to_list(1000)
+    except Exception:
+        logger.exception("list_beams failed")
+        raise HTTPException(status_code=500, detail="Failed to list beams")
+
+
+@api.post("/beams")
+async def create_beam(payload: BeamCreate, user=Depends(get_current_user)):
+    try:
+        beam = Beam(**payload.model_dump())
+        await db.beams.insert_one(beam.model_dump())
+        logger.info("beam created id=%s mark=%s by=%s", beam.id, beam.mark, user.get("email"))
+        return beam.model_dump()
+    except Exception:
+        logger.exception("create_beam failed")
+        raise HTTPException(status_code=500, detail="Failed to create beam")
+
+
+@api.get("/beams/{beam_id}")
+async def get_beam(beam_id: str, user=Depends(get_current_user)):
+    try:
+        beam = await db.beams.find_one({"id": beam_id}, {"_id": 0})
+        if not beam:
+            raise HTTPException(status_code=404, detail="Beam not found")
+        beam["anomalies"] = await db.anomalies.find({"beam_id": beam_id}, {"_id": 0}).to_list(500)
+        beam["inspections"] = await db.inspections.find({"beam_id": beam_id}, {"_id": 0}).to_list(500)
+        beam["camber_readings"] = await db.camber_readings.find({"beam_id": beam_id}, {"_id": 0}).to_list(500)
+        beam["finish_sheets"] = await db.finish_sheets.find({"beam_id": beam_id}, {"_id": 0}).to_list(500)
+        beam["pre_delivery"] = await db.pre_delivery.find({"beam_id": beam_id}, {"_id": 0}).to_list(500)
+        if beam.get("product_type_id"):
+            beam["product_type"] = await db.product_types.find_one({"id": beam["product_type_id"]}, {"_id": 0})
+        return beam
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("get_beam failed id=%s", beam_id)
+        raise HTTPException(status_code=500, detail="Failed to load beam")
+
+
+@api.patch("/beams/{beam_id}")
+async def update_beam(beam_id: str, payload: BeamUpdate, user=Depends(get_current_user)):
+    try:
+        updates = {k: v for k, v in payload.model_dump().items() if v is not None}
+        await db.beams.update_one({"id": beam_id}, {"$set": updates})
+        beam = await db.beams.find_one({"id": beam_id}, {"_id": 0})
+        if not beam:
+            raise HTTPException(status_code=404, detail="Beam not found")
+        logger.info("beam updated id=%s by=%s fields=%s", beam_id, user.get("email"), list(updates.keys()))
+        return beam
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("update_beam failed id=%s", beam_id)
+        raise HTTPException(status_code=500, detail="Failed to update beam")
+
+
+# ---------------- Inspections ----------------
+@api.get("/inspections")
+async def list_inspections(beam_id: str = None, user=Depends(get_current_user)):
+    try:
+        q = {"beam_id": beam_id} if beam_id else {}
+        return await db.inspections.find(q, {"_id": 0}).to_list(1000)
+    except Exception:
+        logger.exception("list_inspections failed")
+        raise HTTPException(status_code=500, detail="Failed to list inspections")
+
+
+@api.post("/inspections")
+async def create_inspection(payload: InspectionCreate, user=Depends(get_current_user)):
+    try:
+        insp = Inspection(**payload.model_dump(), inspector=user["name"])
+        await db.inspections.insert_one(insp.model_dump())
+        logger.info("inspection created id=%s section=%s beam=%s by=%s", insp.id, insp.section, insp.beam_id, user.get("email"))
+        return insp.model_dump()
+    except Exception:
+        logger.exception("create_inspection failed")
+        raise HTTPException(status_code=500, detail="Failed to create inspection")
+
+
+# ---------------- Tension ----------------
+@api.post("/tension/calculate")
+async def tension_calculate(payload: TensionCalcInput, user=Depends(get_current_user)):
+    try:
+        result = run_tension_calc(payload.model_dump())
+        logger.info("tension calculate by=%s theo=%s", user.get("email"), result.get("theoretical_elongation_in"))
+        return result
+    except Exception:
+        logger.exception("tension_calculate failed")
+        raise HTTPException(status_code=500, detail="Failed to calculate tension")
+
+
+@api.get("/tension-reports")
+async def list_tension_reports(user=Depends(get_current_user)):
+    try:
+        reports = await db.tension_reports.find({}, {"_id": 0}).to_list(500)
+        beds = {b["id"]: b for b in await db.beds.find({}, {"_id": 0}).to_list(50)}
+        for r in reports:
+            r["bed_number"] = beds.get(r["bed_id"], {}).get("bed_number")
+        return reports
+    except Exception:
+        logger.exception("list_tension_reports failed")
+        raise HTTPException(status_code=500, detail="Failed to list tension reports")
+
+
+@api.post("/tension-reports")
+async def create_tension_report(payload: TensionReportCreate, user=Depends(get_current_user)):
+    try:
+        data = payload.model_dump()
+        theo = calc_theoretical_elongation(
+            data["jacking_force_kip"], data["bed_length_ft"],
+            data["strand_area_in2"], data["modulus_ksi"],
+        )
+        measured = data.get("measured_elongation_in") or 0.0
+        var, within = evaluate_tension(theo, measured)
+        report = TensionReport(
+            bed_id=data["bed_id"], pour_id=data.get("pour_id"),
+            strand_size=data["strand_size"], strand_area_in2=data["strand_area_in2"],
+            modulus_ksi=data["modulus_ksi"], bed_length_ft=data["bed_length_ft"],
+            jacking_force_kip=data["jacking_force_kip"], num_strands=data["num_strands"],
+            theoretical_elongation_in=round(theo, 3), measured_elongation_in=measured,
+            variance_pct=var, within_tolerance=within,
+        )
+        await db.tension_reports.insert_one(report.model_dump())
+        logger.info("tension report saved id=%s bed=%s by=%s", report.id, report.bed_id, user.get("email"))
+        return report.model_dump()
+    except Exception:
+        logger.exception("create_tension_report failed")
+        raise HTTPException(status_code=500, detail="Failed to save tension report")
+
+
+# ---------------- Camber ----------------
+@api.get("/camber-readings")
+async def list_camber(beam_id: str = None, user=Depends(get_current_user)):
+    try:
+        q = {"beam_id": beam_id} if beam_id else {}
+        return await db.camber_readings.find(q, {"_id": 0}).to_list(1000)
+    except Exception:
+        logger.exception("list_camber failed")
+        raise HTTPException(status_code=500, detail="Failed to list camber readings")
+
+
+@api.post("/camber-readings")
+async def create_camber(payload: CamberReadingCreate, user=Depends(get_current_user)):
+    try:
+        data = payload.model_dump()
+        if not data.get("midspan_in") and data.get("measured_camber_in"):
+            data["midspan_in"] = data["measured_camber_in"]
+        if not data.get("measured_camber_in") and data.get("midspan_in"):
+            data["measured_camber_in"] = data["midspan_in"]
+        cr = CamberReading(**data, inspector=user["name"])
+        await db.camber_readings.insert_one(cr.model_dump())
+        logger.info("camber reading saved id=%s beam=%s by=%s", cr.id, cr.beam_id, user.get("email"))
+        return cr.model_dump()
+    except Exception:
+        logger.exception("create_camber failed")
+        raise HTTPException(status_code=500, detail="Failed to save camber reading")
+
+
+# ---------------- Finish Sheets ----------------
+@api.get("/finish-sheets")
+async def list_finish_sheets(beam_id: str = None, user=Depends(get_current_user)):
+    try:
+        q = {"beam_id": beam_id} if beam_id else {}
+        return await db.finish_sheets.find(q, {"_id": 0}).to_list(1000)
+    except Exception:
+        logger.exception("list_finish_sheets failed")
+        raise HTTPException(status_code=500, detail="Failed to list finish sheets")
+
+
+@api.post("/finish-sheets")
+async def create_finish_sheet(payload: FinishSheetCreate, user=Depends(get_current_user)):
+    try:
+        sheet = FinishSheet(**payload.model_dump(), inspector=user["name"])
+        await db.finish_sheets.insert_one(sheet.model_dump())
+        if payload.status == "fail":
+            await db.beams.update_one({"id": payload.beam_id}, {"$set": {"qc_state": "failed"}})
+        elif payload.status == "hold":
+            await db.beams.update_one({"id": payload.beam_id}, {"$set": {"qc_state": "hold"}})
+        logger.info("finish sheet saved id=%s beam=%s by=%s", sheet.id, sheet.beam_id, user.get("email"))
+        return sheet.model_dump()
+    except Exception:
+        logger.exception("create_finish_sheet failed")
+        raise HTTPException(status_code=500, detail="Failed to save finish sheet")
+
+
+# ---------------- Pre-Delivery ----------------
+@api.get("/pre-delivery")
+async def list_pre_delivery(beam_id: str = None, user=Depends(get_current_user)):
+    try:
+        q = {"beam_id": beam_id} if beam_id else {}
+        return await db.pre_delivery.find(q, {"_id": 0}).to_list(1000)
+    except Exception:
+        logger.exception("list_pre_delivery failed")
+        raise HTTPException(status_code=500, detail="Failed to list pre-delivery records")
+
+
+@api.post("/pre-delivery")
+async def create_pre_delivery(payload: PreDeliveryCreate, user=Depends(get_current_user)):
+    try:
+        data = payload.model_dump()
+        released = bool(data.get("released"))
+        record = PreDelivery(
+            **data,
+            inspector=user["name"],
+            release_at=now_iso() if released else None,
+        )
+        await db.pre_delivery.insert_one(record.model_dump())
+        if released:
+            await db.beams.update_one({"id": payload.beam_id}, {"$set": {"qc_state": "shipped", "status": "complete"}})
+            logger.info("beam released id=%s by=%s truck=%s dest=%s", payload.beam_id, user.get("email"), payload.truck_number, payload.destination)
+        else:
+            logger.info("pre-delivery draft saved id=%s beam=%s by=%s", record.id, record.beam_id, user.get("email"))
+        return record.model_dump()
+    except Exception:
+        logger.exception("create_pre_delivery failed")
+        raise HTTPException(status_code=500, detail="Failed to save pre-delivery record")
+
+
+# ---------------- Anomalies / Crack Map ----------------
+@api.get("/anomalies")
+async def list_anomalies(beam_id: str = None, user=Depends(get_current_user)):
+    try:
+        q = {"beam_id": beam_id} if beam_id else {}
+        return await db.anomalies.find(q, {"_id": 0}).to_list(1000)
+    except Exception:
+        logger.exception("list_anomalies failed")
+        raise HTTPException(status_code=500, detail="Failed to list anomalies")
+
+
+@api.post("/anomalies")
+async def create_anomaly(payload: AnomalyCreate, user=Depends(get_current_user)):
+    try:
+        an = Anomaly(**payload.model_dump(), inspector=user["name"])
+        await db.anomalies.insert_one(an.model_dump())
+        logger.info("anomaly created id=%s beam=%s type=%s by=%s", an.id, an.beam_id, an.type, user.get("email"))
+        return an.model_dump()
+    except Exception:
+        logger.exception("create_anomaly failed")
+        raise HTTPException(status_code=500, detail="Failed to save anomaly")
+
+
+# ---------------- Forms Export ----------------
+@api.get("/forms/export/{form_type}")
+async def export_form(form_type: str, beam_id: str = None, user=Depends(get_current_user)):
+    if form_type not in excel_export.BUILDERS:
+        raise HTTPException(status_code=400, detail="Unknown form type")
+
+    try:
+        beams = {b["id"]: b for b in await db.beams.find({}, {"_id": 0}).to_list(1000)}
+        beds = {b["id"]: b for b in await db.beds.find({}, {"_id": 0}).to_list(50)}
+        jobs = {j["id"]: j for j in await db.jobs.find({}, {"_id": 0}).to_list(500)}
+        ptypes = {p["id"]: p for p in await db.product_types.find({}, {"_id": 0}).to_list(500)}
+
+        context = {}
+        if form_type == "qir":
+            beam = beams.get(beam_id) or (list(beams.values())[0] if beams else {})
+            context["beam"] = beam
+            context["job"] = jobs.get(beam.get("job_id"), {})
+            pt = ptypes.get(beam.get("product_type_id"), {})
+            context["product_type_name"] = pt.get("name", "")
+            context["inspections"] = await db.inspections.find({"beam_id": beam.get("id")}, {"_id": 0}).to_list(500)
+        elif form_type == "tension":
+            reports = await db.tension_reports.find({}, {"_id": 0}).to_list(500)
+            for r in reports:
+                r["bed_number"] = beds.get(r["bed_id"], {}).get("bed_number")
+            context["tension_reports"] = reports
+        elif form_type == "camber":
+            readings = await db.camber_readings.find({}, {"_id": 0}).to_list(500)
+            for r in readings:
+                r["beam_mark"] = beams.get(r["beam_id"], {}).get("mark", "")
+            context["camber_readings"] = readings
+        elif form_type == "crackmap":
+            anomalies = await db.anomalies.find({}, {"_id": 0}).to_list(1000)
+            for a in anomalies:
+                a["beam_mark"] = beams.get(a["beam_id"], {}).get("mark", "")
+            context["anomalies"] = anomalies
+        elif form_type == "finish":
+            sheets = await db.finish_sheets.find({"beam_id": beam_id} if beam_id else {}, {"_id": 0}).to_list(500)
+            for s in sheets:
+                s["beam_mark"] = beams.get(s["beam_id"], {}).get("mark", "")
+            context["finish_sheets"] = sheets
+        elif form_type == "pre_delivery":
+            records = await db.pre_delivery.find({"beam_id": beam_id} if beam_id else {}, {"_id": 0}).to_list(500)
+            for r in records:
+                r["beam_mark"] = beams.get(r["beam_id"], {}).get("mark", "")
+            context["pre_delivery"] = records
+
+        builder_name, filename = excel_export.BUILDERS[form_type]
+        data = getattr(excel_export, builder_name)(context)
+        logger.info("form exported type=%s by=%s", form_type, user.get("email"))
+        return StreamingResponse(
+            io.BytesIO(data),
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f"attachment; filename={filename}.xlsx"},
+        )
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("export_form failed type=%s", form_type)
+        raise HTTPException(status_code=500, detail="Failed to export form")
+
+
+app.include_router(auth_router)
+app.include_router(api)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_credentials=True,
+    allow_origins=os.environ.get("CORS_ORIGINS", "*").split(","),
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+@app.on_event("startup")
+async def startup():
+    await db.users.create_index("email", unique=True)
+    await db.beds.create_index("bed_number")
+    await db.beams.create_index("bed_id")
+    await db.camber_readings.create_index("beam_id")
+    await db.finish_sheets.create_index("beam_id")
+    await db.pre_delivery.create_index("beam_id")
+    await seed_admin()
+    await seed_plant()
+    logger.info("BedForge QC startup complete.")
+
+
+@app.on_event("shutdown")
+async def shutdown():
+    client.close()
