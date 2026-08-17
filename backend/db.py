@@ -94,12 +94,14 @@ class MemoryClient:
 mongo_url = os.environ.get("MONGO_URL")
 db_name = os.environ.get("DB_NAME", "bedforge_dev")
 
-if mongo_url:
+use_memory = not mongo_url or mongo_url.startswith("memory://")
+
+if not use_memory:
     from motor.motor_asyncio import AsyncIOMotorClient
 
     client = AsyncIOMotorClient(mongo_url)
     db = client[db_name]
 else:
-    logger.warning("MONGO_URL not set; using in-memory BedForge datastore for local development.")
+    logger.warning("Using in-memory BedForge datastore for local development.")
     client = MemoryClient()
     db = client[db_name]
