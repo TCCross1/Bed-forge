@@ -255,3 +255,87 @@ class TestPlantForms:
         r = requests.get(f"{API}/forms/export/{form_type}", headers=auth_headers, timeout=60)
         assert r.status_code == 200, r.text
         assert r.content[:2] == b"PK"
+
+
+# ---------- BeamSpec / Blueprints ----------
+class TestBeamSpec:
+    def test_reference_unauth_401(self):
+        r = requests.get(f"{API}/beam-specs/reference/l25390", timeout=30)
+        assert r.status_code == 401
+
+    def test_upload_unauth_401(self):
+        r = requests.post(f"{API}/blueprints/upload", files={"files": ("x.png", b"x", "image/png")}, timeout=30)
+        assert r.status_code == 401
+
+    def test_l25390_reference_shape(self, auth_headers):
+        r = requests.get(f"{API}/beam-specs/reference/l25390", headers=auth_headers, timeout=30)
+        assert r.status_code == 200, r.text
+        data = r.json()
+        assert data["job_number"] == "L25390"
+        assert abs(data["geometry"]["length_ft"] - 73.333) < 0.01
+        assert data["geometry"]["depth_in"] == 36.0
+        assert len(data["strands"]) == 20
+        kinds = {h["kind"] for h in data["hardware"]}
+        for kind in ("lift_loop", "insert", "drain", "tie_rod", "hold_down", "bearing_plate", "bituminous_zone"):
+            assert kind in kinds, f"missing {kind}"
+
+    def test_upload_rejects_exe(self, auth_headers):
+        r = requests.post(
+            f"{API}/blueprints/upload",
+            files={"files": ("virus.exe", b"MZ", "application/octet-stream")},
+            headers=auth_headers,
+            timeout=30,
+        )
+        assert r.status_code == 400
+
+    def test_from_l25390_and_measure(self, auth_headers):
+        beams = requests.get(f"{API}/beams", headers=auth_headers, timeout=30)
+        assert beams.status_code == 200
+        beam_id = beams.json()[0]["id"]
+        created = requests.post(
+            f"{API}/beam-specs/from-l25390",
+            params={"beam_id": beam_id},
+            headers=auth_headers,
+            timeout=30,
+        )
+        assert created.status_code == 200, created.text
+        spec = created.json()
+        loop = next(h for h in spec["hardware"] if h["kind"] == "lift_loop")
+        measured = loop["position"]["station_ft"]
+        ok = requests.post(
+            f"{API}/beam-specs/{spec['id']}/measurements",
+            json={"element_id": loop["id"], "measured_station_ft": measured},
+            headers=auth_headers,
+            timeout=30,
+        )
+        assert ok.status_code == 200, ok.text
+        assert ok.json()["within_tolerance"] is True
+        fail = requests.post(
+            f"{API}/beam-specs/{spec['id']}/measurements",
+            json={"element_id": loop["id"], "measured_station_ft": measured + 2.0},
+            headers=auth_headers,
+            timeout=30,
+        )
+        assert fail.status_code == 200, fail.text
+        assert fail.json()["within_tolerance"] is False
+
+    def test_lock_requires_supervisor(self, auth_headers):
+        tech = requests.post(
+            f"{API}/auth/login",
+            json={"email": "tech@bedforge.com", "password": "Tech1234!"},
+            timeout=30,
+        )
+        assert tech.status_code == 200
+        tech_h = {"Authorization": f"Bearer {tech.json()['access_token']}"}
+        attached = requests.post(
+            f"{API}/beam-specs/from-l25390",
+            headers=auth_headers,
+            timeout=30,
+        )
+        assert attached.status_code == 200
+        spec_id = attached.json()["id"]
+        denied = requests.post(f"{API}/beam-specs/{spec_id}/lock", headers=tech_h, timeout=30)
+        assert denied.status_code == 403
+        locked = requests.post(f"{API}/beam-specs/{spec_id}/lock", headers=auth_headers, timeout=30)
+        assert locked.status_code == 200, locked.text
+        assert locked.json()["status"] == "locked"

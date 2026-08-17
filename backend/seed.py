@@ -118,3 +118,51 @@ async def seed_plant():
                 num_strands=24,
             )
             await db.tension_reports.insert_one(tr.model_dump())
+
+
+async def seed_l25390():
+    """Idempotent Larue County / L25390 Type 2 I-beam spec for the digital twin."""
+    try:
+        if await db.beam_specs.find_one({"job_number": "L25390"}):
+            return
+        from models import Job
+        from l25390 import build_l25390_spec, PRODUCT_NAME, LENGTH_FT
+
+        job = await db.jobs.find_one({"job_number": "L25390"}, {"_id": 0})
+        if not job:
+            job_obj = Job(
+                job_number="L25390",
+                name="KY 210 over Fork of Nolin River",
+                customer="KYTC / Larue County",
+                state_spec="KYTC 2024",
+            )
+            job = job_obj.model_dump()
+            await db.jobs.insert_one(job)
+
+        beam = await db.beams.find_one({"twin_type": "i_beam"}, {"_id": 0})
+        beam_id = beam["id"] if beam else None
+        mark = beam["mark"] if beam else "B1"
+        if beam:
+            await db.beams.update_one({"id": beam_id}, {"$set": {
+                "length_ft": LENGTH_FT,
+                "job_id": job["id"],
+            }})
+
+        spec = build_l25390_spec(
+            beam_id=beam_id,
+            job_id=job["id"],
+            pour_id=beam.get("pour_id") if beam else None,
+            beam_mark=mark,
+        )
+        spec.status = "locked"
+        spec.locked_by = "system-seed"
+        spec.locked_at = now_iso()
+        spec.review_notes = "Seeded from Larue County contract 255390 / L25390 Type 2 shop-drawing reference."
+        dumped = spec.model_dump()
+        await db.beam_specs.insert_one(dumped)
+        if beam_id:
+            await db.beams.update_one({"id": beam_id}, {"$set": {"spec_id": spec.id}})
+    except Exception:
+        import logging
+        logging.getLogger(__name__).exception("seed_l25390 failed")
+

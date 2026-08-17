@@ -2,7 +2,8 @@ import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { formatApiErrorDetail } from "../lib/api";
-import { HardHat, Loader2 } from "lucide-react";
+import { BrandLockup, BrandMark } from "../components/Layout";
+import { Loader2 } from "lucide-react";
 
 const DEMO = [
   { email: "tccrossmusic@gmail.com", label: "Admin", password: "BedForge2026!" },
@@ -42,28 +43,33 @@ export default function Login() {
           alt="Concrete facility"
           className="absolute inset-0 w-full h-full object-cover opacity-30"
         />
-        <div className="absolute inset-0 bg-gradient-to-t from-[#0A0C10] via-[#0A0C10]/60 to-transparent" />
-        <div className="relative z-10 flex flex-col justify-end p-12">
-          <div className="text-primary font-mono text-xs tracking-[0.4em] mb-4">PRESTRESS SERVICES INDUSTRIES LLC</div>
-          <h2 className="font-display font-extrabold text-5xl uppercase tracking-tight leading-none">
-            Paperless<br />QC & Digital<br />Twin Platform
-          </h2>
-          <p className="text-muted-foreground mt-4 max-w-md">
-            8 beds. Every beam. Real-time tolerance gates, tension validation, and 3D anomaly capture — built for the plant floor.
-          </p>
+        <div className="absolute inset-0 bg-gradient-to-t from-[#0A0C10] via-[#0A0C10]/70 to-[#0A0C10]/30" />
+        <div className="relative z-10 flex flex-col justify-between p-12 w-full">
+          <BrandLockup className="h-28 w-auto max-w-full" testid="login-hero-lockup" />
+          <div>
+            <div className="text-primary font-mono text-xs tracking-[0.4em] mb-4">PRESTRESS SERVICES INDUSTRIES LLC</div>
+            <h2 className="font-display font-extrabold text-5xl uppercase tracking-tight leading-none">
+              Paperless<br />QC & Digital<br />Twin Platform
+            </h2>
+            <p className="text-muted-foreground mt-4 max-w-md">
+              8 beds. Every beam. Real-time tolerance gates, tension validation, and 3D anomaly capture — built for the plant floor.
+            </p>
+          </div>
         </div>
       </div>
 
       <div className="flex-1 flex items-center justify-center p-6 sm:p-8">
         <div className="w-full max-w-md">
-          <div className="flex items-center gap-3 mb-10">
-            <div className="w-12 h-12 bg-primary flex items-center justify-center rounded-none">
-              <HardHat className="w-7 h-7 text-white" />
+          <div className="flex flex-col items-start gap-3 mb-10">
+            <BrandLockup className="h-20 w-auto max-w-full lg:hidden" testid="login-mobile-lockup" />
+            <div className="hidden lg:flex items-center gap-3">
+              <BrandMark className="h-14 w-auto" testid="login-form-mark" />
+              <div>
+                <div className="font-display font-extrabold text-2xl tracking-tight leading-none">BEDFORGE QC</div>
+                <div className="text-[10px] tracking-[0.3em] text-muted-foreground font-mono">SECURE ACCESS</div>
+              </div>
             </div>
-            <div>
-              <div className="font-display font-extrabold text-2xl tracking-tight leading-none">BEDFORGE QC</div>
-              <div className="text-[10px] tracking-[0.3em] text-muted-foreground font-mono">SECURE ACCESS</div>
-            </div>
+            <div className="text-[10px] tracking-[0.3em] text-muted-foreground font-mono">SECURE ACCESS</div>
           </div>
 
           <form onSubmit={submit} className="space-y-5">

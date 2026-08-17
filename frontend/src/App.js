@@ -12,6 +12,7 @@ import CamberSheet from "./pages/CamberSheet";
 import FinishSheet from "./pages/FinishSheet";
 import PreDelivery from "./pages/PreDelivery";
 import FormsExport from "./pages/FormsExport";
+import Drawings from "./pages/Drawings";
 
 function Protected({ children }) {
   const { user, ready } = useAuth();
@@ -37,6 +38,7 @@ function AppRoutes() {
       />
       <Route path="/" element={<Protected><Dashboard /></Protected>} />
       <Route path="/twin" element={<Protected><DigitalTwin /></Protected>} />
+      <Route path="/drawings" element={<Protected><Drawings /></Protected>} />
       <Route path="/inspection" element={<Protected><NewInspection /></Protected>} />
       <Route path="/tension" element={<Protected><TensionCalculator /></Protected>} />
       <Route path="/camber" element={<Protected><CamberSheet /></Protected>} />

@@ -22,7 +22,8 @@ from models import (
 )
 from auth import router as auth_router, get_current_user, seed_admin
 from tension import run_tension_calc, calc_theoretical_elongation, evaluate_tension
-from seed import seed_plant
+from seed import seed_plant, seed_l25390
+from blueprint_routes import router as blueprint_router
 import excel_export
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
@@ -204,6 +205,15 @@ async def get_beam(beam_id: str, user=Depends(get_current_user)):
         beam["camber_readings"] = await db.camber_readings.find({"beam_id": beam_id}, {"_id": 0}).to_list(500)
         beam["finish_sheets"] = await db.finish_sheets.find({"beam_id": beam_id}, {"_id": 0}).to_list(500)
         beam["pre_delivery"] = await db.pre_delivery.find({"beam_id": beam_id}, {"_id": 0}).to_list(500)
+        spec = None
+        if beam.get("spec_id"):
+            spec = await db.beam_specs.find_one({"id": beam["spec_id"]}, {"_id": 0})
+        if not spec:
+            latest = await db.beam_specs.find({"beam_id": beam_id}, {"_id": 0}).sort("created_at", -1).to_list(1)
+            spec = latest[0] if latest else None
+        beam["spec"] = spec
+        if spec:
+            beam["measurements"] = await db.spec_measurements.find({"spec_id": spec["id"]}, {"_id": 0}).to_list(500)
         if beam.get("product_type_id"):
             beam["product_type"] = await db.product_types.find_one({"id": beam["product_type_id"]}, {"_id": 0})
         return beam
@@ -479,6 +489,7 @@ async def export_form(form_type: str, beam_id: str = None, user=Depends(get_curr
 
 app.include_router(auth_router)
 app.include_router(api)
+app.include_router(blueprint_router)
 
 app.add_middleware(
     CORSMiddleware,
@@ -497,8 +508,13 @@ async def startup():
     await db.camber_readings.create_index("beam_id")
     await db.finish_sheets.create_index("beam_id")
     await db.pre_delivery.create_index("beam_id")
+    await db.beam_specs.create_index("beam_id")
+    await db.beam_specs.create_index("job_number")
+    await db.blueprints.create_index("beam_id")
+    await db.spec_measurements.create_index("spec_id")
     await seed_admin()
     await seed_plant()
+    await seed_l25390()
     logger.info("BedForge QC startup complete.")
 
 

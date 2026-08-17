@@ -7,15 +7,42 @@ import {
   Calculator,
   FileSpreadsheet,
   LogOut,
-  HardHat,
   Ruler,
   Sparkles,
   Truck,
   Menu,
   X,
+  Upload,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { ROLE_LABELS } from "../lib/constants";
+
+export const MARK_SRC = "/brand/bedforge-mark.png";
+export const LOCKUP_SRC = "/brand/bedforge-lockup.png";
+
+export function BrandMark({ className = "h-10 w-auto", testid = "brand-mark" }) {
+  return (
+    <img
+      src={MARK_SRC}
+      alt="BedForge"
+      data-testid={testid}
+      className={`object-contain select-none pointer-events-none ${className}`}
+      draggable={false}
+    />
+  );
+}
+
+export function BrandLockup({ className = "h-12 w-auto", testid = "brand-lockup" }) {
+  return (
+    <img
+      src={LOCKUP_SRC}
+      alt="BedForge Quality Control — Precision. Strength. Quality."
+      data-testid={testid}
+      className={`object-contain select-none pointer-events-none ${className}`}
+      draggable={false}
+    />
+  );
+}
 
 const PRIMARY_NAV = [
   { to: "/", label: "Board", icon: LayoutGrid, testid: "nav-dashboard" },
@@ -26,6 +53,7 @@ const PRIMARY_NAV = [
 ];
 
 const SECONDARY_NAV = [
+  { to: "/drawings", label: "Drawings", icon: Upload, testid: "nav-drawings" },
   { to: "/camber", label: "Camber", icon: Ruler, testid: "nav-camber" },
   { to: "/finish", label: "Finish", icon: Sparkles, testid: "nav-finish" },
   { to: "/release", label: "Release", icon: Truck, testid: "nav-release" },
@@ -75,14 +103,10 @@ export default function Layout({ children }) {
         className="hidden lg:flex w-64 shrink-0 border-r border-[#1C2230] bg-[#0C0E13] flex-col fixed h-screen z-20"
         data-testid="desktop-sidebar"
       >
-        <div className="h-20 flex items-center gap-3 px-6 border-b border-[#1C2230]">
-          <div className="w-10 h-10 bg-primary flex items-center justify-center rounded-none">
-            <HardHat className="w-6 h-6 text-white" />
-          </div>
-          <div>
-            <div className="font-display font-extrabold text-lg leading-none tracking-tight">BEDFORGE</div>
-            <div className="text-[10px] tracking-[0.3em] text-muted-foreground font-mono">QC · PSI LLC</div>
-          </div>
+        <div className="h-24 flex items-center justify-start px-4 border-b border-[#1C2230]">
+          <NavLink to="/" className="flex items-center" aria-label="BedForge home">
+            <BrandMark className="h-16 w-auto" testid="sidebar-brand-mark" />
+          </NavLink>
         </div>
 
         <nav className="flex-1 py-4 flex flex-col gap-1 px-3 overflow-y-auto">
@@ -111,22 +135,19 @@ export default function Layout({ children }) {
 
       <div className="flex-1 flex flex-col min-w-0 lg:ml-64">
         <header
-          className="lg:hidden sticky top-0 z-30 h-14 border-b border-[#1C2230] bg-[#0A0C10]/95 backdrop-blur flex items-center justify-between px-4"
+          className="lg:hidden sticky top-0 z-30 h-14 border-b border-[#1C2230] bg-[#0A0C10]/95 backdrop-blur grid grid-cols-[auto_1fr_auto] items-center px-3"
           data-testid="mobile-topbar"
         >
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 bg-primary flex items-center justify-center rounded-none">
-              <HardHat className="w-4 h-4 text-white" />
-            </div>
-            <div>
-              <div className="font-display font-extrabold text-sm leading-none tracking-tight">BEDFORGE</div>
-              <div className="text-[9px] tracking-[0.2em] text-muted-foreground font-mono">QC</div>
-            </div>
+          <NavLink to="/" className="flex items-center min-h-12 justify-self-start" aria-label="BedForge home">
+            <BrandMark className="h-10 w-auto" testid="mobile-brand-mark" />
+          </NavLink>
+          <div className="flex items-center justify-center min-w-0 px-2">
+            <BrandLockup className="h-9 w-auto max-w-full" testid="mobile-brand-lockup" />
           </div>
           <button
             data-testid="mobile-more-btn"
             onClick={() => setMoreOpen(true)}
-            className="min-h-12 min-w-12 flex items-center justify-center border border-[#1C2230] rounded-none"
+            className="min-h-12 min-w-12 flex items-center justify-center border border-[#1C2230] rounded-none justify-self-end"
             aria-label="Open secondary navigation"
           >
             <Menu className="w-5 h-5" />
@@ -138,9 +159,12 @@ export default function Layout({ children }) {
             <button className="absolute inset-0 bg-black/70" onClick={() => setMoreOpen(false)} aria-label="Close menu" />
             <div className="absolute bottom-0 left-0 right-0 bg-[#0F1218] border-t border-[#1C2230] p-4 pb-[calc(1rem+env(safe-area-inset-bottom))]">
               <div className="flex items-center justify-between mb-4">
-                <div>
-                  <div className="font-display font-bold uppercase tracking-wider">More</div>
-                  <div className="text-xs text-muted-foreground font-mono">{user?.name} · {ROLE_LABELS[user?.role] || user?.role}</div>
+                <div className="flex items-center gap-3">
+                  <BrandMark className="h-10 w-auto" testid="sheet-brand-mark" />
+                  <div>
+                    <div className="font-display font-bold uppercase tracking-wider">More</div>
+                    <div className="text-xs text-muted-foreground font-mono">{user?.name} · {ROLE_LABELS[user?.role] || user?.role}</div>
+                  </div>
                 </div>
                 <button onClick={() => setMoreOpen(false)} className="min-h-12 min-w-12 flex items-center justify-center border border-[#1C2230] rounded-none">
                   <X className="w-5 h-5" />
@@ -193,12 +217,17 @@ export default function Layout({ children }) {
 
 export function PageHeader({ title, subtitle, right }) {
   return (
-    <div className="min-h-16 lg:h-20 border-b border-[#1C2230] flex items-center justify-between gap-3 px-4 sm:px-6 lg:px-8 py-3 sticky top-14 lg:top-0 bg-[#0A0C10]/95 backdrop-blur z-10">
-      <div className="min-w-0">
-        <h1 className="font-display font-extrabold text-xl sm:text-2xl lg:text-3xl uppercase tracking-tight leading-none truncate">{title}</h1>
-        {subtitle && <p className="text-xs sm:text-sm text-muted-foreground mt-1 truncate">{subtitle}</p>}
+    <div className="sticky top-14 lg:top-0 z-10 bg-[#0A0C10]/95 backdrop-blur border-b border-[#1C2230]">
+      <div className="hidden lg:flex h-24 items-center justify-center px-8" data-testid="hero-header-banner">
+        <BrandLockup className="h-16 w-auto max-w-full" testid="header-brand-lockup" />
       </div>
-      {right}
+      <div className="min-h-16 lg:border-t lg:border-[#1C2230] flex items-center justify-between gap-3 px-4 sm:px-6 lg:px-8 py-3">
+        <div className="min-w-0">
+          <h1 className="font-display font-extrabold text-xl sm:text-2xl lg:text-3xl uppercase tracking-tight leading-none truncate">{title}</h1>
+          {subtitle && <p className="text-xs sm:text-sm text-muted-foreground mt-1 truncate">{subtitle}</p>}
+        </div>
+        {right}
+      </div>
     </div>
   );
 }

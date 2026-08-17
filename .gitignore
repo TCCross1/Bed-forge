@@ -87,3 +87,6 @@ credentials.json
 *.key
 .credentials
 frontend/node_modules/.cache/default-development/0.pack
+
+# Uploaded shop drawings (authenticated download only)
+backend/uploads/
