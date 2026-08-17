@@ -30,6 +30,18 @@ app = FastAPI(title="BedForge QC")
 api = APIRouter(prefix="/api")
 
 
+async def enrich_beam(beam: dict, include_details: bool = False) -> dict:
+    data = dict(beam)
+    if data.get("product_type_id"):
+        data["product_type"] = await db.product_types.find_one({"id": data["product_type_id"]}, {"_id": 0})
+    if include_details:
+        beam_id = data["id"]
+        data["anomalies"] = await db.anomalies.find({"beam_id": beam_id}, {"_id": 0}).to_list(500)
+        data["inspections"] = await db.inspections.find({"beam_id": beam_id}, {"_id": 0}).to_list(500)
+        data["camber_readings"] = await db.camber_readings.find({"beam_id": beam_id}, {"_id": 0}).to_list(500)
+    return data
+
+
 @api.get("/")
 async def root():
     return {"message": "BedForge QC API", "status": "ok"}
@@ -78,6 +90,19 @@ async def create_pour(payload: PourCreate, user=Depends(get_current_user)):
 @api.get("/beds")
 async def list_beds(user=Depends(get_current_user)):
     return await db.beds.find({}, {"_id": 0}).sort("bed_number", 1).to_list(50)
+
+
+@api.get("/beds/{bed_id}/twin")
+async def get_bed_twin(bed_id: str, user=Depends(get_current_user)):
+    bed = await db.beds.find_one({"id": bed_id}, {"_id": 0})
+    if not bed:
+        raise HTTPException(status_code=404, detail="Bed not found")
+    beams = await db.beams.find({"bed_id": bed_id}, {"_id": 0}).to_list(1000)
+    beams = sorted(beams, key=lambda item: item.get("position_on_bed", 0))
+    bed["beams"] = [await enrich_beam(beam, include_details=True) for beam in beams]
+    if bed.get("current_pour_id"):
+        bed["pour"] = await db.pours.find_one({"id": bed["current_pour_id"]}, {"_id": 0})
+    return bed
 
 
 @api.patch("/beds/{bed_id}")
@@ -131,7 +156,8 @@ async def dashboard(user=Depends(get_current_user)):
 # ---------------- Beams ----------------
 @api.get("/beams")
 async def list_beams(user=Depends(get_current_user)):
-    return await db.beams.find({}, {"_id": 0}).to_list(1000)
+    beams = await db.beams.find({}, {"_id": 0}).to_list(1000)
+    return [await enrich_beam(beam) for beam in beams]
 
 
 @api.post("/beams")
@@ -146,12 +172,7 @@ async def get_beam(beam_id: str, user=Depends(get_current_user)):
     beam = await db.beams.find_one({"id": beam_id}, {"_id": 0})
     if not beam:
         raise HTTPException(status_code=404, detail="Beam not found")
-    beam["anomalies"] = await db.anomalies.find({"beam_id": beam_id}, {"_id": 0}).to_list(500)
-    beam["inspections"] = await db.inspections.find({"beam_id": beam_id}, {"_id": 0}).to_list(500)
-    beam["camber_readings"] = await db.camber_readings.find({"beam_id": beam_id}, {"_id": 0}).to_list(500)
-    if beam.get("product_type_id"):
-        beam["product_type"] = await db.product_types.find_one({"id": beam["product_type_id"]}, {"_id": 0})
-    return beam
+    return await enrich_beam(beam, include_details=True)
 
 
 @api.patch("/beams/{beam_id}")
