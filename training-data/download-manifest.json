@@ -1,0 +1,274 @@
+{
+  "files": [
+    {
+      "agency": "NYSDOT",
+      "kind": "i_beam",
+      "url": "https://www.dot.ny.gov/main/business-center/engineering/cadd-info/bridge-details-sheets-repostitory/bdos_r1.zip",
+      "path": "training-data/i-beams/nysdot/bdos_r1.zip",
+      "ok": true,
+      "detail": "16733 bytes",
+      "bytes": 16733
+    },
+    {
+      "agency": "NYSDOT",
+      "kind": "mixed",
+      "url": "https://www.dot.ny.gov/main/business-center/engineering/cadd-info/bridge-details-sheets-repostitory-usc/BD-PC_SET_USC-03-22.pdf",
+      "path": "training-data/i-beams/nysdot/BD-PC_SET_USC-03-22.pdf",
+      "ok": true,
+      "detail": "4829572 bytes",
+      "bytes": 4829572
+    },
+    {
+      "agency": "NYSDOT",
+      "kind": "mixed",
+      "url": "https://www.dot.ny.gov/main/business-center/engineering/cadd-info/bridge-details-sheets-repostitory-usc/BD-PC_SET.zip",
+      "path": "training-data/i-beams/nysdot/BD-PC_SET.zip",
+      "ok": true,
+      "detail": "15706977 bytes",
+      "bytes": 15706977
+    },
+    {
+      "agency": "NYSDOT",
+      "kind": "box_beam",
+      "url": "https://www.dot.ny.gov/main/business-center/engineering/cadd-info/bridge-details-sheets-repostitory-usc/BD-PC_01-26.pdf",
+      "path": "training-data/box-beams/nysdot/BD-PC_01-26.pdf",
+      "ok": true,
+      "detail": "5687728 bytes",
+      "bytes": 5687728
+    },
+    {
+      "agency": "TDOT",
+      "kind": "i_beam",
+      "url": "https://www.tn.gov/content/dam/tn/tdot/structures/SDG-5-Precast_Prestressed_Beams-V12082023.pdf",
+      "path": "training-data/guides/tdot/SDG-5-Precast_Prestressed_Beams-V12082023.pdf",
+      "ok": true,
+      "detail": "1561984 bytes",
+      "bytes": 1561984
+    },
+    {
+      "agency": "SCDOT",
+      "kind": "i_beam",
+      "url": "https://www.scdot.org/content/dam/scdot-legacy/business/structuraldrawings/aashto-bms/IM704_AASHTO_BM.pdf",
+      "path": "training-data/guides/scdot/IM704_AASHTO_BM.pdf",
+      "ok": true,
+      "detail": "663033 bytes",
+      "bytes": 663033
+    },
+    {
+      "agency": "SCDOT",
+      "kind": "box_beam",
+      "url": "https://www.scdot.org/content/dam/scdot-legacy/business/structuraldrawings/abb/IM704-ABB.pdf",
+      "path": "training-data/guides/scdot/IM704-ABB.pdf",
+      "ok": true,
+      "detail": "896139 bytes",
+      "bytes": 896139
+    },
+    {
+      "agency": "SCDOT",
+      "kind": "i_beam",
+      "url": "https://www.scdot.org/content/dam/scdot-legacy/business/structuraldrawings/fibs/IM704_FIBs.pdf",
+      "path": "training-data/guides/scdot/IM704_FIBs.pdf",
+      "ok": true,
+      "detail": "719927 bytes",
+      "bytes": 719927
+    },
+    {
+      "agency": "SCDOT",
+      "kind": "i_beam",
+      "url": "https://www.scdot.org/content/dam/scdot-legacy/business/structuraldrawings/aashto-bms/704-AASHTO-BM.pdf",
+      "path": "training-data/i-beams/scdot/704-AASHTO-BM.pdf",
+      "ok": false,
+      "detail": "HTTP Error 404: Not Found",
+      "bytes": 0
+    },
+    {
+      "agency": "SCDOT",
+      "kind": "box_beam",
+      "url": "https://www.scdot.org/content/dam/scdot-legacy/business/structuraldrawings/abb/704-ABB-GD.pdf",
+      "path": "training-data/box-beams/scdot/704-ABB-GD.pdf",
+      "ok": false,
+      "detail": "HTTP Error 404: Not Found",
+      "bytes": 0
+    },
+    {
+      "agency": "SCDOT",
+      "kind": "box_beam",
+      "url": "https://www.scdot.org/content/dam/scdot-legacy/business/structuraldrawings/abb/704-ABB-TYPSEC.pdf",
+      "path": "training-data/box-beams/scdot/704-ABB-TYPSEC.pdf",
+      "ok": false,
+      "detail": "HTTP Error 404: Not Found",
+      "bytes": 0
+    },
+    {
+      "agency": "SCDOT",
+      "kind": "i_beam",
+      "url": "https://www.scdot.org/content/dam/scdot-legacy/business/structuraldrawings/fibs/704-FIB.pdf",
+      "path": "training-data/i-beams/scdot/704-FIB.pdf",
+      "ok": false,
+      "detail": "HTTP Error 404: Not Found",
+      "bytes": 0
+    },
+    {
+      "agency": "ODOT",
+      "kind": "i_beam",
+      "url": "https://www.oregon.gov/odot/engineering/202307/br300s_all.pdf",
+      "path": "training-data/i-beams/odot/br300s_all.pdf",
+      "ok": true,
+      "detail": "3691904 bytes",
+      "bytes": 3691904
+    },
+    {
+      "agency": "ODOT",
+      "kind": "box_beam",
+      "url": "https://www.oregon.gov/odot/engineering/202307/br400s_all.pdf",
+      "path": "training-data/box-beams/odot/br400s_all.pdf",
+      "ok": true,
+      "detail": "3211314 bytes",
+      "bytes": 3211314
+    },
+    {
+      "agency": "ODOT",
+      "kind": "i_beam",
+      "url": "https://www.oregon.gov/odot/Engineering/202207/br300s_all.pdf",
+      "path": "training-data/i-beams/odot/br300s_all-202207.pdf",
+      "ok": true,
+      "detail": "3723927 bytes",
+      "bytes": 3723927
+    },
+    {
+      "agency": "NCDOT",
+      "kind": "i_beam",
+      "url": "https://connect.ncdot.gov/resources/Structures/Structure%20Specs/pcg1_24.pdf",
+      "path": "training-data/i-beams/ncdot/pcg1_24.pdf",
+      "ok": true,
+      "detail": "301020 bytes",
+      "bytes": 301020
+    },
+    {
+      "agency": "NCDOT",
+      "kind": "i_beam",
+      "url": "https://connect.ncdot.gov/resources/Structures/Structure%20Specs/pcg2_24.pdf",
+      "path": "training-data/i-beams/ncdot/pcg2_24.pdf",
+      "ok": true,
+      "detail": "158836 bytes",
+      "bytes": 158836
+    },
+    {
+      "agency": "NCDOT",
+      "kind": "i_beam",
+      "url": "https://connect.ncdot.gov/resources/Structures/Structure%20Specs/pcg3_24.pdf",
+      "path": "training-data/i-beams/ncdot/pcg3_24.pdf",
+      "ok": true,
+      "detail": "160973 bytes",
+      "bytes": 160973
+    },
+    {
+      "agency": "NCDOT",
+      "kind": "i_beam",
+      "url": "https://connect.ncdot.gov/resources/Structures/Structure%20Specs/pcg10_24.pdf",
+      "path": "training-data/i-beams/ncdot/pcg10_24.pdf",
+      "ok": true,
+      "detail": "170027 bytes",
+      "bytes": 170027
+    },
+    {
+      "agency": "NCDOT",
+      "kind": "i_beam",
+      "url": "https://connect.ncdot.gov/resources/Structures/Structure%20Design%20Manual/FIG066%20Dimensions,%20Area,%20and%20Design%20Data%20for%20Prestressed%20Concrete%20Girders%20AASHTO%20Types%20II%20through%20IV.pdf",
+      "path": "training-data/guides/ncdot/FIG066-AASHTO-II-IV.pdf",
+      "ok": true,
+      "detail": "98714 bytes",
+      "bytes": 98714
+    },
+    {
+      "agency": "NCDOT",
+      "kind": "box_beam",
+      "url": "https://connect.ncdot.gov/resources/Structures/Structure%20Specs/pcbb1_24.pdf",
+      "path": "training-data/box-beams/ncdot/pcbb1_24.pdf",
+      "ok": true,
+      "detail": "109257 bytes",
+      "bytes": 109257
+    },
+    {
+      "agency": "NCDOT",
+      "kind": "box_beam",
+      "url": "https://connect.ncdot.gov/resources/Structures/Structure%20Specs/pcbb2_24.pdf",
+      "path": "training-data/box-beams/ncdot/pcbb2_24.pdf",
+      "ok": true,
+      "detail": "128088 bytes",
+      "bytes": 128088
+    },
+    {
+      "agency": "NCDOT",
+      "kind": "box_beam",
+      "url": "https://connect.ncdot.gov/resources/Structures/Structure%20Specs/pcbb4_24.pdf",
+      "path": "training-data/box-beams/ncdot/pcbb4_24.pdf",
+      "ok": true,
+      "detail": "122654 bytes",
+      "bytes": 122654
+    },
+    {
+      "agency": "NCDOT",
+      "kind": "box_beam",
+      "url": "https://connect.ncdot.gov/resources/Structures/Structure%20Specs/pcbb6_24.pdf",
+      "path": "training-data/box-beams/ncdot/pcbb6_24.pdf",
+      "ok": true,
+      "detail": "121706 bytes",
+      "bytes": 121706
+    },
+    {
+      "agency": "NCDOT",
+      "kind": "box_beam",
+      "url": "https://connect.ncdot.gov/resources/Structures/Stucture%20Spec%20Memos/Box%20Beam%20Guidelines%20and%20Standards.pdf",
+      "path": "training-data/guides/ncdot/Box-Beam-Guidelines-and-Standards.pdf",
+      "ok": true,
+      "detail": "2174654 bytes",
+      "bytes": 2174654
+    },
+    {
+      "agency": "TxDOT",
+      "kind": "box_beam",
+      "url": "https://ftp.txdot.gov/pub/txdot-info/cmd/cserve/standard/bridge/BB-B28-12.pdf",
+      "path": "training-data/box-beams/txdot/BB-B28-12.pdf",
+      "ok": false,
+      "detail": "<urlopen error [SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: unable to get local issuer certificate (_ssl.c:1082)>",
+      "bytes": 0
+    },
+    {
+      "agency": "TxDOT",
+      "kind": "box_beam",
+      "url": "https://ftp.txdot.gov/pub/txdot-info/cmd/cserve/standard/bridge/BB-B34-12.pdf",
+      "path": "training-data/box-beams/txdot/BB-B34-12.pdf",
+      "ok": false,
+      "detail": "<urlopen error [SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: unable to get local issuer certificate (_ssl.c:1082)>",
+      "bytes": 0
+    },
+    {
+      "agency": "TxDOT",
+      "kind": "box_beam",
+      "url": "https://ftp.txdot.gov/pub/txdot-info/cmd/cserve/standard/bridge/BB-ABB28-06.pdf",
+      "path": "training-data/box-beams/txdot/BB-ABB28-06.pdf",
+      "ok": false,
+      "detail": "<urlopen error [SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: unable to get local issuer certificate (_ssl.c:1082)>",
+      "bytes": 0
+    },
+    {
+      "agency": "TxDOT",
+      "kind": "box_beam",
+      "url": "https://ftp.txdot.gov/pub/txdot-info/cmd/cserve/standard/bridge/BB-table-24.pdf",
+      "path": "training-data/guides/txdot/BB-table-24.pdf",
+      "ok": false,
+      "detail": "<urlopen error [SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: unable to get local issuer certificate (_ssl.c:1082)>",
+      "bytes": 0
+    },
+    {
+      "agency": "VDOT",
+      "kind": "box_beam",
+      "url": "https://www.vdot.virginia.gov/media/vdotvirginiagov/doing-business/technical-guidance-and-support/technical-guidance-documents/structure-and-bridge/manuals-of-structure-and-bridge-acc/part5/Part5.pdf",
+      "path": "training-data/guides/vdot/Part5-Prestressed-Adjacent-Member-Standards.pdf",
+      "ok": true,
+      "detail": "770626 bytes",
+      "bytes": 770626
+    }
+  ]
+}

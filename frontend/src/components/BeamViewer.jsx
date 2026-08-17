@@ -196,7 +196,7 @@ function HardwareMesh({ item, geo, selected, measurement, onSelect }) {
       </group>
     );
   }
-  if (kind === "grout_groove") {
+  if (kind === "grout_groove" || kind === "shear_key") {
     const w = inchesToFt(geo.width_in);
     return (
       <mesh position={[w / 2 - 0.04, y, z + span / 2]} onClick={handle}>

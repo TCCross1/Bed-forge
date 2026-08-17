@@ -96,12 +96,23 @@ class BeamGeometry(BaseModel):
     product_name: str = "KYTC PC I-Beam Type 2"
 
 
+class BillItem(BaseModel):
+    item: str
+    quantity: float = 1
+    unit: str = "EA"
+    notes: str = ""
+
+
 class BeamSpec(BaseModel):
     id: str = Field(default_factory=new_id)
     beam_id: Optional[str] = None
     job_id: Optional[str] = None
     pour_id: Optional[str] = None
     blueprint_id: Optional[str] = None
+    catalog_id: str = ""
+    source_agency: str = ""
+    source_drawing: str = ""
+    source_url: str = ""
     job_number: str = ""
     beam_mark: str = ""
     product_name: str = ""
@@ -112,6 +123,7 @@ class BeamSpec(BaseModel):
     strands: List[StrandItem] = Field(default_factory=list)
     hardware: List[HardwareItem] = Field(default_factory=list)
     stirrup_zones: List[StirrupZone] = Field(default_factory=list)
+    bill_of_materials: List[BillItem] = Field(default_factory=list)
     notes: List[str] = Field(default_factory=list)
     tolerances: Dict[str, float] = Field(default_factory=lambda: dict(DEFAULT_TOLERANCES_IN))
     special_finishes: List[str] = Field(default_factory=list)

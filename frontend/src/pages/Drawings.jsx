@@ -17,6 +17,8 @@ export default function Drawings() {
   const [spec, setSpec] = useState(null);
   const [reviewNotes, setReviewNotes] = useState("");
   const [history, setHistory] = useState([]);
+  const [corpus, setCorpus] = useState([]);
+  const [catalogId, setCatalogId] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -29,6 +31,16 @@ export default function Drawings() {
       .catch((err) => {
         console.error("[drawings] beams failed", err);
         toast.error(formatApiErrorDetail(err.response?.data?.detail) || "Failed to load beams");
+      });
+    api.get("/beam-specs/corpus")
+      .then((r) => {
+        if (cancelled) return;
+        const items = r.data?.items || [];
+        setCorpus(items);
+        setCatalogId((cur) => cur || items[0]?.catalog_id || "");
+      })
+      .catch((err) => {
+        console.error("[drawings] corpus failed", err);
       });
     return () => { cancelled = true; };
   }, []);
@@ -78,6 +90,27 @@ export default function Drawings() {
     } catch (err) {
       console.error("[drawings] upload failed", err);
       toast.error(formatApiErrorDetail(err.response?.data?.detail) || "Upload / extract failed");
+    } finally {
+      setBusy("");
+    }
+  };
+
+  const loadCorpus = async () => {
+    if (!beamId || !catalogId) {
+      toast.error("Select a beam and a standard drawing");
+      return;
+    }
+    setBusy("corpus");
+    try {
+      const { data } = await api.post("/beam-specs/from-corpus", null, { params: { catalog_id: catalogId, beam_id: beamId } });
+      setSpec(data);
+      setReviewNotes(data.review_notes || "");
+      toast.info(`${data.product_name} attached — review then lock`);
+      const list = await api.get("/beam-specs", { params: { beam_id: beamId } });
+      setHistory(list.data || []);
+    } catch (err) {
+      console.error("[drawings] corpus attach failed", err);
+      toast.error(formatApiErrorDetail(err.response?.data?.detail) || "Failed to attach corpus spec");
     } finally {
       setBusy("");
     }
@@ -169,7 +202,7 @@ export default function Drawings() {
             />
           </Field>
           <div className="text-xs font-mono text-muted-foreground">
-            {files.length ? files.map((f) => f.name).join(", ") : "Larue County / L25390 Type 2 shop drawings are the accuracy reference."}
+            {files.length ? files.map((f) => f.name).join(", ") : "Upload a shop drawing or load a NY/SC/NC/OR gold standard from the corpus."}
           </div>
           <button
             data-testid="dwg-upload"
@@ -178,6 +211,23 @@ export default function Drawings() {
             className="w-full min-h-14 bg-primary text-white font-display font-bold uppercase tracking-widest rounded-none hover:bg-white hover:text-black transition-colors duration-100 disabled:opacity-60 flex items-center justify-center gap-2"
           >
             {busy === "upload" && <Loader2 className="w-4 h-4 animate-spin" />} Extract BeamSpec
+          </button>
+          <Field label="Training corpus standard">
+            <select data-testid="dwg-corpus" value={catalogId} onChange={(e) => setCatalogId(e.target.value)} className={inputClass}>
+              {corpus.map((item) => (
+                <option key={item.catalog_id} value={item.catalog_id}>
+                  {item.agency} · {item.product_name}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <button
+            data-testid="dwg-corpus-load"
+            onClick={loadCorpus}
+            disabled={busy === "corpus"}
+            className="w-full min-h-12 border border-[#1C2230] rounded-none font-semibold uppercase tracking-wider hover:border-primary hover:text-primary"
+          >
+            Load selected standard
           </button>
           <button
             data-testid="dwg-reference"

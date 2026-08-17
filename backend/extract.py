@@ -1,10 +1,11 @@
 """Replaceable shop-drawing → BeamSpec extractor.
 
 Backends (BEAMSPEC_EXTRACTOR env):
-  auto      — L25390 reference if filename/text matches, else vision, else heuristic
+  auto      — L25390, then gold corpus, then vision, then section heuristic
+  corpus    — gold training corpus only
   l25390    — force Larue County Type 2 reference
   openai    — vision model (OPENAI_API_KEY)
-  heuristic — PDF/text regex only
+  heuristic — PDF/text regex + AASHTO section table
 """
 import json
 import logging
@@ -14,6 +15,7 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 
 from beam_spec import BeamSpec, BeamGeometry, HardwareItem, StationRef
+from corpus import clone_spec, detect_section, match_corpus, spec_from_section
 from l25390 import JOB_NUMBER, PRODUCT_NAME, build_l25390_spec
 
 logger = logging.getLogger(__name__)
@@ -38,8 +40,12 @@ Extract a JSON object with this exact shape (no markdown):
   "special_finishes": []
 }
 Read EVERY lift loop, F-64/insert, drain, tube, tie-rod, hold-down, bearing plate,
-bituminous/debond zone, diaphragm angle, grout groove, and marked-end stamp.
+bituminous/debond zone, diaphragm angle, grout groove, shear key, transverse tendon,
+and marked-end stamp.
 Stations are feet from the Marked End. Heights are inches from soffit.
+Also return bill_of_materials: [{"item":"","quantity":0,"unit":"EA","notes":""}].
+Gold examples follow AASHTO Type II (36x12x18x6), Type III (45x16x22x7), Type IV (54x20x26x8),
+NCDOT 3'-0" boxes (27/33/39" deep), SCDOT ABB BII-36 / BIII-36, ODOT BR325–BR440.
 """
 
 
@@ -216,14 +222,46 @@ def extract_beam_spec(
         logger.info("extract used l25390_reference files=%s", names)
         return spec, spec.extractor
 
+    if mode in ("auto", "corpus"):
+        gold = match_corpus(names, text)
+        if gold:
+            spec = clone_spec(
+                gold,
+                beam_id=beam_id,
+                job_id=job_id,
+                pour_id=pour_id,
+                blueprint_id=blueprint_id,
+                beam_mark=beam_mark,
+            )
+            spec.notes = [f"Matched gold corpus '{gold.catalog_id}' from '{names}'."] + spec.notes
+            logger.info("extract used gold_corpus id=%s files=%s", gold.catalog_id, names)
+            return spec, spec.extractor
+
     if mode in ("auto", "openai"):
         vision = _extract_openai(files, beam_id, job_id, pour_id, blueprint_id, beam_mark)
         if vision:
             logger.info("extract used openai_vision files=%s", names)
             return vision, vision.extractor
 
-    spec = build_l25390_spec(beam_id, job_id, pour_id, blueprint_id, beam_mark)
+    section = detect_section(names, text)
     heur = _heuristic_geometry(text, names)
+    if section:
+        seeded = spec_from_section(
+            section,
+            heur["length_ft"],
+            beam_id=beam_id,
+            job_id=job_id,
+            pour_id=pour_id,
+            blueprint_id=blueprint_id,
+            beam_mark=beam_mark,
+        )
+        if seeded:
+            if heur["twin_type"] == "box_beam":
+                seeded.geometry.twin_type = "box_beam"
+            logger.info("extract used section_heuristic section=%s files=%s", section, names)
+            return seeded, seeded.extractor
+
+    spec = build_l25390_spec(beam_id, job_id, pour_id, blueprint_id, beam_mark)
     spec.geometry.length_ft = heur["length_ft"]
     spec.geometry.twin_type = heur["twin_type"]
     if heur["twin_type"] == "box_beam" and not any(h.kind == "grout_groove" for h in spec.hardware):

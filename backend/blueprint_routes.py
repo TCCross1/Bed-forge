@@ -13,6 +13,7 @@ from models import now_iso
 from storage import list_files, save_upload, MAX_BYTES
 from beam_spec import Blueprint
 from l25390 import build_l25390_spec
+from corpus import clone_spec, corpus_summaries, load_gold_specs
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["blueprints"])
@@ -189,6 +190,49 @@ async def create_from_l25390(beam_id: Optional[str] = None, user=Depends(get_cur
     except Exception:
         logger.exception("create_from_l25390 failed")
         raise HTTPException(status_code=500, detail="Failed to create L25390 reference spec")
+
+
+@router.get("/beam-specs/corpus")
+async def list_corpus(user=Depends(get_current_user)):
+    try:
+        return {"count": len(corpus_summaries()), "items": corpus_summaries()}
+    except Exception:
+        logger.exception("list_corpus failed")
+        raise HTTPException(status_code=500, detail="Failed to list training corpus")
+
+
+@router.post("/beam-specs/from-corpus")
+async def create_from_corpus(catalog_id: str, beam_id: Optional[str] = None, user=Depends(get_current_user)):
+    try:
+        gold = next((s for s in load_gold_specs() if s.catalog_id == catalog_id), None)
+        if not gold:
+            raise HTTPException(status_code=404, detail="Corpus spec not found")
+        beam = None
+        if beam_id:
+            beam = await db.beams.find_one({"id": beam_id}, {"_id": 0})
+            if not beam:
+                raise HTTPException(status_code=404, detail="Beam not found")
+        spec = clone_spec(
+            gold,
+            beam_id=beam_id,
+            job_id=beam.get("job_id") if beam else None,
+            pour_id=beam.get("pour_id") if beam else None,
+            beam_mark=beam.get("mark") if beam else "B1",
+        )
+        spec.status = "extracted"
+        spec.review_notes = (
+            f"Attached from training corpus {gold.catalog_id} ({gold.source_agency} {gold.source_drawing}). "
+            "QC Supervisor must verify against the shop drawing before lock."
+        )
+        dumped = spec.model_dump()
+        await db.beam_specs.insert_one(dumped)
+        logger.info("corpus spec created id=%s catalog=%s beam=%s by=%s", spec.id, catalog_id, beam_id, user.get("email"))
+        return dumped
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("create_from_corpus failed catalog=%s", catalog_id)
+        raise HTTPException(status_code=500, detail="Failed to attach corpus spec")
 
 
 @router.get("/beam-specs/{spec_id}")

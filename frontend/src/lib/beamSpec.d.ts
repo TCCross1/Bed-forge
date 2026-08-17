@@ -68,6 +68,10 @@ export interface BeamSpec {
   job_id?: string | null;
   pour_id?: string | null;
   blueprint_id?: string | null;
+  catalog_id?: string;
+  source_agency?: string;
+  source_drawing?: string;
+  source_url?: string;
   job_number: string;
   beam_mark: string;
   product_name: string;
@@ -78,6 +82,7 @@ export interface BeamSpec {
   strands: StrandItem[];
   hardware: HardwareItem[];
   stirrup_zones: StirrupZone[];
+  bill_of_materials?: { item: string; quantity: number; unit: string; notes?: string }[];
   notes: string[];
   special_finishes: string[];
   status: "extracted" | "reviewed" | "locked" | string;
