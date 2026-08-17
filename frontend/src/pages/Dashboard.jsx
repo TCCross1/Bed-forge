@@ -245,6 +245,16 @@ export default function Dashboard() {
                 </Link>
               </div>
             </div>
+            <div className={`${cardClass} p-4 sm:p-5 mb-4`} data-testid="tape-shortcut">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <div className="text-[10px] font-mono uppercase tracking-[0.25em] text-[#2979FF]">Field / desk</div>
+                  <div className="font-display font-bold uppercase tracking-wider mt-1">Digital tape — daily cal ±0.15%</div>
+                  <p className="text-xs text-muted-foreground mt-1">Camera / gravity in the browser (not ARKit). Native iPhone is ARKit. Calibrate this device first. Gold Fresh tab stays Fresh.</p>
+                </div>
+                <ARMeasureLink compact={device.field} />
+              </div>
+            </div>
             <div className={`${cardClass} p-4 sm:p-5 mb-6`} data-testid="plant-demo-path">
               <div className="text-[10px] font-mono uppercase tracking-[0.25em] text-[#C9A227]">Today’s plant path</div>
               <div className="font-display font-bold uppercase tracking-wider mt-1 mb-3">One clean walk from mill tag to DOT package</div>

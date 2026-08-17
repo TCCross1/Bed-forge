@@ -114,8 +114,8 @@ final class ARMeasureViewController: UIViewController, ARSCNViewDelegate {
             row.bottomAnchor.constraint(equalTo: row2.topAnchor, constant: -10),
             row.heightAnchor.constraint(equalToConstant: 56)
         ])
-        statusLabel.text = lidar ? "LiDAR READY · AIM POINT A" : "WORLD TRACKING · AIM POINT A"
-        metaLabel.text = "Walk the soffit, bed, or form. Green + vibe when Point B is level with A."
+        statusLabel.text = lidar ? "ARKIT + LIDAR · AIM POINT A" : "ARKIT WORLD TRACKING · AIM POINT A (NO LIDAR)"
+        metaLabel.text = lidar ? "Native ARKit with LiDAR. Not the browser camera tape." : "Native ARKit world tracking — not LiDAR, not the browser camera tape."
     }
 
     override func viewWillAppear(_ animated: Bool) {
@@ -201,7 +201,7 @@ final class ARMeasureViewController: UIViewController, ARSCNViewDelegate {
         }
         if !level { didBuzzLevel = false }
         confidenceFill.transform = CGAffineTransform(scaleX: CGFloat(max(0.08, lastConfidence)), y: 1)
-        metaLabel.text = String(format: "%@ · confidence %.0f%% · samples %d", lidar ? "LiDAR" : "World tracking", lastConfidence * 100, samples.count)
+        metaLabel.text = String(format: "%@ · confidence %.0f%% · samples %d", lidar ? "ARKit LiDAR" : "ARKit (no LiDAR)", lastConfidence * 100, samples.count)
     }
 
     @objc private func tapA() { beginSampling(forA: true, force: false) }
@@ -255,6 +255,7 @@ final class ARMeasureViewController: UIViewController, ARSCNViewDelegate {
             "sample_count": samples.count,
             "lidar": lidar,
             "engine": lidar ? "arkit-lidar" : "arkit",
+            "honesty_label": lidar ? "ARKit with LiDAR" : "ARKit world tracking (no LiDAR)",
             "warning": (!level && forceSnap) ? "Force-snapped off-level" : ""
         ]
         dismiss(animated: true) { self.onComplete?(payload) }

@@ -4,11 +4,15 @@ import api, { formatApiErrorDetail } from "../lib/api";
 import Layout, { PageHeader, Field, inputClass, cardClass } from "../components/Layout";
 import { useDevice } from "../context/DeviceContext";
 import { useSync } from "../context/SyncContext";
-import { nativeARPlugin } from "../lib/device";
+import { deviceId, nativeARPlugin } from "../lib/device";
 import {
   LEVEL_TOLERANCE_IN, SAMPLE_TARGET, averagePoints, confidenceFromSamples,
   gravityPose, haptic, metrics, requestMotion, setTorch, startCamera, stopCamera,
 } from "../lib/arEngine";
+import {
+  CAL_LOCK_HOURS, CAL_TOLERANCE_PCT, WEB_HONESTY_LABEL,
+  applyScale, evaluateCalibration, formatRemaining, sanitizeEngine,
+} from "../lib/tapeCal";
 import { toast } from "sonner";
 import { Flashlight, Loader2, ScanLine, Sparkles } from "lucide-react";
 
@@ -96,7 +100,15 @@ export default function ARMeasure() {
   const [savedRun, setSavedRun] = useState(null);
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState("");
-  const [engine, setEngine] = useState(device.native ? "arkit" : "gravity");
+  const native = nativeARPlugin();
+  const honesty = sanitizeEngine(native ? "arkit" : "web", false, Boolean(native));
+  const [engine, setEngine] = useState(honesty.engine);
+  const [honestyLabel, setHonestyLabel] = useState(honesty.honestyLabel);
+  const [calStatus, setCalStatus] = useState(null);
+  const [calHistory, setCalHistory] = useState([]);
+  const [knownFt, setKnownFt] = useState("10");
+  const [measuredFt, setMeasuredFt] = useState("");
+  const [tick, setTick] = useState(0);
   const videoRef = useRef(null);
   const streamRef = useRef(null);
   const orientRef = useRef({ beta: 0, gamma: 0 });
@@ -107,7 +119,9 @@ export default function ARMeasure() {
   const shotsRef = useRef([]);
   const previewTimer = useRef(null);
   const beamIdRef = useRef(beamId);
-  const native = nativeARPlugin();
+  const calAllowed = Boolean(calStatus?.allowed);
+  const remaining = Math.max(0, Number(calStatus?.remaining_seconds || 0) - tick);
+  const scaleFactor = calAllowed ? Number(calStatus?.scale_factor || 1) : 1;
 
   useEffect(() => {
     pointARef.current = pointA;
@@ -121,6 +135,22 @@ export default function ARMeasure() {
     beamIdRef.current = beamId;
   }, [beamId]);
 
+  const loadCalibration = async () => {
+    try {
+      const did = deviceId();
+      const [statusRes, histRes] = await Promise.all([
+        api.get("/tape-calibration", { params: { device_id: did } }),
+        api.get("/tape-calibration/history", { params: { device_id: did } }),
+      ]);
+      setCalStatus(statusRes.data || null);
+      setCalHistory(histRes.data || []);
+      setTick(0);
+    } catch (err) {
+      console.error("[measure] cal status failed", err);
+      toast.error(formatApiErrorDetail(err.response?.data?.detail) || "Failed to load calibration");
+    }
+  };
+
   useEffect(() => {
     api.get("/beams").then((r) => {
       setBeams(r.data || []);
@@ -133,7 +163,14 @@ export default function ARMeasure() {
       setBeds(r.data || []);
       setBedId((cur) => cur || r.data?.[0]?.id || "");
     }).catch((err) => console.error("[measure] beds failed", err));
+    loadCalibration();
   }, []);
+
+  useEffect(() => {
+    if (!calStatus?.allowed) return undefined;
+    const t = setInterval(() => setTick((n) => n + 1), 30000);
+    return () => clearInterval(t);
+  }, [calStatus?.allowed, calStatus?.expires_at]);
 
   useEffect(() => {
     const onOrient = (e) => { orientRef.current = { beta: e.beta || 0, gamma: e.gamma || 0 }; };
@@ -146,6 +183,7 @@ export default function ARMeasure() {
     shotsRef.current = next;
     setShots(next);
     setSavedRun(null);
+    setMeasuredFt(String(shot.raw_distance_ft ?? shot.distance_ft ?? ""));
     scheduleTapePreview(previewTimer, next, beamIdRef.current, setCompare);
   };
 
@@ -186,6 +224,8 @@ export default function ARMeasure() {
         haptic(m.level);
         const shot = {
           ...m,
+          raw_distance_ft: m.distance_ft,
+          distance_ft: m.distance_ft,
           point_a: origin,
           point_b: avg,
           confidence: conf,
@@ -196,23 +236,21 @@ export default function ARMeasure() {
           warning: !m.level && kind === "FORCE" ? "Force-snapped off-level" : "",
           station_index: shotsRef.current.length + 1,
         };
-        const next = [...shotsRef.current, shot];
-        shotsRef.current = next;
-        setShots(next);
-        setSavedRun(null);
-        scheduleTapePreview(previewTimer, next, beamIdRef.current, setCompare);
-        toast.success(`Station ${shot.station_index} · ${m.distance_ft} ft from header`);
+        appendShot(shot);
+        toast.success(`Station ${shot.station_index} · ${applyScale(shot.distance_ft, scaleFactor)} ft from header`);
       }
     }, 80);
     return () => clearInterval(t);
-  }, [running, native]);
+  }, [running, native, scaleFactor]);
 
   const startWeb = async () => {
     await requestMotion();
     try {
       const stream = await startCamera(videoRef.current, torch);
       streamRef.current = stream;
-      setEngine("gravity");
+      const web = sanitizeEngine("gravity", false, false);
+      setEngine(web.engine);
+      setHonestyLabel(web.honestyLabel);
       setRunning(true);
     } catch (err) {
       console.error("[measure] camera failed", err);
@@ -233,23 +271,32 @@ export default function ARMeasure() {
         delta_height_in: payload.delta_height_in,
         level: payload.level,
       };
+    const nativeHonesty = sanitizeEngine(payload.engine || "arkit", Boolean(payload.lidar), true);
+    setEngine(nativeHonesty.engine);
+    setHonestyLabel(payload.honesty_label || nativeHonesty.honestyLabel);
     const shot = {
       ...m,
+      raw_distance_ft: m.distance_ft,
+      distance_ft: m.distance_ft,
       point_a: origin || payload.point_a,
       point_b: payload.point_b || origin,
       confidence: payload.confidence || 0.8,
       sample_count: payload.sample_count || SAMPLE_TARGET,
       forced: Boolean(payload.forced),
-      lidar: Boolean(payload.lidar),
-      engine: payload.engine || "arkit",
+      lidar: Boolean(nativeHonesty.lidar),
+      engine: nativeHonesty.engine,
       warning: payload.warning || "",
       station_index: shotsRef.current.length + 1,
     };
     appendShot(shot);
-    toast.success(`Station ${shot.station_index} · ${shot.distance_ft} ft from header`);
+    toast.success(`Station ${shot.station_index} · ${applyScale(shot.distance_ft, scaleFactor)} ft from header`);
   };
 
   const startSession = async () => {
+    if (!calAllowed) {
+      toast.error(calStatus?.detail || "Calibrate this device before measuring");
+      return;
+    }
     setSavedRun(null);
     setPointA(null);
     pointARef.current = null;
@@ -261,13 +308,15 @@ export default function ARMeasure() {
     if (native) {
       try {
         const caps = await native.capabilities();
-        setEngine(caps.lidar ? "arkit-lidar" : "arkit");
+        const nativeHonesty = sanitizeEngine(caps.engine || (caps.lidar ? "arkit-lidar" : "arkit"), Boolean(caps.lidar), true);
+        setEngine(nativeHonesty.engine);
+        setHonestyLabel(caps.honesty_label || nativeHonesty.honestyLabel);
         const payload = await native.present({ beamId, purpose });
-        ingestNativePayload({ ...payload, engine: payload.engine || "arkit" });
+        ingestNativePayload({ ...payload, engine: payload.engine || nativeHonesty.engine });
       } catch (err) {
         if (String(err?.message || err) !== "cancelled") {
           console.error("[measure] native AR failed", err);
-          toast.error("ARKit session failed — using camera fallback");
+          toast.error("ARKit session failed — falling back to camera / gravity tape (not ARKit)");
           await startWeb();
         }
       }
@@ -278,6 +327,10 @@ export default function ARMeasure() {
 
   const snapNativeNext = async () => {
     if (!native) return;
+    if (!calAllowed) {
+      toast.error("Calibration expired — recalibrate this device");
+      return;
+    }
     try {
       const payload = await native.present({ beamId, purpose, origin: pointARef.current });
       ingestNativePayload({ ...payload, engine: payload.engine || engine });
@@ -321,9 +374,50 @@ export default function ARMeasure() {
   };
 
   const liveMetrics = pointA && live ? metrics(pointA, live) : null;
+  const liveDistance = liveMetrics ? applyScale(liveMetrics.distance_ft, scaleFactor) : null;
   const green = Boolean(liveMetrics?.level);
 
+  const submitCalibration = async () => {
+    const measured = measuredFt || (shotsRef.current[shotsRef.current.length - 1]?.raw_distance_ft)
+      || (shotsRef.current[shotsRef.current.length - 1]?.distance_ft)
+      || (liveMetrics ? liveMetrics.distance_ft : "");
+    const preview = evaluateCalibration(knownFt, measured);
+    if (!preview.ok) {
+      toast.error(preview.detail);
+      return;
+    }
+    setBusy("cal");
+    try {
+      const { data } = await api.post("/tape-calibration", {
+        device_id: deviceId(),
+        known_length_ft: Number(knownFt),
+        measured_length_ft: Number(measured),
+        engine,
+        lidar: Boolean(native) && engine.includes("lidar"),
+        device_class: device.field ? "field" : "command",
+        device_model: device.model,
+      });
+      setCalStatus(data.status || null);
+      setTick(0);
+      await loadCalibration();
+      if (data.passed) {
+        toast.success(`Calibration pass · scale ${data.calibration?.scale_factor} · ${CAL_LOCK_HOURS}h lock on this device`);
+      } else {
+        toast.error(data.detail || "Calibration failed ±0.15% — tape stays locked");
+      }
+    } catch (err) {
+      console.error("[measure] calibrate failed", err);
+      toast.error(formatApiErrorDetail(err.response?.data?.detail) || "Failed to save calibration");
+    } finally {
+      setBusy("");
+    }
+  };
+
   const finishRun = async () => {
+    if (!calAllowed) {
+      toast.error(calStatus?.detail || "Calibration expired — recalibrate this device");
+      return;
+    }
     if (!shotsRef.current.length) {
       toast.error("Snap at least one station after the origin");
       return;
@@ -352,6 +446,7 @@ export default function ARMeasure() {
         engine: shotsRef.current[0]?.engine || engine,
         device_class: device.field ? "field" : "command",
         device_model: device.model,
+        device_id: deviceId(),
         lidar: Boolean(shotsRef.current[0]?.lidar),
         note,
       });
@@ -361,7 +456,13 @@ export default function ARMeasure() {
       refresh?.();
     } catch (err) {
       console.error("[measure] finish run failed", err);
-      toast.error(formatApiErrorDetail(err.response?.data?.detail) || "Failed to save tape run");
+      const status = err.response?.status;
+      if (status === 409) {
+        toast.error(formatApiErrorDetail(err.response?.data?.detail) || "Calibration expired — recalibrate this device");
+        loadCalibration();
+      } else {
+        toast.error(formatApiErrorDetail(err.response?.data?.detail) || "Failed to save tape run");
+      }
     } finally {
       setBusy("");
     }
@@ -372,16 +473,20 @@ export default function ARMeasure() {
   const statusLine = savedRun
     ? `SAVED · ${savedRun.shot_count} pts · ${savedRun.compare?.rescan_count || 0} rescan`
     : liveMetrics
-      ? `${green ? "LEVEL — SNAP" : "WALK"} · ${liveMetrics.distance_ft} ft · Δ${liveMetrics.delta_height_in}"`
+      ? `${green ? "LEVEL — SNAP" : "WALK"} · ${liveDistance} ft · Δ${liveMetrics.delta_height_in}"`
       : running
         ? (pointA ? "WALK THE BEAM — SNAP ON GREEN" : "AIM AT THE HEADER / MARKED END")
-        : "START DIGITAL TAPE";
+        : calAllowed
+          ? "START DIGITAL TAPE"
+          : "CALIBRATE THIS DEVICE FIRST";
+  const remainingLabel = calAllowed ? formatRemaining(remaining) : "locked";
+  const calColor = calAllowed ? "#00E676" : "#FF3366";
 
   return (
     <Layout>
       <PageHeader
         title="Digital tape measure"
-        subtitle="One QC tech. Flashlight + self-level. Plot the header, walk, snap on green. Multi-point vs the twin."
+        subtitle="Daily cal ±0.15% on this device. Browser tape is camera/gravity — not ARKit."
       />
       <div className="p-4 sm:p-6 lg:p-8 grid grid-cols-1 xl:grid-cols-[1.2fr_380px] gap-4">
         <div className={`${cardClass} overflow-hidden`}>
@@ -405,9 +510,14 @@ export default function ARMeasure() {
               <div className="font-mono text-lg sm:text-2xl font-bold" style={{ color: green ? "#00E676" : "#FFFFFF" }}>
                 {statusLine}
               </div>
-              <div className="text-[10px] font-mono text-muted-foreground">
-                {engine.toUpperCase()} · level ±{LEVEL_TOLERANCE_IN}" · {shots.length} station{shots.length === 1 ? "" : "s"}
+              <div className="text-[10px] font-mono text-muted-foreground" data-testid="ar-honesty">
+                {honestyLabel} · level ±{LEVEL_TOLERANCE_IN}" · {shots.length} station{shots.length === 1 ? "" : "s"}
                 {sampling ? ` · sampling ${samples.length}/${SAMPLE_TARGET}` : ""}
+              </div>
+              <div className="text-[10px] font-mono uppercase tracking-widest" style={{ color: calColor }} data-testid="ar-cal-remaining">
+                {calAllowed
+                  ? `CAL LOCK ${remainingLabel} · scale ${Number(scaleFactor).toFixed(6)} · this device`
+                  : "NO VALID CAL — measuring blocked until ±0.15% pass"}
               </div>
               {(running || liveMetrics) && (
                 <LevelGauge deltaIn={liveMetrics?.delta_height_in || 0} level={green} />
@@ -418,8 +528,8 @@ export default function ARMeasure() {
             </div>
             <div className="absolute bottom-3 left-3 right-3 grid grid-cols-2 sm:grid-cols-4 gap-2 pointer-events-auto">
               {!running && !shots.length && (
-                <button type="button" data-testid="ar-start" onClick={startSession} className="col-span-2 sm:col-span-4 min-h-14 bg-primary text-white font-display font-bold uppercase tracking-widest">
-                  <ScanLine className="w-5 h-5 inline mr-2" /> Start digital tape
+                <button type="button" data-testid="ar-start" onClick={startSession} disabled={!calAllowed} className="col-span-2 sm:col-span-4 min-h-14 bg-primary text-white font-display font-bold uppercase tracking-widest disabled:opacity-40">
+                  <ScanLine className="w-5 h-5 inline mr-2" /> {calAllowed ? "Start digital tape" : "Calibrate first"}
                 </button>
               )}
               {running && (
@@ -436,7 +546,7 @@ export default function ARMeasure() {
                   <button type="button" data-testid="ar-force" disabled={!pointA} onClick={() => snap("FORCE")} className="min-h-14 bg-[#FFD600] text-black font-display font-bold uppercase disabled:opacity-40">
                     Force
                   </button>
-                  <button type="button" data-testid="ar-finish" disabled={!shots.length || busy === "save"} onClick={finishRun} className="col-span-2 min-h-12 bg-white text-black font-display font-bold uppercase disabled:opacity-40">
+                  <button type="button" data-testid="ar-finish" disabled={!shots.length || busy === "save" || !calAllowed} onClick={finishRun} className="col-span-2 min-h-12 bg-white text-black font-display font-bold uppercase disabled:opacity-40">
                     {busy === "save" ? <Loader2 className="w-4 h-4 animate-spin inline" /> : "Finish run"}
                   </button>
                   <button type="button" data-testid="ar-stop" onClick={stopSession} className="col-span-2 min-h-12 border border-[#1C2230] bg-[#0F1218]/90 font-mono text-xs uppercase">
@@ -446,16 +556,16 @@ export default function ARMeasure() {
               )}
               {!running && native && shots.length > 0 && !savedRun && (
                 <>
-                  <button type="button" onClick={snapNativeNext} className="col-span-2 min-h-14 bg-[#00E676] text-black font-display font-bold uppercase">
+                  <button type="button" onClick={snapNativeNext} disabled={!calAllowed} className="col-span-2 min-h-14 bg-[#00E676] text-black font-display font-bold uppercase disabled:opacity-40">
                     Snap next
                   </button>
-                  <button type="button" data-testid="ar-finish-native" disabled={busy === "save"} onClick={finishRun} className="col-span-2 min-h-14 bg-white text-black font-display font-bold uppercase">
+                  <button type="button" data-testid="ar-finish-native" disabled={busy === "save" || !calAllowed} onClick={finishRun} className="col-span-2 min-h-14 bg-white text-black font-display font-bold uppercase disabled:opacity-40">
                     Finish run
                   </button>
                 </>
               )}
               {!running && shots.length > 0 && (
-                <button type="button" onClick={startSession} className="col-span-2 sm:col-span-4 min-h-14 border border-primary text-primary font-display font-bold uppercase">
+                <button type="button" onClick={startSession} disabled={!calAllowed} className="col-span-2 sm:col-span-4 min-h-14 border border-primary text-primary font-display font-bold uppercase disabled:opacity-40">
                   New run
                 </button>
               )}
@@ -464,6 +574,37 @@ export default function ARMeasure() {
         </div>
 
         <div className="space-y-4">
+          <div className={`${cardClass} p-4 space-y-3`} data-testid="ar-cal-panel" style={{ borderColor: calAllowed ? "#1C2230" : "#FF3366" }}>
+            <div className="font-display font-bold uppercase tracking-wider">Daily calibration</div>
+            <div className="text-[10px] font-mono uppercase tracking-widest" style={{ color: calColor }}>
+              {calAllowed ? `Unlocked ${remainingLabel} remaining` : "Locked — pass ±0.15% on this phone"}
+            </div>
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              Measure a known length on this device. Within ±{CAL_TOLERANCE_PCT}% unlocks the tape for {CAL_LOCK_HOURS} hours and stores a scale factor only for this phone. A fail does not unlock. Web is {WEB_HONESTY_LABEL.toLowerCase()}.
+            </p>
+            <Field label="Known length (ft)">
+              <input data-testid="ar-cal-known" className={inputClass} value={knownFt} onChange={(e) => setKnownFt(e.target.value)} inputMode="decimal" />
+            </Field>
+            <Field label="Measured length (ft)">
+              <input data-testid="ar-cal-measured" className={inputClass} value={measuredFt} onChange={(e) => setMeasuredFt(e.target.value)} inputMode="decimal" placeholder={liveDistance != null ? String(liveDistance) : "Last station or type it"} />
+            </Field>
+            <button
+              type="button"
+              data-testid="ar-cal-submit"
+              onClick={submitCalibration}
+              disabled={busy === "cal"}
+              className="w-full min-h-14 bg-[#C9A227] text-black font-display font-bold uppercase tracking-widest disabled:opacity-60"
+            >
+              {busy === "cal" ? <Loader2 className="w-4 h-4 animate-spin inline" /> : "Calibrate this device"}
+            </button>
+            {(calHistory || []).slice(0, 4).map((row) => (
+              <div key={row.id} className="border-t border-[#1C2230] pt-2 font-mono text-[11px]" style={{ color: row.passed ? "#00E676" : "#FF3366" }}>
+                {row.passed ? "PASS" : "FAIL"} · {row.known_length_ft} ft known / {row.measured_length_ft} ft shot
+                {row.scale_factor ? ` · scale ${row.scale_factor}` : ""} · {row.calibrated_by || "tech"}
+              </div>
+            ))}
+          </div>
+
           <div className={`${cardClass} p-4 space-y-3`}>
             <Field label="Beam">
               <select data-testid="ar-beam" className={inputClass} value={beamId} onChange={(e) => { setBeamId(e.target.value); scheduleTapePreview(previewTimer, shotsRef.current, e.target.value, setCompare); }}>
@@ -489,7 +630,7 @@ export default function ARMeasure() {
               </Link>
             )}
             {!running && shots.length > 0 && !savedRun && (
-              <button type="button" data-testid="ar-save" onClick={finishRun} disabled={busy === "save"} className="w-full min-h-14 bg-primary text-white font-display font-bold uppercase tracking-widest disabled:opacity-60">
+              <button type="button" data-testid="ar-save" onClick={finishRun} disabled={busy === "save" || !calAllowed} className="w-full min-h-14 bg-primary text-white font-display font-bold uppercase tracking-widest disabled:opacity-60">
                 {busy === "save" ? <Loader2 className="w-4 h-4 animate-spin inline" /> : "Save run + AI compare"}
               </button>
             )}
@@ -505,7 +646,7 @@ export default function ARMeasure() {
                 <div key={`${s.station_index}-${i}`} className="border-b border-[#1C2230] py-2 flex items-start justify-between gap-2">
                   <div className="font-mono text-[11px]">
                     <div style={{ color: flagColor(row) }}>
-                      #{s.station_index} · {s.distance_ft} ft · Δ{s.delta_height_in}" · {s.level ? "LEVEL" : "OFF"}
+                      #{s.station_index} · {applyScale(s.distance_ft, scaleFactor)} ft · Δ{s.delta_height_in}" · {s.level ? "LEVEL" : "OFF"}
                       {s.forced ? " · FORCED" : ""}
                     </div>
                     <div className="text-muted-foreground">

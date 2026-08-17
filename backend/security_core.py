@@ -161,7 +161,10 @@ def redact_value(value):
         out = {}
         for key, item in value.items():
             lowered = str(key).lower()
-            if any(part in lowered for part in ("password", "hash", "token", "secret", "photo_data", "raw_text", "authorization")):
+            if any(part in lowered for part in (
+                "password", "hash", "token", "secret", "photo_data", "raw_text",
+                "authorization", "gps", "latitude", "longitude", "geolocation", "photo_bytes",
+            )):
                 out[key] = "[redacted]"
             else:
                 out[key] = redact_value(item)

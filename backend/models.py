@@ -806,6 +806,8 @@ class ARMeasurement(BaseModel):
     run_id: Optional[str] = None
     station_index: Optional[int] = None
     origin_label: str = ""
+    device_id: str = ""
+    scale_factor: Optional[float] = None
     created_by: str = ""
     created_at: str = Field(default_factory=now_iso)
 
@@ -833,6 +835,7 @@ class ARMeasurementCreate(BaseModel):
     run_id: Optional[str] = None
     station_index: Optional[int] = None
     origin_label: str = ""
+    device_id: str = ""
 
 
 class TapeShotIn(BaseModel):
@@ -862,6 +865,7 @@ class TapeRunCreate(BaseModel):
     device_model: str = ""
     lidar: bool = False
     note: str = ""
+    device_id: str = ""
 
 
 class TapeRunPreview(BaseModel):
@@ -885,6 +889,17 @@ class DeviceRegistrationCreate(BaseModel):
     device_class: str = "field"
     push_token: str = ""
     model: str = ""
+
+
+class TapeCalibrationCreate(BaseModel):
+    device_id: str = ""
+    known_length_ft: float
+    measured_length_ft: float
+    engine: str = "web"
+    lidar: bool = False
+    device_class: str = "field"
+    device_model: str = ""
+    note: str = ""
 
 
 # ---------- Strand roll mill traceability ----------

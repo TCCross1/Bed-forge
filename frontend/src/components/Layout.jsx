@@ -150,6 +150,7 @@ export function ARMeasureLink({ beamId, purpose = "tape", compact = false }) {
     <Link
       to={`/measure?${qs.toString()}`}
       data-testid="ar-measure-entry"
+      title="Digital tape — daily calibration, not the Fresh Test tab"
       className="min-h-12 px-4 border border-[#1C2230] rounded-none flex items-center gap-2 text-sm font-semibold uppercase tracking-wider hover:border-primary hover:text-primary"
     >
       <ScanLine className="w-4 h-4" /> {compact ? "Tape" : "Digital Tape"}

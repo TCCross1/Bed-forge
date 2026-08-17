@@ -25,7 +25,9 @@ public class ARMeasurePlugin: CAPPlugin, CAPBridgedPlugin {
             "arkit": arkit,
             "lidar": lidar,
             "torch": AVCaptureDevice.default(for: .video)?.hasTorch ?? false,
-            "engine": lidar ? "arkit-lidar" : (arkit ? "arkit" : "none")
+            "engine": lidar ? "arkit-lidar" : (arkit ? "arkit" : "none"),
+            "honesty_label": lidar ? "ARKit with LiDAR" : (arkit ? "ARKit world tracking (no LiDAR)" : "ARKit not supported"),
+            "web_is_arkit": false
         ])
     }
 

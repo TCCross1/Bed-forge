@@ -83,8 +83,10 @@ def ai_tape_review(compare: dict) -> dict:
 
         compact = _compact_compare(compare)
         prompt = (
-            "You are a precast QC assistant. A tech used an iPhone digital tape "
-            "(flashlight + self-leveling gauge). Origin is the header / marked end. "
+            "You are a precast QC assistant. A tech used a digital tape. "
+            "Browser/web shots are camera + gravity (not ARKit, not LiDAR). "
+            "Native iPhone plugin shots are ARKit (LiDAR only when the hardware supports it). "
+            "Origin is the header / marked end. "
             "Stations are feet from that origin. Compare measured stations to the "
             "shop-drawing / digital-twin design table.\n"
             "Use ONLY the numbers given. Do not invent measurements.\n"

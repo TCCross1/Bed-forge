@@ -1,16 +1,29 @@
-"""AR level math, digital-tape vs twin matching, and QC narrative fallback."""
+"""AR level math, digital-tape vs twin matching, daily calibration lock, and QC narrative fallback."""
 import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from ar_math import (
+    CAL_EXPIRED_DETAIL,
+    CAL_LOCK_HOURS,
+    CAL_TOLERANCE_PCT,
     STATION_MATCH_WINDOW_FT,
+    WEB_HONESTY_LABEL,
+    apply_device_scale,
+    cal_expires_at,
+    cal_lock_status,
     compare_tape_shots,
     derive_metrics,
     design_stations_from_spec,
+    evaluate_calibration,
     evaluate_level,
+    measure_block,
     meters_to_in,
+    public_cal_audit,
+    sanitize_engine,
+    scale_for_device,
 )
 from models import LEVEL_TOLERANCE_IN
 from tape_ai import heuristic_tape_summary
@@ -126,3 +139,140 @@ def test_heuristic_summary_names_rescan_stations():
     assert review["rescan_labels"]
     assert "Insert A" in review["rescan_labels"][0]
     assert "rescan" in review["summary"].lower()
+
+
+def test_cal_tolerance_is_point_one_five_percent():
+    assert CAL_TOLERANCE_PCT == 0.15
+    assert CAL_LOCK_HOURS == 24
+    edge = evaluate_calibration(10.0, 10.015)
+    assert edge["passed"] is True
+    assert abs(edge["error_pct"] - 0.15) < 1e-6
+    over = evaluate_calibration(10.0, 10.016)
+    assert over["passed"] is False
+    assert over["error_pct"] > 0.15
+    under = evaluate_calibration(10.0, 9.985)
+    assert under["passed"] is True
+    fail_low = evaluate_calibration(10.0, 9.98)
+    assert fail_low["passed"] is False
+    assert fail_low["scale_factor"] == round(10.0 / 9.98, 8)
+
+
+def test_failed_cal_does_not_unlock():
+    result = evaluate_calibration(10.0, 10.05)
+    assert result["passed"] is False
+    rec = {
+        "device_id": "phone-a",
+        "passed": False,
+        "scale_factor": result["scale_factor"],
+        "calibrated_at": datetime.now(timezone.utc).isoformat(),
+        "expires_at": cal_expires_at().isoformat(),
+    }
+    status = cal_lock_status(rec)
+    assert status["allowed"] is False
+    assert status["http_code"] == 409
+    blocked = measure_block(status)
+    assert blocked is not None
+    assert blocked[0] == 409
+
+
+def test_24h_lock_allows_then_expires_409():
+    now = datetime(2026, 8, 17, 12, 0, tzinfo=timezone.utc)
+    rec = {
+        "device_id": "phone-a",
+        "passed": True,
+        "scale_factor": 0.999,
+        "calibrated_at": now.isoformat(),
+        "expires_at": (now + timedelta(hours=24)).isoformat(),
+        "calibrated_by": "Dana",
+        "known_length_ft": 10.0,
+        "measured_length_ft": 10.01,
+    }
+    live = cal_lock_status(rec, now=now + timedelta(hours=23, minutes=59))
+    assert live["allowed"] is True
+    assert live["http_code"] == 200
+    assert live["remaining_seconds"] > 0
+    assert measure_block(live) is None
+    dead = cal_lock_status(rec, now=now + timedelta(hours=24, seconds=1))
+    assert dead["allowed"] is False
+    assert dead["http_code"] == 409
+    assert dead["detail"] == CAL_EXPIRED_DETAIL
+    code, detail = measure_block(dead)
+    assert code == 409
+    assert "expired" in detail.lower()
+
+
+def test_missing_cal_is_409():
+    status = cal_lock_status(None)
+    assert status["allowed"] is False
+    assert status["http_code"] == 409
+    assert measure_block(status)[0] == 409
+
+
+def test_scale_is_per_device_not_plant_wide():
+    now = datetime(2026, 8, 17, 12, 0, tzinfo=timezone.utc)
+    phone_a = {
+        "device_id": "phone-a",
+        "passed": True,
+        "scale_factor": 0.9985,
+        "calibrated_at": now.isoformat(),
+        "expires_at": (now + timedelta(hours=24)).isoformat(),
+    }
+    phone_b = {
+        "device_id": "phone-b",
+        "passed": True,
+        "scale_factor": 1.012,
+        "calibrated_at": now.isoformat(),
+        "expires_at": (now + timedelta(hours=24)).isoformat(),
+    }
+    assert scale_for_device(phone_a, "phone-a", now=now) == 0.9985
+    assert scale_for_device(phone_b, "phone-b", now=now) == 1.012
+    assert scale_for_device(phone_a, "phone-b", now=now) is None
+    assert scale_for_device(phone_b, "phone-a", now=now) is None
+    assert apply_device_scale(10.0, 0.9985) == 9.985
+    expired = {**phone_a, "expires_at": (now - timedelta(minutes=1)).isoformat()}
+    assert scale_for_device(expired, "phone-a", now=now) is None
+
+
+def test_web_engine_cannot_claim_lidar_or_arkit():
+    web = sanitize_engine("web", lidar=True)
+    assert web["lidar"] is False
+    assert web["is_native"] is False
+    assert web["honesty_label"] == WEB_HONESTY_LABEL
+    assert "not ARKit" in web["honesty_label"]
+    gravity = sanitize_engine("gravity", lidar=True)
+    assert gravity["lidar"] is False
+    assert "LiDAR" in gravity["honesty_label"] and "not" in gravity["honesty_label"]
+    native = sanitize_engine("arkit", lidar=False)
+    assert native["is_native"] is True
+    assert native["lidar"] is False
+    assert "ARKit" in native["honesty_label"]
+    lidar = sanitize_engine("arkit-lidar", lidar=True)
+    assert lidar["lidar"] is True
+    assert lidar["honesty_label"].startswith("ARKit")
+    assert "LiDAR" in lidar["honesty_label"]
+
+
+def test_cal_audit_omits_photo_and_gps():
+    row = public_cal_audit({
+        "id": "c1",
+        "device_id": "phone-a",
+        "known_length_ft": 10.0,
+        "measured_length_ft": 10.01,
+        "scale_factor": 0.999,
+        "error_pct": 0.1,
+        "passed": True,
+        "engine": "web",
+        "calibrated_by": "Dana",
+        "calibrated_at": "2026-08-17T12:00:00+00:00",
+        "photo_data": "VERY-LONG-BASE64",
+        "gps": {"lat": 38.2, "lng": -85.7},
+        "latitude": 38.2,
+    })
+    blob = str(row)
+    assert "VERY-LONG-BASE64" not in blob
+    assert "38.2" not in blob
+    assert "gps" not in row
+    assert "photo_data" not in row
+    assert row["passed"] is True
+    assert row["device_id"] == "phone-a"
+    assert row["scale_factor"] == 0.999

@@ -102,6 +102,14 @@ export const ARTICLES = [
     body: "Every fail becomes one record: twin pin, out-of-tolerance shot, fresh-test fail, low cylinder, or a tech filing by hand. Open NCR from the sidebar, Board open-count, More, or the File NCR toast after a fail. Workflow is open → investigating → corrective action → verification → closed. Photos for most categories. Major/Critical need root cause, CA, and supervisor verification — the server 409s a silent close. The analyst may show frequency — it never auto-closes and never changes the mix. An NCR does not bypass tension or release gates.",
   },
   {
+    id: "tape",
+    tags: ["tape", "digital", "calibrat", "arkit", "lidar", "scale", "camera", "measure", "0.15", "lock", "gravity"],
+    title: "Digital tape and daily calibration",
+    tutorial: "qc",
+    route: "/measure",
+    body: "Open Digital Tape from More on the phone, Tape Review in the desk sidebar, Board tape card, or a Tape button on twin/inspect — not the gold Fresh Test tab. Browser tape is camera + gravity, not ARKit and not LiDAR. The native iPhone plugin is the ARKit path (LiDAR only on supported hardware). Calibrate this device against a known length. It must land within ±0.15% or the tape stays locked. A pass unlocks this phone for 24 hours and stores a scale factor only for this device — never plant-wide. Expired cal 409s until you recalibrate. Who, when, device, known/measured, scale, and pass/fail are audited. Photos and GPS are not logged.",
+  },
+  {
     id: "override",
     tags: ["override", "unlock", "bypass", "gate", "command", "manager"],
     title: "Overrides",
@@ -212,6 +220,12 @@ export const ROUTE_WALKS = {
     { testid: "ncr-save", label: "File — then add photos and containment" },
     { testid: "ncr-root-cause", label: "Root cause — required to close Major" },
   ],
+  "/measure": [
+    { testid: "ar-honesty", label: "Honesty line — camera/gravity on web, ARKit only on the iPhone plugin" },
+    { testid: "ar-cal-panel", label: "Daily calibration — known length vs this phone, ±0.15%" },
+    { testid: "ar-cal-submit", label: "Calibrate this device — 24h lock, per-phone scale" },
+    { testid: "ar-start", label: "Start digital tape — blocked until this device is in cal" },
+  ],
 };
 
 const STOP = new Set(["the", "a", "an", "and", "or", "to", "of", "in", "on", "for", "is", "it", "how", "what", "why", "do", "i", "we", "my", "this", "that"]);
@@ -253,6 +267,7 @@ export function suggestedPrompts(route = "/", role = "qc_tech") {
     "/camber": ["Which camber points do I take?", "What if release strength is short?"],
     "/finish": ["What is Marked End ID?", "Walk me through this screen"],
     "/ncr": ["How do I file an NCR?", "Who can close a Major?", "Walk me through this screen"],
+    "/measure": ["How do I calibrate the tape?", "Is the browser tape ARKit?", "Walk me through this screen"],
     "/release": ["What is required before the truck leaves?"],
     "/tags": ["How do I print cylinder tags?"],
     "/qr": ["How do beam QR codes work?"],
@@ -334,6 +349,17 @@ export function localAnswer(question, route = "/", role = "qc_tech") {
       navigateTo: "/ncr",
       highlights: walkForRoute("/ncr"),
       articles: retrieveArticles("ncr"),
+    };
+  }
+  if (/calibrat|digital tape|arkit|lidar|tape measure|0\.15/.test(q.toLowerCase())) {
+    return {
+      source: "local",
+      text: retrieveArticles("digital tape calibration arkit")[0]?.body
+        + " Open Digital Tape from More or the sidebar. Calibrate this phone first. Browser is not ARKit.",
+      tutorial: "qc",
+      navigateTo: "/measure",
+      highlights: walkForRoute("/measure"),
+      articles: retrieveArticles("tape calibration"),
     };
   }
   if (/show me tension|tension tutorial|drape|hold-down/.test(q.toLowerCase())) {

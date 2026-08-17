@@ -2,7 +2,7 @@
 
 export const OFFLINE_DB = "bedforge-offline";
 export const OFFLINE_STORE = "queue";
-export const FIELD_WRITE_RE = /\/(inspections|tension-reports|camber-readings|finish-sheets|pre-delivery|ar-measurements|ar-tape-runs|maturity\/samples|strand-rolls|fresh-tests|batches|mix-designs)$/;
+export const FIELD_WRITE_RE = /\/(inspections|tension-reports|camber-readings|finish-sheets|pre-delivery|ar-measurements|ar-tape-runs|tape-calibration|maturity\/samples|strand-rolls|fresh-tests|batches|mix-designs)$/;
 
 function openDb() {
   return new Promise((resolve, reject) => {
@@ -102,6 +102,7 @@ export function isFieldWrite(url = "", method = "get") {
   if (/\/beam-specs\/[^/]+\/hold-downs\/[^/]+\/check$/.test(path)) return true;
   if (/\/beams\/[^/]+$/.test(path) && verb === "patch") return true;
   if (path.includes("/ar-tape-runs")) return true;
+  if (path.includes("/tape-calibration")) return true;
   if (path.includes("/cylinders/") && path.includes("/crush")) return true;
   if (/\/batches\/[^/]+$/.test(path) && verb === "patch") return true;
   if (/\/batches\/[^/]+\/link-qc$/.test(path)) return true;

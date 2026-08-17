@@ -64,6 +64,8 @@ def test_redact_strips_secrets_and_photos():
         "access_token": "abc",
         "photo_data": "AAAA",
         "raw_text": "HEAT 123",
+        "latitude": 38.2,
+        "gps": {"lat": 38.2, "lng": -85.7},
         "nested": {"secret": "nope", "mark": "B1"},
     }
     clean = redact_value(dirty)
@@ -72,6 +74,8 @@ def test_redact_strips_secrets_and_photos():
     assert clean["access_token"] == "[redacted]"
     assert clean["photo_data"] == "[redacted]"
     assert clean["raw_text"] == "[redacted]"
+    assert clean["latitude"] == "[redacted]"
+    assert clean["gps"] == "[redacted]"
     assert clean["nested"]["secret"] == "[redacted]"
     assert clean["nested"]["mark"] == "B1"
 
