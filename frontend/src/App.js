@@ -1,6 +1,8 @@
 import "./App.css";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider, useAuth } from "./context/AuthContext";
+import { DeviceProvider } from "./context/DeviceContext";
+import { SyncProvider } from "./context/SyncContext";
 import { Toaster } from "sonner";
 import { Loader2 } from "lucide-react";
 import Login from "./pages/Login";
@@ -14,6 +16,7 @@ import PreDelivery from "./pages/PreDelivery";
 import FormsExport from "./pages/FormsExport";
 import Drawings from "./pages/Drawings";
 import BedPlanner from "./pages/BedPlanner";
+import ARMeasure from "./pages/ARMeasure";
 
 function Protected({ children }) {
   const { user, ready } = useAuth();
@@ -47,6 +50,7 @@ function AppRoutes() {
       <Route path="/finish" element={<Protected><FinishSheet /></Protected>} />
       <Route path="/release" element={<Protected><PreDelivery /></Protected>} />
       <Route path="/forms" element={<Protected><FormsExport /></Protected>} />
+      <Route path="/measure" element={<Protected><ARMeasure /></Protected>} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
@@ -55,12 +59,16 @@ function AppRoutes() {
 function App() {
   return (
     <div className="App">
-      <AuthProvider>
-        <BrowserRouter>
-          <AppRoutes />
-        </BrowserRouter>
-        <Toaster theme="dark" position="top-right" richColors />
-      </AuthProvider>
+      <DeviceProvider>
+        <AuthProvider>
+          <BrowserRouter>
+            <SyncProvider>
+              <AppRoutes />
+            </SyncProvider>
+          </BrowserRouter>
+          <Toaster theme="dark" position="top-right" richColors />
+        </AuthProvider>
+      </DeviceProvider>
     </div>
   );
 }

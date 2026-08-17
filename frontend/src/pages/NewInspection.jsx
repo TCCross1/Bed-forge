@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import api, { formatApiErrorDetail } from "../lib/api";
-import Layout, { PageHeader, Field, inputClass, cardClass } from "../components/Layout";
+import Layout, { PageHeader, Field, inputClass, cardClass, ARMeasureLink } from "../components/Layout";
 import { toast } from "sonner";
 import { CheckCircle2, XCircle, PauseCircle, ChevronRight, ChevronLeft, Loader2 } from "lucide-react";
 
@@ -186,7 +186,11 @@ export default function NewInspection() {
 
   return (
     <Layout>
-      <PageHeader title="Guided Inspection (QIR)" subtitle="Prestress form sections · QIR 2026.6.1" />
+      <PageHeader
+        title="Guided Inspection (QIR)"
+        subtitle="Prestress form sections · QIR 2026.6.1"
+        right={<ARMeasureLink beamId={beamId} purpose="layout" />}
+      />
       <div className="p-4 sm:p-6 lg:p-8 max-w-4xl">
         <div className={`${cardClass} p-4 sm:p-6 mb-4 sm:mb-6`}>
           <Field label="Beam Under Inspection">

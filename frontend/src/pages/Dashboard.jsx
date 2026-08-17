@@ -1,12 +1,14 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import api, { formatApiErrorDetail } from "../lib/api";
-import Layout, { PageHeader, cardClass } from "../components/Layout";
+import Layout, { PageHeader, cardClass, ARMeasureLink } from "../components/Layout";
 import PlantFloor from "../components/PlantFloor";
 import { bedState, productionStatus, qcState } from "../lib/constants";
 import { isoToday } from "../lib/bedLayout";
-import { Activity, Layers, CheckCircle2, AlertTriangle, XCircle, Loader2, RefreshCw, Box, LayoutGrid } from "lucide-react";
+import { Activity, Layers, CheckCircle2, AlertTriangle, XCircle, Loader2, RefreshCw, Box, LayoutGrid, ScanLine } from "lucide-react";
 import { toast } from "sonner";
+import { useDevice } from "../context/DeviceContext";
+import { useSync } from "../context/SyncContext";
 
 function Stat({ label, value, color, icon: Icon, testid }) {
   return (
@@ -73,6 +75,8 @@ function BedCard({ bed, onOpen, onOpenBeam }) {
 }
 
 export default function Dashboard() {
+  const device = useDevice();
+  const { events, measurements } = useSync();
   const [data, setData] = useState(null);
   const [plant, setPlant] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -170,6 +174,22 @@ export default function Dashboard() {
               <Stat label="Failed" value={s.failed} color="#FF3366" icon={XCircle} testid="stat-failed" />
             </div>
 
+            {(measurements[0] || events[0]) && (
+              <div className={`${cardClass} p-4 mb-6 flex flex-col sm:flex-row sm:items-center justify-between gap-3`} data-testid="live-sync-strip">
+                <div>
+                  <div className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground flex items-center gap-2">
+                    <ScanLine className="w-3 h-3" /> Live field sync
+                  </div>
+                  <div className="font-mono text-sm mt-1">
+                    {measurements[0]
+                      ? `${measurements[0].level ? "LEVEL" : "OFF LEVEL"} · ${measurements[0].distance_ft} ft · Δ${measurements[0].delta_height_in}" · ${measurements[0].engine}`
+                      : events[0]?.title}
+                  </div>
+                </div>
+                <ARMeasureLink compact={device.field} />
+              </div>
+            )}
+
             {view === "twins" ? (
               <div className={`${cardClass} overflow-hidden mb-4`}>
                 <div className="px-4 py-3 border-b border-[#1C2230] flex items-center justify-between">
@@ -178,7 +198,7 @@ export default function Dashboard() {
                 </div>
                 <PlantFloor
                   plant={plant}
-                  height={520}
+                  height={device.field ? 340 : 520}
                   onSelectBed={openBed}
                   onSelectBeam={openBeam}
                 />

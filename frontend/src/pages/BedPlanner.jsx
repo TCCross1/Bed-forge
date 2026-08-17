@@ -1,9 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import api, { formatApiErrorDetail } from "../lib/api";
-import Layout, { PageHeader, cardClass, inputClass } from "../components/Layout";
+import Layout, { PageHeader, cardClass, inputClass, ARMeasureLink } from "../components/Layout";
 import BedViewer from "../components/BedViewer";
 import { useAuth } from "../context/AuthContext";
+import { useDevice } from "../context/DeviceContext";
 import { PRODUCTION_STATUS_STYLES, canPlan, productionStatus } from "../lib/constants";
 import { addDays, dragPayload, isoToday, readDragPayload, weekStartMonday } from "../lib/bedLayout";
 import { toast } from "sonner";
@@ -18,6 +19,7 @@ function setParam(params, key, value) {
 
 export default function BedPlanner() {
   const { user } = useAuth();
+  const device = useDevice();
   const plan = canPlan(user?.role);
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
@@ -200,13 +202,16 @@ export default function BedPlanner() {
         title="Bed Twin Planner"
         subtitle="Assign job beams to a casting bed and day — order on the bed is the production sequence"
         right={
-          <button
-            data-testid="refresh-planner"
-            onClick={load}
-            className="min-h-12 px-4 border border-[#1C2230] rounded-none flex items-center gap-2 text-sm font-semibold uppercase tracking-wider hover:border-primary hover:text-primary"
-          >
-            <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} /> Refresh
-          </button>
+          <div className="flex flex-wrap gap-2 justify-end">
+            <ARMeasureLink beamId={highlightBeam} purpose="layout" />
+            <button
+              data-testid="refresh-planner"
+              onClick={load}
+              className="min-h-12 px-4 border border-[#1C2230] rounded-none flex items-center gap-2 text-sm font-semibold uppercase tracking-wider hover:border-primary hover:text-primary"
+            >
+              <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} /> Refresh
+            </button>
+          </div>
         }
       />
 
@@ -326,7 +331,7 @@ export default function BedPlanner() {
                 {layout && (
                   <BedViewer
                     layout={layout}
-                    height={420}
+                    height={device.field ? 280 : 420}
                     onSelectBeam={(row) => {
                       if (row?.beam_id) navigate(`/twin?beam=${row.beam_id}`);
                     }}

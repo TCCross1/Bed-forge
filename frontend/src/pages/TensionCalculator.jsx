@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import api, { formatApiErrorDetail } from "../lib/api";
-import Layout, { PageHeader, Field, inputClass, cardClass } from "../components/Layout";
+import Layout, { PageHeader, Field, inputClass, cardClass, ARMeasureLink } from "../components/Layout";
 import TensionTwin from "../components/TensionTwin";
 import {
   HOLD_DOWN_STATUS_COLORS,
@@ -12,6 +12,7 @@ import {
 } from "../lib/beamSpec";
 import { Calculator, CheckCircle2, XCircle, Save, Loader2, Upload } from "lucide-react";
 import { toast } from "sonner";
+import { useDevice } from "../context/DeviceContext";
 
 const STRAND_PRESETS = [
   { size: "0.5in", area: 0.153 },
@@ -39,6 +40,7 @@ function SummaryChip({ label, value, color, testid }) {
 }
 
 export default function TensionCalculator() {
+  const device = useDevice();
   const [params] = useSearchParams();
   const [beams, setBeams] = useState([]);
   const [selectedId, setSelectedId] = useState(params.get("beam") || "");
@@ -230,12 +232,15 @@ export default function TensionCalculator() {
         title="Tension Twin"
         subtitle="Tap any strand or I-beam hold-down — pattern locked from the shop drawing"
         right={
-          <Link
-            to="/drawings"
-            className="min-h-12 px-4 border border-[#1C2230] rounded-none flex items-center gap-2 text-sm font-semibold uppercase tracking-wider hover:border-primary hover:text-primary"
-          >
-            <Upload className="w-4 h-4" /> Drawings
-          </Link>
+          <div className="flex flex-wrap gap-2 justify-end">
+            <ARMeasureLink beamId={selectedId} purpose="layout" />
+            <Link
+              to="/drawings"
+              className="min-h-12 px-4 border border-[#1C2230] rounded-none flex items-center gap-2 text-sm font-semibold uppercase tracking-wider hover:border-primary hover:text-primary"
+            >
+              <Upload className="w-4 h-4" /> Drawings
+            </Link>
+          </div>
         }
       />
 
@@ -299,7 +304,7 @@ export default function TensionCalculator() {
               {spec ? `${spec.product_name} · ${spec.beam_mark}` : "Select a beam with a locked BeamSpec"}
             </div>
             {loading ? (
-              <div className="h-[520px] flex items-center justify-center text-muted-foreground">
+              <div className={`${device.field ? "h-[320px]" : "h-[520px]"} flex items-center justify-center text-muted-foreground`}>
                 <Loader2 className="w-6 h-6 animate-spin mr-2" /> Loading tension twin…
               </div>
             ) : spec ? (
@@ -310,7 +315,7 @@ export default function TensionCalculator() {
                 layer={layer}
                 selected={selected}
                 onSelect={pick}
-                height={520}
+                height={device.field ? 320 : 520}
               />
             ) : (
               <div className="h-[320px] flex items-center justify-center text-sm font-mono text-muted-foreground px-6 text-center">

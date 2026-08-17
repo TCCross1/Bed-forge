@@ -399,3 +399,71 @@ class AnomalyCreate(BaseModel):
     length_in: float = 0.0
     note: str = ""
     photo_url: str = ""
+
+
+LEVEL_TOLERANCE_IN = 0.125  # 1/8"
+
+
+class ARMeasurement(BaseModel):
+    id: str = Field(default_factory=new_id)
+    beam_id: Optional[str] = None
+    bed_id: Optional[str] = None
+    purpose: str = "level"
+    point_a: Dict[str, float] = Field(default_factory=lambda: {"x": 0.0, "y": 0.0, "z": 0.0})
+    point_b: Dict[str, float] = Field(default_factory=lambda: {"x": 0.0, "y": 0.0, "z": 0.0})
+    distance_ft: float = 0.0
+    delta_height_in: float = 0.0
+    level: bool = False
+    forced: bool = False
+    confidence: float = 0.0
+    sample_count: int = 12
+    lidar: bool = False
+    engine: str = "web"
+    device_class: str = "field"
+    device_model: str = ""
+    warning: str = ""
+    note: str = ""
+    photo_data: str = ""
+    element_id: Optional[str] = None
+    created_by: str = ""
+    created_at: str = Field(default_factory=now_iso)
+
+
+class ARMeasurementCreate(BaseModel):
+    beam_id: Optional[str] = None
+    bed_id: Optional[str] = None
+    purpose: str = "level"
+    point_a: Dict[str, float]
+    point_b: Dict[str, float]
+    distance_ft: Optional[float] = None
+    delta_height_in: Optional[float] = None
+    level: Optional[bool] = None
+    forced: bool = False
+    confidence: float = 0.0
+    sample_count: int = 12
+    lidar: bool = False
+    engine: str = "web"
+    device_class: str = "field"
+    device_model: str = ""
+    warning: str = ""
+    note: str = ""
+    photo_data: str = ""
+    element_id: Optional[str] = None
+
+
+class DeviceRegistration(BaseModel):
+    id: str = Field(default_factory=new_id)
+    platform: str = "ios"
+    device_class: str = "field"
+    push_token: str = ""
+    model: str = ""
+    user_id: str = ""
+    created_at: str = Field(default_factory=now_iso)
+    updated_at: str = Field(default_factory=now_iso)
+
+
+class DeviceRegistrationCreate(BaseModel):
+    platform: str = "web"
+    device_class: str = "field"
+    push_token: str = ""
+    model: str = ""

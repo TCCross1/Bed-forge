@@ -1,17 +1,19 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import api, { formatApiErrorDetail } from "../lib/api";
-import Layout, { PageHeader, Field, inputClass, cardClass } from "../components/Layout";
+import Layout, { PageHeader, Field, inputClass, cardClass, ARMeasureLink } from "../components/Layout";
 import BeamViewer from "../components/BeamViewer";
 import { useAuth } from "../context/AuthContext";
+import { useSync } from "../context/SyncContext";
 import { canPlan, qcState } from "../lib/constants";
 import { isoToday } from "../lib/bedLayout";
 import { ELEMENT_COLORS, KIND_LABELS, hardwareColor, latestMeasurements } from "../lib/beamSpec";
 import { toast } from "sonner";
-import { Loader2, MapPin, Ruler, Upload, CalendarDays } from "lucide-react";
+import { Loader2, MapPin, Ruler, Upload, CalendarDays, ScanLine } from "lucide-react";
 
 export default function DigitalTwin() {
   const { user } = useAuth();
+  const { measurements: liveAr } = useSync();
   const plan = canPlan(user?.role);
   const [params] = useSearchParams();
   const [beams, setBeams] = useState([]);
@@ -64,6 +66,8 @@ export default function DigitalTwin() {
     }
   };
 
+  const latestArId = (liveAr || []).find((m) => m.beam_id === selectedId)?.id;
+
   useEffect(() => {
     if (!selectedId) return undefined;
     let cancelled = false;
@@ -75,7 +79,7 @@ export default function DigitalTwin() {
         toast.error(formatApiErrorDetail(err.response?.data?.detail) || "Failed to load beam twin");
       });
     return () => { cancelled = true; };
-  }, [selectedId]);
+  }, [selectedId, latestArId]);
 
   const spec = beam?.spec || null;
   const measurementMap = useMemo(() => latestMeasurements(beam?.measurements), [beam]);
@@ -174,7 +178,8 @@ export default function DigitalTwin() {
         title="Digital Twin"
         subtitle={spec ? `${spec.product_name} · ${spec.geometry?.length_ft}' · ${spec.status}` : "Upload a shop drawing to generate a blueprint-accurate twin"}
         right={
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2 justify-end">
+            <ARMeasureLink beamId={selectedId} purpose="level" />
             <Link
               to={selectedId ? `/planner?beam=${selectedId}` : "/planner"}
               className="min-h-12 px-4 border border-[#1C2230] rounded-none flex items-center gap-2 text-sm font-semibold uppercase tracking-wider hover:border-primary hover:text-primary"
@@ -353,6 +358,21 @@ export default function DigitalTwin() {
                   Δ {measurementMap[selectedHw.id].delta_in}" · {measurementMap[selectedHw.id].within_tolerance ? "PASS" : "FAIL"}
                 </div>
               )}
+              <div className="border-t border-[#1C2230] pt-3" data-testid="twin-ar-history">
+                <div className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground mb-2 flex items-center gap-2">
+                  <ScanLine className="w-3 h-3" /> AR level history
+                </div>
+                {(beam?.ar_measurements || []).slice(0, 6).map((m) => (
+                  <div key={m.id} className="border-b border-[#1C2230] py-2 font-mono text-[11px]">
+                    <span style={{ color: m.level ? "#00E676" : "#FF3366" }}>{m.level ? "LEVEL" : "OFF"}</span>
+                    {" · "}{m.distance_ft} ft · Δ{m.delta_height_in}" · {m.engine}
+                    {m.forced ? " · FORCED" : ""}
+                  </div>
+                ))}
+                {!(beam?.ar_measurements || []).length && (
+                  <div className="text-xs font-mono text-muted-foreground">No AR shots on this beam yet.</div>
+                )}
+              </div>
             </div>
           )}
 

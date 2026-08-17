@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import api, { formatApiErrorDetail } from "../lib/api";
-import Layout, { PageHeader, Field, inputClass, cardClass } from "../components/Layout";
+import Layout, { PageHeader, Field, inputClass, cardClass, ARMeasureLink } from "../components/Layout";
 import { toast } from "sonner";
 import { Loader2, Ruler, CheckCircle2, XCircle } from "lucide-react";
 
@@ -95,7 +95,11 @@ export default function CamberSheet() {
 
   return (
     <Layout>
-      <PageHeader title="Camber / Strength Sheet" subtitle="Release strength + 3-point camber (Marked / Mid / Unmarked)" />
+      <PageHeader
+        title="Camber / Strength Sheet"
+        subtitle="Release strength + 3-point camber (Marked / Mid / Unmarked)"
+        right={<ARMeasureLink beamId={beamId} purpose="camber" />}
+      />
       <div className="p-4 sm:p-6 lg:p-8 grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6 max-w-6xl">
         <div className={`${cardClass} p-5 sm:p-8 space-y-4`}>
           <h3 className="font-display font-bold uppercase tracking-wider text-lg flex items-center gap-2">

@@ -91,3 +91,9 @@ frontend/node_modules/.cache/default-development/0.pack
 
 # Uploaded shop drawings (authenticated download only)
 backend/uploads/
+
+# Capacitor native shells (generated). Source plugins live in native/ios/.
+ios/App/Pods/
+ios/App/App/public/
+android/app/build/
+*.xcuserstate

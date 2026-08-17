@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { NavLink, useNavigate, useLocation } from "react-router-dom";
+import { Link, NavLink, useNavigate, useLocation } from "react-router-dom";
 import {
   LayoutGrid,
   Box,
@@ -14,8 +14,10 @@ import {
   X,
   Upload,
   CalendarDays,
+  ScanLine,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
+import { useDevice } from "../context/DeviceContext";
 import { ROLE_LABELS } from "../lib/constants";
 
 export const MARK_SRC = "/brand/bedforge-mark.png";
@@ -53,12 +55,29 @@ const PRIMARY_NAV = [
   { to: "/forms", label: "Forms", icon: FileSpreadsheet, testid: "nav-forms" },
 ];
 
+const FIELD_NAV = [
+  { to: "/", label: "Board", icon: LayoutGrid, testid: "nav-dashboard" },
+  { to: "/twin", label: "Twin", icon: Box, testid: "nav-twin" },
+  { to: "/measure", label: "AR", icon: ScanLine, testid: "nav-measure" },
+  { to: "/tension", label: "Tension", icon: Calculator, testid: "nav-tension" },
+];
+
 const SECONDARY_NAV = [
   { to: "/planner", label: "Planner", icon: CalendarDays, testid: "nav-planner" },
   { to: "/drawings", label: "Drawings", icon: Upload, testid: "nav-drawings" },
   { to: "/camber", label: "Camber", icon: Ruler, testid: "nav-camber" },
   { to: "/finish", label: "Finish", icon: Sparkles, testid: "nav-finish" },
   { to: "/release", label: "Release", icon: Truck, testid: "nav-release" },
+  { to: "/measure", label: "AR Measure", icon: ScanLine, testid: "nav-measure" },
+];
+
+const COMMAND_SECONDARY = [
+  { to: "/planner", label: "Planner", icon: CalendarDays, testid: "nav-planner" },
+  { to: "/drawings", label: "Drawings", icon: Upload, testid: "nav-drawings" },
+  { to: "/camber", label: "Camber", icon: Ruler, testid: "nav-camber" },
+  { to: "/finish", label: "Finish", icon: Sparkles, testid: "nav-finish" },
+  { to: "/release", label: "Release", icon: Truck, testid: "nav-release" },
+  { to: "/measure", label: "AR Review", icon: ScanLine, testid: "nav-measure" },
 ];
 
 function linkClass(isActive) {
@@ -88,11 +107,35 @@ function NavItems({ items, onNavigate, endHome }) {
   });
 }
 
+export function ARMeasureLink({ beamId, purpose = "level", compact = false }) {
+  const qs = new URLSearchParams();
+  if (beamId) qs.set("beam", beamId);
+  if (purpose) qs.set("purpose", purpose);
+  return (
+    <Link
+      to={`/measure?${qs.toString()}`}
+      data-testid="ar-measure-entry"
+      className="min-h-12 px-4 border border-[#1C2230] rounded-none flex items-center gap-2 text-sm font-semibold uppercase tracking-wider hover:border-primary hover:text-primary"
+    >
+      <ScanLine className="w-4 h-4" /> {compact ? "AR" : "AR Measure"}
+    </Link>
+  );
+}
+
 export default function Layout({ children }) {
   const { user, logout } = useAuth();
+  const device = useDevice();
   const navigate = useNavigate();
   const location = useLocation();
   const [moreOpen, setMoreOpen] = useState(false);
+  const command = device.command;
+  const field = device.field;
+  const secondary = command ? COMMAND_SECONDARY : SECONDARY_NAV;
+  const fieldMore = [
+    { to: "/inspection", label: "Inspect", icon: ClipboardCheck, testid: "nav-inspection" },
+    { to: "/forms", label: "Forms", icon: FileSpreadsheet, testid: "nav-forms" },
+    ...SECONDARY_NAV.filter((i) => i.to !== "/measure"),
+  ];
 
   const signOut = () => {
     logout();
@@ -100,9 +143,9 @@ export default function Layout({ children }) {
   };
 
   return (
-    <div className="min-h-screen flex bg-[#0A0C10] grain">
+    <div className={`min-h-screen flex bg-[#0A0C10] grain ${field ? "bf-field" : "bf-command"}`} data-device={field ? "field" : "command"}>
       <aside
-        className="hidden lg:flex w-64 shrink-0 border-r border-[#1C2230] bg-[#0C0E13] flex-col fixed h-screen z-20"
+        className={`${command ? "flex" : "hidden"} w-64 shrink-0 border-r border-[#1C2230] bg-[#0C0E13] flex-col fixed h-screen z-20`}
         data-testid="desktop-sidebar"
       >
         <div className="h-24 flex items-center justify-start px-4 border-b border-[#1C2230]">
@@ -112,10 +155,10 @@ export default function Layout({ children }) {
         </div>
 
         <nav className="flex-1 py-4 flex flex-col gap-1 px-3 overflow-y-auto">
-          <div className="px-4 pb-2 text-[10px] font-mono uppercase tracking-[0.25em] text-muted-foreground">Primary</div>
+          <div className="px-4 pb-2 text-[10px] font-mono uppercase tracking-[0.25em] text-muted-foreground">Command</div>
           <NavItems items={PRIMARY_NAV} endHome />
-          <div className="px-4 pt-5 pb-2 text-[10px] font-mono uppercase tracking-[0.25em] text-muted-foreground">Secondary</div>
-          <NavItems items={SECONDARY_NAV} />
+          <div className="px-4 pt-5 pb-2 text-[10px] font-mono uppercase tracking-[0.25em] text-muted-foreground">Review &amp; release</div>
+          <NavItems items={secondary} />
         </nav>
 
         <div className="border-t border-[#1C2230] p-4">
@@ -135,9 +178,9 @@ export default function Layout({ children }) {
         </div>
       </aside>
 
-      <div className="flex-1 flex flex-col min-w-0 lg:ml-64">
+      <div className={`flex-1 flex flex-col min-w-0 ${command ? "ml-64" : ""}`}>
         <header
-          className="lg:hidden sticky top-0 z-30 h-14 border-b border-[#1C2230] bg-[#0A0C10]/95 backdrop-blur grid grid-cols-[auto_1fr_auto] items-center px-3"
+          className={`${field ? "grid" : "hidden"} sticky top-0 z-30 h-14 border-b border-[#1C2230] bg-[#0A0C10]/95 backdrop-blur grid-cols-[auto_1fr] items-center px-3`}
           data-testid="mobile-topbar"
         >
           <NavLink to="/" className="flex items-center min-h-12 justify-self-start" aria-label="BedForge home">
@@ -146,25 +189,17 @@ export default function Layout({ children }) {
           <div className="flex items-center justify-center min-w-0 px-2">
             <BrandLockup className="h-9 w-auto max-w-full" testid="mobile-brand-lockup" />
           </div>
-          <button
-            data-testid="mobile-more-btn"
-            onClick={() => setMoreOpen(true)}
-            className="min-h-12 min-w-12 flex items-center justify-center border border-[#1C2230] rounded-none justify-self-end"
-            aria-label="Open secondary navigation"
-          >
-            <Menu className="w-5 h-5" />
-          </button>
         </header>
 
-        {moreOpen && (
-          <div className="lg:hidden fixed inset-0 z-40" data-testid="mobile-more-sheet">
+        {moreOpen && field && (
+          <div className="fixed inset-0 z-40" data-testid="mobile-more-sheet">
             <button className="absolute inset-0 bg-black/70" onClick={() => setMoreOpen(false)} aria-label="Close menu" />
             <div className="absolute bottom-0 left-0 right-0 bg-[#0F1218] border-t border-[#1C2230] p-4 pb-[calc(1rem+env(safe-area-inset-bottom))]">
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-3">
                   <BrandMark className="h-10 w-auto" testid="sheet-brand-mark" />
                   <div>
-                    <div className="font-display font-bold uppercase tracking-wider">More</div>
+                    <div className="font-display font-bold uppercase tracking-wider">Field tools</div>
                     <div className="text-xs text-muted-foreground font-mono">{user?.name} · {ROLE_LABELS[user?.role] || user?.role}</div>
                   </div>
                 </div>
@@ -173,11 +208,11 @@ export default function Layout({ children }) {
                 </button>
               </div>
               <div className="grid grid-cols-1 gap-1 mb-3">
-                <NavItems items={SECONDARY_NAV} onNavigate={() => setMoreOpen(false)} />
+                <NavItems items={fieldMore} onNavigate={() => setMoreOpen(false)} />
               </div>
               <button
                 onClick={() => { setMoreOpen(false); signOut(); }}
-                className="w-full min-h-12 flex items-center justify-center gap-2 border border-[#1C2230] rounded-none text-sm font-semibold uppercase tracking-wider hover:bg-destructive hover:border-destructive hover:text-white"
+                className="w-full min-h-14 flex items-center justify-center gap-2 border border-[#1C2230] rounded-none text-sm font-semibold uppercase tracking-wider hover:bg-destructive hover:border-destructive hover:text-white"
               >
                 <LogOut className="w-4 h-4" /> Sign Out
               </button>
@@ -185,15 +220,15 @@ export default function Layout({ children }) {
           </div>
         )}
 
-        <main className="flex-1 relative z-10 pb-24 lg:pb-0">{children}</main>
+        <main className={`flex-1 relative z-10 ${field ? "pb-24" : "pb-0"}`}>{children}</main>
       </div>
 
       <nav
-        className="lg:hidden fixed bottom-0 inset-x-0 z-30 border-t border-[#1C2230] bg-[#0C0E13]/95 backdrop-blur pb-[env(safe-area-inset-bottom)]"
+        className={`${field ? "block" : "hidden"} fixed bottom-0 inset-x-0 z-30 border-t border-[#1C2230] bg-[#0C0E13]/95 backdrop-blur pb-[env(safe-area-inset-bottom)]`}
         data-testid="mobile-bottom-nav"
       >
         <div className="grid grid-cols-5">
-          {PRIMARY_NAV.map((item) => {
+          {FIELD_NAV.map((item) => {
             const Icon = item.icon;
             const active = item.to === "/" ? location.pathname === "/" : location.pathname.startsWith(item.to);
             return (
@@ -211,6 +246,16 @@ export default function Layout({ children }) {
               </NavLink>
             );
           })}
+          <button
+            type="button"
+            data-testid="mobile-more-btn"
+            onClick={() => setMoreOpen(true)}
+            className={`flex flex-col items-center justify-center min-h-14 gap-0.5 ${moreOpen ? "text-primary" : "text-muted-foreground"}`}
+            aria-label="Open field tools"
+          >
+            <Menu className="w-5 h-5" />
+            <span className="font-condensed text-[10px] uppercase tracking-wider">More</span>
+          </button>
         </div>
       </nav>
     </div>
@@ -218,12 +263,13 @@ export default function Layout({ children }) {
 }
 
 export function PageHeader({ title, subtitle, right }) {
+  const device = useDevice();
   return (
-    <div className="sticky top-14 lg:top-0 z-10 bg-[#0A0C10]/95 backdrop-blur border-b border-[#1C2230]">
-      <div className="hidden lg:flex h-24 items-center justify-center px-8" data-testid="hero-header-banner">
+    <div className={`sticky z-10 bg-[#0A0C10]/95 backdrop-blur border-b border-[#1C2230] ${device.field ? "top-14" : "top-0"}`}>
+      <div className={`${device.command ? "flex" : "hidden"} h-24 items-center justify-center px-8`} data-testid="hero-header-banner">
         <BrandLockup className="h-16 w-auto max-w-full" testid="header-brand-lockup" />
       </div>
-      <div className="min-h-16 lg:border-t lg:border-[#1C2230] flex items-center justify-between gap-3 px-4 sm:px-6 lg:px-8 py-3">
+      <div className={`min-h-16 flex items-center justify-between gap-3 px-4 sm:px-6 lg:px-8 py-3 ${device.command ? "border-t border-[#1C2230]" : ""}`}>
         <div className="min-w-0">
           <h1 className="font-display font-extrabold text-xl sm:text-2xl lg:text-3xl uppercase tracking-tight leading-none truncate">{title}</h1>
           {subtitle && <p className="text-xs sm:text-sm text-muted-foreground mt-1 truncate">{subtitle}</p>}

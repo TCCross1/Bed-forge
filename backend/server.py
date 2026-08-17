@@ -27,6 +27,7 @@ from seed import seed_plant, seed_l25390, seed_bed_assignments
 from blueprint_routes import router as blueprint_router
 from bed_routes import router as bed_router
 from tension_routes import router as tension_router
+from ar_routes import router as ar_router, emit_sync_event
 from bed_layout import covers, map_production_status
 import excel_export
 
@@ -246,6 +247,7 @@ async def get_beam(beam_id: str, user=Depends(get_current_user)):
         beam["spec"] = spec
         if spec:
             beam["measurements"] = await db.spec_measurements.find({"spec_id": spec["id"]}, {"_id": 0}).to_list(500)
+        beam["ar_measurements"] = await db.ar_measurements.find({"beam_id": beam_id}, {"_id": 0, "photo_data": 0}).sort("created_at", -1).to_list(100)
         if beam.get("product_type_id"):
             beam["product_type"] = await db.product_types.find_one({"id": beam["product_type_id"]}, {"_id": 0})
         return beam
@@ -451,6 +453,14 @@ async def create_anomaly(payload: AnomalyCreate, user=Depends(get_current_user))
     try:
         an = Anomaly(**payload.model_dump(), inspector=user["name"])
         await db.anomalies.insert_one(an.model_dump())
+        if an.severity in ("moderate", "major"):
+            await emit_sync_event(
+                "hold" if an.severity == "major" else "anomaly",
+                f"{an.type.upper()} · {an.severity} on beam",
+                user,
+                beam_id=an.beam_id,
+                anomaly_id=an.id,
+            )
         logger.info("anomaly created id=%s beam=%s type=%s by=%s", an.id, an.beam_id, an.type, user.get("email"))
         return an.model_dump()
     except Exception:
@@ -524,6 +534,7 @@ app.include_router(api)
 app.include_router(blueprint_router)
 app.include_router(bed_router)
 app.include_router(tension_router)
+app.include_router(ar_router)
 
 app.add_middleware(
     CORSMiddleware,
@@ -548,6 +559,10 @@ async def startup():
     await db.spec_measurements.create_index("spec_id")
     await db.bed_assignments.create_index([("bed_id", 1), ("scheduled_date", 1)])
     await db.bed_assignments.create_index("beam_id")
+    await db.ar_measurements.create_index("beam_id")
+    await db.ar_measurements.create_index("created_at")
+    await db.sync_events.create_index("created_at")
+    await db.devices.create_index([("user_id", 1), ("platform", 1), ("device_class", 1)])
     await seed_admin()
     await seed_plant()
     await seed_l25390()

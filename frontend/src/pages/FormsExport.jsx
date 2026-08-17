@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import api, { formatApiErrorDetail } from "../lib/api";
-import Layout, { PageHeader, Field, inputClass, cardClass } from "../components/Layout";
+import Layout, { PageHeader, Field, inputClass, cardClass, ARMeasureLink } from "../components/Layout";
 import { Download, Loader2, ClipboardCheck, Calculator, Ruler, Sparkles, Truck } from "lucide-react";
 import { toast } from "sonner";
 
@@ -53,7 +53,11 @@ export default function FormsExport() {
 
   return (
     <Layout>
-      <PageHeader title="Forms Export" subtitle="Hub for QIR / Tension / Camber / Finish / Pre-Delivery" />
+      <PageHeader
+        title="Forms Export"
+        subtitle="Hub for QIR / Tension / Camber / Finish / Pre-Delivery"
+        right={<ARMeasureLink beamId={beamId} purpose="level" />}
+      />
       <div className="p-4 sm:p-6 lg:p-8 max-w-5xl">
         <div className={`${cardClass} p-5 sm:p-6 mb-4 sm:mb-6`}>
           <Field label="Beam (for QIR, Finish, Pre-Delivery)">
