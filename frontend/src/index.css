@@ -1,0 +1,80 @@
+@import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;500;600;700;800&family=Barlow:wght@400;500;600;700;800&family=IBM+Plex+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  margin: 0;
+  font-family: 'IBM Plex Sans', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background: #0A0C10;
+  color: #FFFFFF;
+}
+
+code, .font-mono {
+  font-family: 'JetBrains Mono', monospace;
+}
+
+@layer base {
+  :root {
+    --background: 220 24% 5%;
+    --foreground: 0 0% 100%;
+    --card: 220 20% 9%;
+    --card-foreground: 0 0% 100%;
+    --popover: 220 20% 9%;
+    --popover-foreground: 0 0% 100%;
+    --primary: 217 100% 58%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 220 15% 15%;
+    --secondary-foreground: 0 0% 100%;
+    --muted: 220 15% 15%;
+    --muted-foreground: 213 9% 59%;
+    --accent: 220 15% 15%;
+    --accent-foreground: 0 0% 100%;
+    --destructive: 346 100% 60%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 222 18% 16%;
+    --input: 222 18% 16%;
+    --ring: 217 100% 58%;
+    --radius: 0.25rem;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+  h1, h2, h3, h4, .font-display {
+    font-family: 'Barlow', sans-serif;
+  }
+  .font-condensed {
+    font-family: 'Barlow Condensed', sans-serif;
+  }
+}
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: #0A0C10; }
+::-webkit-scrollbar-thumb { background: #222631; border-radius: 0; }
+::-webkit-scrollbar-thumb:hover { background: #2979FF; }
+
+::selection { background: #2979FF; color: #fff; }
+
+.status-pass { color: #00E676; }
+.status-fail { color: #FF3366; }
+.status-warn { color: #FFD600; }
+.status-info { color: #2979FF; }
+
+.grain::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.025;
+  z-index: 1;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}

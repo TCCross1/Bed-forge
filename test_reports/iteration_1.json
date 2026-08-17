@@ -1,0 +1,35 @@
+{
+  "summary": "First-build E2E validation of BedForge QC. Backend: 20/20 pytest cases pass (auth, dashboard, tension, beams, anomalies, inspections, forms export). Frontend: All 10 review-listed flows pass via Playwright — login (valid+invalid), token stored as bf_token, 6 stat cards + 8 bed cards, bed-card->twin nav, 3D canvas + pick-required anomaly toast, tension calc (theoretical 34.103 in for defaults; WITHIN at 34.5, OUT at 40), QIR guided flow save, xlsx export of all 4 forms with valid PK-header content, logout clears token, protected route redirect.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "/api/inspections", "issue": "InspectionCreate model accepts field name 'status' (not 'gate' as review_request implied) with values pass/fail/hold. Frontend uses correct field. Just a naming inconsistency between review_request and code."},
+      {"endpoint": "CORS", "issue": "CORS_ORIGINS='*' combined with allow_credentials=True — browsers ignore credentials with wildcard. Not blocking since app uses Bearer tokens in header, but should be explicit origins for cookie fallback path."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "DigitalTwin / NewInspection", "issues": ["React hydration warning: <span> cannot be a child of <option>. Caused by visual-editor instrumentation wrapping option text in a <span>. Non-blocking (dev warning only) but pollutes console."]}
+    ]
+  },
+  "test_report_links": ["/app/backend/tests/backend_test.py", "/app/test_reports/pytest/pytest_results.xml"],
+  "action_items": [
+    "Optional: tighten CORS_ORIGINS to explicit list instead of '*' when allow_credentials=True.",
+    "Optional: cleanup TEST_-prefixed anomaly/inspection rows created by backend_test.py if regression-run frequently."
+  ],
+  "critical_code_review_comments": [
+    "auth.py get_current_user checks httpOnly cookie fallback but login endpoint never sets it — cookie branch is dead code today. Fine since frontend uses Bearer header.",
+    "server.py update_bed sets updated_at by constructing a throwaway Bed() to grab default now_iso — brittle; use now_iso() directly.",
+    "server.py CORS middleware added AFTER app.include_router — works in FastAPI but conventional order is before route inclusion.",
+    "seed_admin idempotently updates admin password if env changes (good). Demo users are only created if missing — password rotation for demo accounts would require manual reset."
+  ],
+  "updated_files": ["/app/backend/tests/backend_test.py"],
+  "success_rate": {"backend": "100% (20/20)", "frontend": "100% (all listed flows)"},
+  "test_credentials": "Admin tccrossmusic@gmail.com / BedForge2026!; Supervisor supervisor@bedforge.com / Super1234!; Tech tech@bedforge.com / Tech1234!; Production production@bedforge.com / Prod1234!",
+  "seed_data_creation": "Backend seed_plant() auto-runs on startup (8 beds, 11 beams, product types, 1 job/pour, anomalies, camber, tension reports). Test suite also inserts TEST_-prefixed anomaly + inspection during BeamOps class.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend test file at /app/backend/tests/backend_test.py — pytest xdist enabled via pytest.ini. Frontend token key is 'bf_token' (localStorage). Inspection payload uses field 'status' (not 'gate'); values are pass/fail/hold. Tension defaults produce theoretical ≈ 34.103 in (spec says ~34.1). All export endpoints return valid xlsx (PK header). No auth cookies actually set — Bearer header only despite dual-path in get_current_user."
+}
