@@ -301,12 +301,17 @@ def build_package_pdf(context: dict) -> bytes:
             next((bed.get("bed_number") for bed in beds if bed.get("id") == beam.get("bed_id")), "—"),
             beam.get("position_on_bed", "—"),
             beam.get("length_ft", "—"),
+            (
+                f"LOCKED R{beam.get('blueprint_source', {}).get('revision_id', '')[:8]}"
+                if beam.get("blueprint_source", {}).get("status") == "locked"
+                else beam.get("blueprint_source", {}).get("status", "legacy_seed").upper()
+            ),
             beam.get("qc_state", "—"),
             safe_join(beam.get("traceability", {}).get("strand_rolls", [])),
         ]
         for beam in beams
     ]
-    add_section(story, 1, "Beams", grid_table(["Beam", "Product", "Bed", "Pos", "Length (ft)", "QC", "Strand Rolls"], beam_rows or [["—", "—", "—", "—", "—", "—", "—"]], widths=[0.8 * inch, 2.15 * inch, 0.55 * inch, 0.55 * inch, 0.9 * inch, 0.8 * inch, 1.95 * inch]))
+    add_section(story, 1, "Beams", grid_table(["Beam", "Product", "Bed", "Pos", "Length (ft)", "Blueprint", "QC", "Strand Rolls"], beam_rows or [["—", "—", "—", "—", "—", "—", "—", "—"]], widths=[0.75 * inch, 1.85 * inch, 0.45 * inch, 0.45 * inch, 0.75 * inch, 1.15 * inch, 0.65 * inch, 1.65 * inch]))
 
     batch_rows = [[batch_record.get("ticket_number", "—"), batch_record.get("mix_design", pour.get("concrete_mix", "—")), batch_record.get("ambient_temp_f", "—"), batch_record.get("concrete_temp_f", "—"), batch_record.get("humidity_pct", "—"), batch_record.get("wind_mph", "—"), batch_record.get("weather", "—")]]
     add_section(story, 2, "Batch / Environment", grid_table(["Ticket", "Mix", "Ambient °F", "Concrete °F", "Humidity %", "Wind MPH", "Weather"], batch_rows, widths=[0.95 * inch, 1.75 * inch, 0.85 * inch, 0.95 * inch, 0.85 * inch, 0.85 * inch, 1.25 * inch]))

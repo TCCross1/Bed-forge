@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import api from "../lib/api";
 import Layout, { PageHeader } from "../components/Layout";
 import { Calculator, CheckCircle2, XCircle } from "lucide-react";
@@ -12,8 +12,29 @@ const FIELDS = [
 ];
 
 export default function TensionCalculator() {
+  const [beams, setBeams] = useState([]);
+  const [beamId, setBeamId] = useState("");
   const [vals, setVals] = useState(Object.fromEntries(FIELDS.map((f) => [f.key, f.def])));
   const [result, setResult] = useState(null);
+  const selectedBeam = useMemo(() => beams.find((beam) => beam.id === beamId), [beams, beamId]);
+
+  useEffect(() => {
+    api.get("/beams").then((res) => {
+      setBeams(res.data);
+      setBeamId(res.data[0]?.id || "");
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!selectedBeam) return;
+    const ref = selectedBeam.product_type?.blueprint?.tension_reference || {};
+    setVals((current) => ({
+      ...current,
+      bed_length_ft: selectedBeam.length_ft || current.bed_length_ft,
+      jacking_force_kip: ref.jacking_force_kip ?? current.jacking_force_kip,
+      strand_area_in2: ref.strand_area_in2 ?? current.strand_area_in2,
+    }));
+  }, [selectedBeam]);
 
   const calc = async () => {
     const payload = {
@@ -37,6 +58,19 @@ export default function TensionCalculator() {
         <div className="bg-card border border-border rounded-sm p-8">
           <h3 className="font-display font-bold uppercase tracking-wider text-lg mb-6 flex items-center gap-2"><Calculator className="w-5 h-5 text-primary" /> Inputs</h3>
           <div className="space-y-4">
+            <div>
+              <label className="text-xs font-mono uppercase tracking-widest text-muted-foreground">Blueprint Reference Beam</label>
+              <select value={beamId} onChange={(e) => setBeamId(e.target.value)} className="mt-1 w-full bg-background border border-border rounded-sm px-4 min-h-12 font-mono text-sm">
+                {beams.map((beam) => <option key={beam.id} value={beam.id}>{beam.mark} · {beam.length_ft}ft · {beam.blueprint_source?.status || "legacy_seed"}</option>)}
+              </select>
+              {selectedBeam && (
+                <div className={`mt-2 rounded-sm border px-3 py-2 text-xs font-mono ${selectedBeam.blueprint_source?.status === "locked" ? "border-primary/40 text-primary" : "border-[#FFD60055] text-[#FFD600]"}`}>
+                  {selectedBeam.blueprint_source?.status === "locked"
+                    ? `Using locked blueprint defaults${selectedBeam.product_type?.blueprint?.hold_downs?.length ? ` · ${selectedBeam.product_type.blueprint.hold_downs.length} hold-down stations` : ""}`
+                    : "No locked blueprint reference — validate strand layout manually before relying on this calc."}
+                </div>
+              )}
+            </div>
             {FIELDS.map((f) => (
               <div key={f.key}>
                 <label className="text-xs font-mono uppercase tracking-widest text-muted-foreground">{f.label}</label>

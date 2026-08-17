@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
-import { LayoutGrid, Box, ClipboardCheck, Calculator, FileSpreadsheet, LogOut, HardHat, ShieldAlert, Factory, KeyRound, MonitorPlay } from "lucide-react";
+import { LayoutGrid, Box, ClipboardCheck, Calculator, FileSpreadsheet, LogOut, HardHat, ShieldAlert, Factory, KeyRound, MonitorPlay, ScrollText } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { ROLE_LABELS } from "../lib/constants";
 import api from "../lib/api";
@@ -14,6 +14,7 @@ const NAV = [
   { to: "/ncr", label: "NCR Board", icon: ShieldAlert, testid: "nav-ncr" },
   { to: "/batch", label: "Batch Plant", icon: Factory, testid: "nav-batch" },
   { to: "/licensing", label: "Licensing", icon: KeyRound, testid: "nav-licensing" },
+  { to: "/blueprints", label: "Blueprints", icon: ScrollText, testid: "nav-blueprints" },
   { to: "/command-board", label: "Command Board", icon: MonitorPlay, testid: "nav-command-board" },
 ];
 

@@ -5,7 +5,7 @@ import Layout, { PageHeader } from "../components/Layout";
 import BeamTwinViewer, { BedTwinViewer } from "../components/BeamViewer";
 import { bedState, qcState } from "../lib/constants";
 import { toast } from "sonner";
-import { Layers3, Loader2, MapPin, Ruler, ScanLine, Box, Construction } from "lucide-react";
+import { Layers3, Loader2, MapPin, Ruler, ScanLine, Box, Construction, Lock, AlertTriangle } from "lucide-react";
 
 function SpecRows({ spec }) {
   return Object.entries(spec || {}).map(([key, value]) => (
@@ -86,6 +86,8 @@ export default function DigitalTwin() {
   const beamState = beam ? qcState(beam.qc_state) : null;
   const bedStatus = selectedBed ? bedState(selectedBed.status) : null;
   const blueprint = beam?.product_type?.blueprint || {};
+  const blueprintSource = beam?.blueprint_source || { status: "legacy_seed" };
+  const draftTwinBlocked = blueprintSource.status === "draft";
   const strandCount = (blueprint.strand_pattern?.rows || []).reduce((sum, row) => sum + (row.count || 0), 0);
   const stirrupCount = (() => {
     const stirrups = blueprint.stirrups || {};
@@ -161,13 +163,23 @@ export default function DigitalTwin() {
               </select>
             </div>
             <div className="flex items-center gap-2">
+              {blueprintSource.status === "locked" && <span className="font-mono text-xs font-bold tracking-widest px-3 py-1 rounded-sm border border-primary/40 text-primary flex items-center gap-2"><Lock className="w-3.5 h-3.5" /> LOCKED BLUEPRINT</span>}
+              {blueprintSource.status === "draft" && <span className="font-mono text-xs font-bold tracking-widest px-3 py-1 rounded-sm border border-[#FFD60055] text-[#FFD600] flex items-center gap-2"><AlertTriangle className="w-3.5 h-3.5" /> DRAFT EXTRACTION</span>}
               {bedStatus && <span className="font-mono text-xs font-bold tracking-widest px-3 py-1 rounded-sm" style={{ color: bedStatus.color, border: `1px solid ${bedStatus.color}55` }}>{bedStatus.label}</span>}
               {beamState && <span className="font-mono text-xs font-bold tracking-widest px-3 py-1 rounded-sm" style={{ color: beamState.color, border: `1px solid ${beamState.color}55` }}>{beamState.label}</span>}
             </div>
           </div>
 
           <div className="flex-1">
-            {mode === "beam" && beam ? (
+            {draftTwinBlocked ? (
+              <div className="h-full flex items-center justify-center p-10">
+                <div className="max-w-lg border border-[#FFD60055] bg-[#FFD60010] rounded-sm p-6 text-sm">
+                  <div className="flex items-center gap-2 text-[#FFD600] font-display font-bold uppercase tracking-wider"><AlertTriangle className="w-5 h-5" /> Locked blueprint required</div>
+                  <p className="text-muted-foreground mt-3">This beam is linked to a draft blueprint extraction. BedForge blocks production twin rendering until a reviewer verifies and locks the blueprint revision.</p>
+                  <p className="text-muted-foreground mt-2">Once locked, geometry, strand rows, hold-downs, hardware, and inspection expectations will come only from the immutable revision.</p>
+                </div>
+              </div>
+            ) : mode === "beam" && beam ? (
               <BeamTwinViewer
                 beam={beam}
                 anomalies={beam.anomalies || []}
@@ -205,6 +217,7 @@ export default function DigitalTwin() {
                   <div className="border border-border rounded-sm px-3 py-2"><div className="text-xs uppercase tracking-widest text-muted-foreground">Product</div><div className="mt-1 text-white">{beam.product_type?.name || "—"}</div></div>
                   <div className="border border-border rounded-sm px-3 py-2"><div className="text-xs uppercase tracking-widest text-muted-foreground">Length</div><div className="mt-1 text-white">{beam.length_ft} ft</div></div>
                   <div className="border border-border rounded-sm px-3 py-2"><div className="text-xs uppercase tracking-widest text-muted-foreground">Marked End</div><div className="mt-1 text-white">{blueprint.marked_end?.label || "MARKED END"}</div></div>
+                  <div className="border border-border rounded-sm px-3 py-2 col-span-2"><div className="text-xs uppercase tracking-widest text-muted-foreground">Blueprint source</div><div className="mt-1 text-white">{blueprintSource.status === "locked" ? `Locked revision ${blueprintSource.revision_id?.slice(0, 8)}` : blueprintSource.status.replace(/_/g, " ")}</div></div>
                 </div>
                 <div className="border border-border rounded-sm p-3">
                   <div className="text-xs uppercase tracking-widest text-muted-foreground mb-3 flex items-center gap-2"><ScanLine className="w-4 h-4" /> Embedded details</div>

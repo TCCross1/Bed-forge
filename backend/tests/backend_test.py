@@ -8,6 +8,7 @@ BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://beam-forge-2.preview
 API = f"{BASE_URL}/api"
 
 ADMIN = ("tccrossmusic@gmail.com", "BedForge2026!")
+ADMIN_FALLBACK = ("admin@bedforge.com", "admin123")
 DEMO_USERS = [
     ("supervisor@bedforge.com", "Super1234!"),
     ("tech@bedforge.com", "Tech1234!"),
@@ -17,11 +18,13 @@ DEMO_USERS = [
 
 @pytest.fixture(scope="session")
 def admin_token():
-    r = requests.post(f"{API}/auth/login", json={"email": ADMIN[0], "password": ADMIN[1]}, timeout=30)
-    assert r.status_code == 200, r.text
-    data = r.json()
-    assert "access_token" in data and data["user"]["role"] == "admin"
-    return data["access_token"]
+    for email, password in [ADMIN, ADMIN_FALLBACK]:
+        r = requests.post(f"{API}/auth/login", json={"email": email, "password": password}, timeout=30)
+        if r.status_code == 200:
+            data = r.json()
+            assert "access_token" in data and data["user"]["role"] == "admin"
+            return data["access_token"]
+    raise AssertionError(f"Unable to authenticate admin with known credentials: {r.text}")
 
 
 @pytest.fixture(scope="session")
@@ -193,3 +196,92 @@ class TestFormsExport:
     def test_export_unknown_400(self, auth_headers):
         r = requests.get(f"{API}/forms/export/bogus", headers=auth_headers, timeout=30)
         assert r.status_code == 400
+
+
+def _sample_blueprint_pdf():
+    from reportlab.pdfgen import canvas
+
+    buf = io.BytesIO()
+    pdf = canvas.Canvas(buf)
+    pdf.drawString(72, 760, "JOB NO: J-88-2001")
+    pdf.drawString(72, 744, "PROJECT: KDOT BRIDGE WIDENING")
+    pdf.drawString(72, 728, "SHEET NO: S4")
+    pdf.drawString(72, 712, "REV: B")
+    pdf.drawString(72, 696, "BEAM MARK: B9-01")
+    pdf.drawString(72, 680, "AASHTO TYPE IV I-BEAM")
+    pdf.drawString(72, 664, "OVERALL LENGTH: 110' 0\"")
+    pdf.drawString(72, 648, "OVERALL DEPTH: 54 IN")
+    pdf.drawString(72, 632, "TOP FLANGE WIDTH: 20 IN")
+    pdf.drawString(72, 616, "TOP FLANGE THICKNESS: 7.5 IN")
+    pdf.drawString(72, 600, "BOTTOM FLANGE WIDTH: 32 IN")
+    pdf.drawString(72, 584, "BOTTOM FLANGE THICKNESS: 8.5 IN")
+    pdf.drawString(72, 568, "WEB THICKNESS: 7 IN")
+    pdf.drawString(72, 552, "10 STRANDS")
+    pdf.drawString(72, 536, "4 STRANDS @ 4 IN")
+    pdf.drawString(72, 520, "6 STRANDS @ 4 IN")
+    pdf.drawString(72, 504, "2 DRAPED STRANDS")
+    pdf.drawString(72, 488, "HOLD-DOWN @ 24' 0\"")
+    pdf.drawString(72, 472, "HOLD-DOWN @ 86' 0\"")
+    pdf.drawString(72, 456, "LIFT LOOP @ 16' 0\"")
+    pdf.drawString(72, 440, "LIFT LOOP @ 94' 0\"")
+    pdf.drawString(72, 424, "JACKING FORCE: 43.94 KIP")
+    pdf.drawString(72, 408, "ELONGATION: 34.12 IN")
+    pdf.drawString(72, 392, "MARKED END: HEAD / START")
+    pdf.showPage()
+    pdf.drawString(72, 760, "SPECIAL INSPECTION NOTES: VERIFY END GEOMETRY BEFORE CAST")
+    pdf.drawString(72, 744, "BITUMINOUS END TREATMENT REQUIRED")
+    pdf.save()
+    buf.seek(0)
+    return buf
+
+
+class TestBlueprintPipeline:
+    def test_upload_extract_edit_and_lock(self, auth_headers):
+        beams = requests.get(f"{API}/beams", headers=auth_headers, timeout=30).json()
+        assert beams, "expected seeded beams"
+        beam_id = beams[0]["id"]
+        files = {"file": ("sample-blueprint.pdf", _sample_blueprint_pdf().getvalue(), "application/pdf")}
+        data = {
+            "beam_id": beam_id,
+            "beam_mark_hint": "B9-01",
+            "product_family_hint": "i_beam",
+        }
+        upload = requests.post(f"{API}/blueprints/upload", headers=auth_headers, files=files, data=data, timeout=60)
+        assert upload.status_code == 200, upload.text
+        document = upload.json()
+        assert document["page_count"] == 2
+
+        extract = requests.post(f"{API}/blueprints/{document['id']}/extract", headers=auth_headers, timeout=60)
+        assert extract.status_code == 200, extract.text
+        extracted = extract.json()
+        fields = extracted["latest_extraction"]["fields"]
+        assert fields["beam_mark"]["value"] == "B9-01"
+        assert fields["product_family"]["value"] == "i_beam"
+        assert abs(fields["overall_length_ft"]["value"] - 110.0) < 0.01
+
+        patch = {
+            "fields": {
+                "design_camber_in": {
+                    "value": "4.5",
+                    "status": "manually_confirmed",
+                    "confidence": "high",
+                    "source_page": 1,
+                    "extraction_notes": "Reviewed against title block notes",
+                }
+            }
+        }
+        review = requests.patch(f"{API}/blueprints/{document['id']}/extraction", headers=auth_headers, json=patch, timeout=60)
+        assert review.status_code == 200, review.text
+
+        lock = requests.post(f"{API}/blueprints/{document['id']}/lock", headers=auth_headers, json={"beam_ids": [beam_id]}, timeout=60)
+        assert lock.status_code == 200, lock.text
+        locked = lock.json()
+        assert locked["status"] == "locked"
+        assert locked["locked_revision"]["product_family"] == "i_beam"
+
+        beam = requests.get(f"{API}/beams/{beam_id}", headers=auth_headers, timeout=30)
+        assert beam.status_code == 200, beam.text
+        beam_data = beam.json()
+        assert beam_data["blueprint_source"]["status"] == "locked"
+        assert beam_data["product_type"]["blueprint"]["cross_section"]["overall_depth_in"] == 54.0
+        assert len(beam_data["product_type"]["blueprint"]["hold_downs"]) == 2

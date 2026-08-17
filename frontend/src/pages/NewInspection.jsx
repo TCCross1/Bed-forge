@@ -32,6 +32,7 @@ export default function NewInspection() {
   }, []);
 
   const section = SECTIONS[step];
+  const selectedBeam = beams.find((beam) => beam.id === beamId);
 
   const setStatus = (s) => setResults({ ...results, [section.key]: s });
 
@@ -71,6 +72,11 @@ export default function NewInspection() {
           <select data-testid="inspection-beam-select" value={beamId} onChange={(e)=>setBeamId(e.target.value)} className="mt-2 w-full bg-background border border-border rounded-sm px-4 min-h-12 font-mono text-sm md:max-w-sm">
             {beams.map((b)=><option key={b.id} value={b.id}>{b.mark} · {b.twin_type==="box_beam"?"Box":"I-Beam"} · {b.length_ft}ft</option>)}
           </select>
+          {selectedBeam && (
+            <div className={`mt-4 rounded-sm border px-4 py-3 text-xs font-mono ${selectedBeam.blueprint_source?.status === "locked" ? "border-primary/40 text-primary" : "border-[#FFD60055] text-[#FFD600]"}`}>
+              Design source: {selectedBeam.blueprint_source?.status === "locked" ? `locked revision ${selectedBeam.blueprint_source?.revision_id?.slice(0, 8)}` : `${selectedBeam.blueprint_source?.status || "legacy_seed"} — verify design expectations before production sign-off`}
+            </div>
+          )}
 
           <div className="flex items-center gap-1 mt-6 overflow-x-auto pb-2" data-testid="inspection-stepper">
             {SECTIONS.map((sec, i) => {

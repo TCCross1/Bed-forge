@@ -113,6 +113,7 @@ export default function FormsExport() {
             <div className="text-xs uppercase tracking-widest text-muted-foreground">Selected Beam</div>
             <div className="mt-2 text-white">{selectedBeam?.product_type?.name || "—"}</div>
             <div className="text-muted-foreground mt-1">{selectedBeam?.length_ft || "—"} ft</div>
+            <div className="text-muted-foreground mt-1">Blueprint {selectedBeam?.blueprint_source?.status === "locked" ? `locked · ${selectedBeam?.blueprint_source?.revision_id?.slice(0, 8)}` : selectedBeam?.blueprint_source?.status || "legacy_seed"}</div>
           </div>
         </div>
 
