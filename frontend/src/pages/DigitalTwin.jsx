@@ -82,6 +82,15 @@ export default function DigitalTwin() {
   const beamState = beam ? qcState(beam.qc_state) : null;
   const bedStatus = selectedBed ? bedState(selectedBed.status) : null;
   const blueprint = beam?.product_type?.blueprint || {};
+  const strandCount = (blueprint.strand_pattern?.rows || []).reduce((sum, row) => sum + (row.count || 0), 0);
+  const stirrupCount = (() => {
+    const stirrups = blueprint.stirrups || {};
+    const spacingFt = (stirrups.spacing_in || 24) / 12;
+    const startFt = stirrups.start_ft ?? 0;
+    const endFt = stirrups.end_ft ?? beam?.length_ft ?? 0;
+    if (!spacingFt || endFt <= startFt) return 0;
+    return Math.floor((endFt - startFt) / spacingFt) + 1;
+  })();
   const featureCounts = [
     ["Lift loops", blueprint.lift_loops?.length || 0],
     ["Inserts", blueprint.inserts?.length || 0],
@@ -89,6 +98,9 @@ export default function DigitalTwin() {
     ["Tie-rods", blueprint.tie_rod_openings?.length || 0],
     ["Drain holes", blueprint.drain_holes?.length || 0],
     ["Hold-downs", blueprint.hold_downs?.length || 0],
+    ["Stirrups", stirrupCount],
+    ["Strand ends", strandCount * 2],
+    ["Bituminous pockets", blueprint.bituminous_ends?.length || 0],
   ];
 
   return (
@@ -177,6 +189,19 @@ export default function DigitalTwin() {
                     ))}
                   </div>
                 </div>
+                {selectedBed && (
+                  <div className="border border-border rounded-sm p-3">
+                    <div className="text-xs uppercase tracking-widest text-muted-foreground mb-2">Bed order</div>
+                    <div className="space-y-2">
+                      {beams.filter((item) => item.bed_id === selectedBedId).sort((a, b) => (a.position_on_bed || 0) - (b.position_on_bed || 0)).map((item) => (
+                        <div key={item.id} className={`flex items-center justify-between text-xs font-mono rounded-sm px-2 py-1 border ${item.id === selectedId ? "border-primary text-primary" : "border-border text-muted-foreground"}`}>
+                          <span>POS {String(item.position_on_bed || 0).padStart(2, "0")}</span>
+                          <span className={item.id === selectedId ? "text-white" : "text-white/80"}>{item.mark}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             ) : <div className="text-sm text-muted-foreground font-mono">Load a beam to inspect blueprint data.</div>}
           </div>
@@ -192,7 +217,7 @@ export default function DigitalTwin() {
                 <SpecRows spec={selectedHardware.spec} />
               </div>
             ) : (
-              <div className="text-sm text-muted-foreground font-mono">Tap any loop, insert, tube, tie-rod, strand, groove, or hold-down to inspect its spec.</div>
+              <div className="text-sm text-muted-foreground font-mono">Tap any loop, insert, tube, tie-rod, drain, strand, groove, pocket, or hold-down to inspect its spec.</div>
             )}
           </div>
 
