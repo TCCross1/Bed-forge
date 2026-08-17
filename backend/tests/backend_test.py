@@ -82,6 +82,22 @@ class TestDashboard:
         assert isinstance(beams, list) and len(beams) >= 11
         assert all("_id" not in b for b in beams)
 
+    def test_command_board_shape(self, auth_headers):
+        r = requests.get(f"{API}/command-board", headers=auth_headers, timeout=30)
+        assert r.status_code == 200
+        data = r.json()
+        assert data["plant"] == "BedForge Command Center"
+        assert "summary" in data and "analytics" in data and "events" in data
+        assert len(data["lanes"]) == 8
+        for key in ["beds_active", "beams_in_process", "releases_today", "open_ncrs"]:
+            assert key in data["summary"]
+        for lane in data["lanes"]:
+            for key in ["bed_number", "status", "lane_state", "beam_order", "qc_owner", "estimated_release", "beams"]:
+                assert key in lane, f"lane missing {key}"
+            assert "key" in lane["lane_state"] and "label" in lane["lane_state"]
+        for key in ["releases_today", "layout_to_release_hours", "open_ncrs_by_severity", "camber_pass_rate", "tension_within_tolerance_rate", "strength_trend"]:
+            assert key in data["analytics"]
+
 
 # ---------- Tension ----------
 class TestTension:

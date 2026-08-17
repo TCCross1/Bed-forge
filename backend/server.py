@@ -6,7 +6,8 @@ load_dotenv(ROOT_DIR / ".env")
 
 import os
 import logging
-from datetime import datetime, timezone
+from collections import Counter
+from datetime import datetime, timezone, timedelta
 from fastapi import FastAPI, APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from starlette.middleware.cors import CORSMiddleware
@@ -43,6 +44,57 @@ async def enrich_beam(beam: dict, include_details: bool = False) -> dict:
         data["inspections"] = await db.inspections.find({"beam_id": beam_id}, {"_id": 0}).to_list(500)
         data["camber_readings"] = await db.camber_readings.find({"beam_id": beam_id}, {"_id": 0}).to_list(500)
     return data
+
+
+def parse_iso_dt(value: str | None) -> datetime | None:
+    if not value or not isinstance(value, str):
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def command_board_shift(now: datetime) -> str:
+    hour = now.astimezone(timezone.utc).hour
+    if 6 <= hour < 14:
+        return "Day"
+    if 14 <= hour < 22:
+        return "Swing"
+    return "Night"
+
+
+def within_same_day(value: str | None, now: datetime) -> bool:
+    dt = parse_iso_dt(value)
+    return bool(dt and dt.astimezone(timezone.utc).date() == now.astimezone(timezone.utc).date())
+
+
+def estimate_release_time(bed: dict, batch_record: dict | None, now: datetime) -> str:
+    if bed.get("status") in ("complete",):
+        return "Ready now"
+    offsets = {
+        "idle": None,
+        "setup": timedelta(hours=12),
+        "tensioning": timedelta(hours=8),
+        "casting": timedelta(hours=6),
+        "curing": timedelta(hours=2),
+        "stripping": timedelta(hours=1),
+    }
+    offset = offsets.get(bed.get("status"))
+    if offset is None:
+        return "Awaiting schedule"
+    anchor = parse_iso_dt((batch_record or {}).get("created_at")) or now
+    return (anchor + offset).astimezone(timezone.utc).strftime("%H:%M UTC")
+
+
+def command_lane_state(bed: dict, beams: list[dict], has_open_ncr: bool) -> dict:
+    if has_open_ncr or any(beam.get("qc_state") in ("hold", "failed") for beam in beams):
+        return {"key": "hold_ncr", "label": "HOLD / NCR", "accent": "#FF3366"}
+    if bed.get("status") in ("casting", "curing"):
+        return {"key": "pour_cure", "label": "POUR / CURE", "accent": "#2979FF"}
+    if bed.get("status") in ("stripping", "complete") or any(beam.get("qc_state") in ("passed", "shipped") for beam in beams):
+        return {"key": "ready_release", "label": "READY / RELEASE", "accent": "#00E676"}
+    return {"key": "layout_strand", "label": "LAYOUT / STRAND", "accent": "#FFD600"}
 
 
 async def build_package_context(package_type: str, pour_id: str = None, beam_id: str = None, job_id: str = None) -> dict:
@@ -210,6 +262,188 @@ async def dashboard(user=Depends(get_current_user)):
         "open_anomalies": await db.anomalies.count_documents({}),
     }
     return {"beds": bed_cards, "stats": stats}
+
+
+@api.get("/command-board")
+async def command_board(user=Depends(get_current_user)):
+    now = datetime.now(timezone.utc)
+    beds = await db.beds.find({}, {"_id": 0}).sort("bed_number", 1).to_list(50)
+    beams = await db.beams.find({}, {"_id": 0}).to_list(1000)
+    pours = await db.pours.find({}, {"_id": 0}).to_list(500)
+    inspections = await db.inspections.find({}, {"_id": 0}).to_list(5000)
+    ncrs = await db.ncrs.find({}, {"_id": 0}).to_list(500)
+    batch_records = await db.batch_records.find({}, {"_id": 0}).to_list(500)
+    tension_reports = await db.tension_reports.find({}, {"_id": 0}).to_list(5000)
+    camber_readings = await db.camber_readings.find({}, {"_id": 0}).to_list(5000)
+
+    pours_by_id = {item["id"]: item for item in pours}
+    beams_by_bed = {}
+    for beam in beams:
+        beams_by_bed.setdefault(beam["bed_id"], []).append(beam)
+    inspections_by_beam = {}
+    for item in inspections:
+        inspections_by_beam.setdefault(item["beam_id"], []).append(item)
+
+    ncrs_by_beam = {}
+    open_ncrs = []
+    for item in ncrs:
+        if item.get("status") != "closed":
+            open_ncrs.append(item)
+            if item.get("beam_id"):
+                ncrs_by_beam.setdefault(item["beam_id"], []).append(item)
+
+    batch_by_pour = {}
+    for item in batch_records:
+        batch_by_pour[item["pour_id"]] = item
+
+    releases_today_ids = {
+        item["beam_id"]
+        for item in inspections
+        if item.get("section") == "pre_delivery" and item.get("status") == "pass" and within_same_day(item.get("created_at"), now)
+    }
+    if not releases_today_ids:
+        releases_today_ids = {
+            beam["id"] for beam in beams
+            if beam.get("qc_state") in ("passed", "shipped") and within_same_day(beam.get("created_at"), now)
+        }
+
+    release_cycle_hours = []
+    for beam in beams:
+        beam_inspections = inspections_by_beam.get(beam["id"], [])
+        release_events = [
+            item for item in beam_inspections
+            if item.get("section") == "pre_delivery" and item.get("status") == "pass"
+        ]
+        if not release_events:
+            continue
+        start = parse_iso_dt(beam.get("created_at"))
+        finish = max(
+            (parse_iso_dt(item.get("created_at")) for item in release_events),
+            default=None,
+        )
+        if start and finish:
+            release_cycle_hours.append(round((finish - start).total_seconds() / 3600, 1))
+
+    latest_strengths = sorted(
+        camber_readings,
+        key=lambda item: parse_iso_dt(item.get("reading_date")) or parse_iso_dt(item.get("created_at")) or now,
+        reverse=True,
+    )[:6]
+    strength_trend = [
+        {
+            "label": f"Beam {next((beam.get('mark') for beam in beams if beam.get('id') == item.get('beam_id')), '—')}",
+            "value": item.get("release_strength_psi", 0),
+            "required": item.get("required_strength_psi", 0),
+        }
+        for item in reversed(latest_strengths)
+    ]
+
+    camber_passes = [
+        abs((item.get("measured_camber_in") or 0) - (item.get("design_camber_in") or 0)) <= 0.25
+        for item in camber_readings
+    ]
+    tension_passes = [bool(item.get("within_tolerance")) for item in tension_reports]
+
+    lanes = []
+    for bed in beds:
+        bed_beams = sorted(beams_by_bed.get(bed["id"], []), key=lambda item: item.get("position_on_bed", 0))
+        pour = pours_by_id.get(bed.get("current_pour_id"))
+        batch_record = batch_by_pour.get((pour or {}).get("id"))
+        inspectors = [
+            item.get("inspector")
+            for beam in bed_beams
+            for item in inspections_by_beam.get(beam["id"], [])
+            if item.get("inspector")
+        ]
+        open_lane_ncrs = [item for beam in bed_beams for item in ncrs_by_beam.get(beam["id"], [])]
+        lane_state = command_lane_state(bed, bed_beams, bool(open_lane_ncrs))
+        lanes.append({
+            "id": bed["id"],
+            "bed_number": bed["bed_number"],
+            "name": bed["name"],
+            "status": bed.get("status", "idle"),
+            "lane_state": lane_state,
+            "pour_number": (pour or {}).get("pour_number"),
+            "beam_order": " / ".join(beam.get("mark", "—") for beam in bed_beams) or "No active beam order",
+            "qc_owner": next((item.get("owner") for item in open_lane_ncrs if item.get("owner")), None) or (Counter(inspectors).most_common(1)[0][0] if inspectors else "Unassigned"),
+            "estimated_release": estimate_release_time(bed, batch_record, now),
+            "ncr_count": len(open_lane_ncrs),
+            "beams": [
+                {
+                    "id": beam["id"],
+                    "mark": beam.get("mark"),
+                    "position_on_bed": beam.get("position_on_bed"),
+                    "length_ft": beam.get("length_ft"),
+                    "status": beam.get("status"),
+                    "qc_state": beam.get("qc_state"),
+                    "release_tag": (beam.get("traceability") or {}).get("release_tag"),
+                }
+                for beam in bed_beams
+            ],
+        })
+
+    severity_counts = {"minor": 0, "moderate": 0, "major": 0}
+    for item in open_ncrs:
+        severity = item.get("severity", "major")
+        if severity in severity_counts:
+            severity_counts[severity] += 1
+
+    events = []
+    for bed in beds:
+        events.append({
+            "timestamp": bed.get("updated_at"),
+            "message": f"Bed {bed.get('bed_number')} status {bed.get('status', 'idle').upper()}",
+        })
+    for item in batch_records:
+        events.append({
+            "timestamp": item.get("created_at"),
+            "message": f"Batch {item.get('ticket_number', '—')} captured for pour {pours_by_id.get(item.get('pour_id'), {}).get('pour_number', '—')}",
+        })
+    for item in open_ncrs:
+        events.append({
+            "timestamp": item.get("updated_at") or item.get("created_at"),
+            "message": f"{item.get('code', 'NCR')} {item.get('status', 'open').replace('_', ' ').upper()} · {item.get('title', 'NCR event')}",
+        })
+    for item in tension_reports:
+        bed_number = next((bed.get("bed_number") for bed in beds if bed.get("id") == item.get("bed_id")), "—")
+        events.append({
+            "timestamp": item.get("created_at"),
+            "message": f"Tension report complete for Bed {bed_number} · {'WITHIN TOL' if item.get('within_tolerance') else 'OUT OF TOL'}",
+        })
+    for item in camber_readings:
+        beam_mark = next((beam.get("mark") for beam in beams if beam.get("id") == item.get("beam_id")), item.get("beam_id", "—"))
+        events.append({
+            "timestamp": item.get("reading_date") or item.get("created_at"),
+            "message": f"Camber / strength logged for {beam_mark} · {item.get('release_strength_psi', 0)} PSI",
+        })
+
+    events = sorted(
+        [item for item in events if parse_iso_dt(item.get("timestamp"))],
+        key=lambda item: parse_iso_dt(item["timestamp"]),
+        reverse=True,
+    )[:12]
+
+    return {
+        "generated_at": now_iso(),
+        "plant": "BedForge Command Center",
+        "shift": command_board_shift(now),
+        "summary": {
+            "beds_active": len([bed for bed in beds if bed.get("status") not in ("idle", "complete")]),
+            "beams_in_process": len([beam for beam in beams if beam.get("qc_state") not in ("passed", "shipped")]),
+            "releases_today": len(releases_today_ids),
+            "open_ncrs": len(open_ncrs),
+        },
+        "lanes": lanes,
+        "analytics": {
+            "releases_today": len(releases_today_ids),
+            "layout_to_release_hours": round(sum(release_cycle_hours) / len(release_cycle_hours), 1) if release_cycle_hours else None,
+            "open_ncrs_by_severity": severity_counts,
+            "camber_pass_rate": round((sum(camber_passes) / len(camber_passes)) * 100, 1) if camber_passes else None,
+            "tension_within_tolerance_rate": round((sum(tension_passes) / len(tension_passes)) * 100, 1) if tension_passes else None,
+            "strength_trend": strength_trend,
+        },
+        "events": events,
+    }
 
 
 # ---------------- Beams ----------------

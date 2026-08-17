@@ -12,6 +12,7 @@ import FormsExport from "./pages/FormsExport";
 import NCRBoard from "./pages/NCRBoard";
 import BatchPlant from "./pages/BatchPlant";
 import Licensing from "./pages/Licensing";
+import CommandBoard from "./pages/CommandBoard";
 
 function Protected({ children }) {
   const { user, ready } = useAuth();
@@ -38,6 +39,7 @@ function AppRoutes() {
       <Route path="/ncr" element={<Protected><NCRBoard /></Protected>} />
       <Route path="/batch" element={<Protected><BatchPlant /></Protected>} />
       <Route path="/licensing" element={<Protected><Licensing /></Protected>} />
+      <Route path="/command-board" element={<Protected><CommandBoard /></Protected>} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
