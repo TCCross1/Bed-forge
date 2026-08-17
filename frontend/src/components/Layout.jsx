@@ -28,6 +28,7 @@ import { useDevice } from "../context/DeviceContext";
 import { useCompany } from "../context/CompanyContext";
 import { ROLE_LABELS, isExec } from "../lib/constants";
 import OfflineBanner from "./OfflineBanner";
+import ForgeCoach from "./ForgeCoach";
 
 export const MARK_SRC = "/brand/bedforge-mark.png";
 export const LOCKUP_SRC = "/brand/bedforge-lockup.png";
@@ -251,6 +252,14 @@ export default function Layout({ children }) {
                 <NavItems items={fieldMore} onNavigate={() => setMoreOpen(false)} />
               </div>
               <button
+                type="button"
+                data-testid="forge-coach-open-sheet"
+                onClick={() => { setMoreOpen(false); window.dispatchEvent(new CustomEvent("bf-coach-open")); }}
+                className="w-full min-h-12 mb-2 flex items-center justify-center gap-2 border border-[#C9A227] text-[#C9A227] text-sm font-semibold uppercase tracking-wider"
+              >
+                Ask Expert
+              </button>
+              <button
                 onClick={() => { setMoreOpen(false); signOut(); }}
                 className="w-full min-h-14 flex items-center justify-center gap-2 border border-[#1C2230] rounded-none text-sm font-semibold uppercase tracking-wider hover:bg-destructive hover:border-destructive hover:text-white"
               >
@@ -301,6 +310,7 @@ export default function Layout({ children }) {
           </button>
         </div>
       </nav>
+      <ForgeCoach />
     </div>
   );
 }

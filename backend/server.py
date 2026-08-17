@@ -38,6 +38,7 @@ from beam_qr_routes import router as beam_qr_router
 from company_routes import router as company_router
 from cylinder_routes import router as cylinder_router
 from owner_routes import router as owner_router, attach_board_forecasts
+from coach_routes import router as coach_router
 import excel_export
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
@@ -554,6 +555,7 @@ app.include_router(company_router)
 app.include_router(cylinder_router)
 app.include_router(control_router)
 app.include_router(owner_router)
+app.include_router(coach_router)
 
 security_headers_middleware(app)
 
