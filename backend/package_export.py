@@ -74,14 +74,14 @@ def job_qr_payload(package_type, job, pour, beds, beams):
 
 def qr_block(payload):
     widget = qr.QrCodeWidget(payload)
-    bounds = widget.getBounds()
     size = 1.3 * inch
-    width = bounds[2] - bounds[0]
-    height = bounds[3] - bounds[1]
+    widget.x = 0
+    widget.y = 16
+    widget.barWidth = size
+    widget.barHeight = size
     drawing = Drawing(size, size + 16)
     drawing.add(Rect(0, 16, size, size, strokeColor=colors.HexColor("#0F172A"), fillColor=colors.white, strokeWidth=0.8))
     drawing.add(widget)
-    widget.transform = [size / width, 0, 0, size / height, -bounds[0] * size / width, 16 - bounds[1] * size / height]
     drawing.add(String(size / 2, 5, "JOB QR", fontName="Helvetica-Bold", fontSize=8.5, textAnchor="middle", fillColor=colors.HexColor("#0F172A")))
     return drawing
 
