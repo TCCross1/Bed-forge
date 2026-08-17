@@ -223,6 +223,7 @@ class MixDesign(BaseModel):
     target_spread_in: Optional[float] = None
     target_temp_f: Optional[float] = None
     notes: str = ""
+    ingredients: List[Dict[str, Any]] = Field(default_factory=list)
     created_by: str = ""
     created_at: str = Field(default_factory=now_iso)
 
@@ -236,6 +237,7 @@ class MixDesignCreate(BaseModel):
     target_spread_in: Optional[float] = None
     target_temp_f: Optional[float] = None
     notes: str = ""
+    ingredients: List[Dict[str, Any]] = Field(default_factory=list)
 
 
 class BatchIngredient(BaseModel):
@@ -333,6 +335,8 @@ class BatchRecordCreate(BaseModel):
 
 
 class BatchRecordUpdate(BaseModel):
+    job_id: Optional[str] = None
+    pour_id: Optional[str] = None
     bed_ids: Optional[List[str]] = None
     beam_ids: Optional[List[str]] = None
     batched_at: Optional[str] = None

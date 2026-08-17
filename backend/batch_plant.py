@@ -1,5 +1,6 @@
 """Batch plant math — w/cm, immutability, weather labels, AI recommendations (never writes mix)."""
 import logging
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
@@ -84,6 +85,14 @@ def is_immutable(doc: Optional[dict]) -> bool:
     return bool(rec.get("immutable")) or str(rec.get("status") or "") == "confirmed"
 
 
+def confirm_blocker(rec: Optional[dict]) -> Optional[str]:
+    """Plant manager cannot freeze a ticket that has no mix identity."""
+    mix = str((rec or {}).get("mix_code") or "").strip()
+    if not mix:
+        return "Mix code is required before confirm"
+    return None
+
+
 def can_draft(role: str) -> bool:
     return (role or "") in DRAFT_ROLES
 
@@ -137,6 +146,43 @@ def apply_computed_batch(data: dict) -> dict:
     out["water_lb"] = water_lb(ingredients)
     out["w_cm"] = water_cementitious_ratio(ingredients)
     return out
+
+
+def copy_library_into_batch(data: dict, design: Optional[dict]) -> dict:
+    """Fill empty mix fields from a library card. Never overwrites keyed-in weights."""
+    out = dict(data or {})
+    mix = design or {}
+    if not str(out.get("mix_code") or "").strip() and mix.get("mix_code"):
+        out["mix_code"] = mix["mix_code"]
+    if not out.get("mix_design_id") and mix.get("id"):
+        out["mix_design_id"] = mix["id"]
+    for key in ("target_strength_psi", "target_air_pct", "target_slump_in", "target_spread_in", "target_temp_f"):
+        if out.get(key) in (None, "") and mix.get(key) not in (None, ""):
+            out[key] = mix.get(key)
+    current = out.get("ingredients") or []
+    blank = not current or not any(
+        (_num(item.get("weight_lb")) or 0) or (_num(item.get("dosage")) or 0)
+        for item in current
+    )
+    if blank and mix.get("ingredients"):
+        out["ingredients"] = [dict(row) for row in mix["ingredients"]]
+    return out
+
+
+def weather_failure_env(manual_override: bool = False) -> dict:
+    """Open-Meteo down must never block a mixer. No lat/lon in this payload."""
+    return {
+        "source": "manual",
+        "env_flag": "estimated/manual",
+        "captured_at": datetime.now(timezone.utc).isoformat(),
+        "manual_override": bool(manual_override),
+        "ambient_f": None,
+        "rh_pct": None,
+        "pressure_inhg": None,
+        "wind_mph": None,
+        "weather": "",
+        "solar_proxy": "unknown",
+    }
 
 
 def apply_recommendations_to_batch(_batch: dict, _recs: List[dict]) -> dict:

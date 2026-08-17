@@ -412,8 +412,26 @@ async def seed_company():
 
 async def seed_mix_designs():
     """Idempotent SCC starter mix so the batch plant is not an empty library."""
+    ingredients = [
+        {"kind": "cement", "name": "Type III cement", "source": "", "size": "", "weight_lb": 658, "moisture_pct": None, "dosage": None, "dosage_unit": "lb", "notes": ""},
+        {"kind": "scm", "name": "Fly ash", "source": "", "size": "", "weight_lb": 120, "moisture_pct": None, "dosage": None, "dosage_unit": "lb", "notes": ""},
+        {"kind": "scm", "name": "Slag", "source": "", "size": "", "weight_lb": 0, "moisture_pct": None, "dosage": None, "dosage_unit": "lb", "notes": ""},
+        {"kind": "coarse", "name": "Coarse #67", "source": "", "size": "#67", "weight_lb": 1680, "moisture_pct": None, "dosage": None, "dosage_unit": "lb", "notes": ""},
+        {"kind": "sand", "name": "Sand", "source": "", "size": "", "weight_lb": 1420, "moisture_pct": None, "dosage": None, "dosage_unit": "lb", "notes": ""},
+        {"kind": "water", "name": "Batch water", "source": "", "size": "", "weight_lb": 250, "moisture_pct": None, "dosage": None, "dosage_unit": "lb", "notes": ""},
+        {"kind": "ice", "name": "Ice / chilled water", "source": "", "size": "", "weight_lb": 0, "moisture_pct": None, "dosage": None, "dosage_unit": "lb", "notes": ""},
+        {"kind": "admixture", "name": "AEA", "source": "", "size": "", "weight_lb": None, "moisture_pct": None, "dosage": 0.8, "dosage_unit": "oz/cwt", "notes": ""},
+        {"kind": "admixture", "name": "HRWR", "source": "", "size": "", "weight_lb": None, "moisture_pct": None, "dosage": 6.0, "dosage_unit": "oz/cwt", "notes": ""},
+        {"kind": "admixture", "name": "Retarder", "source": "", "size": "", "weight_lb": None, "moisture_pct": None, "dosage": 0, "dosage_unit": "oz/cwt", "notes": ""},
+        {"kind": "admixture", "name": "Accelerator", "source": "", "size": "", "weight_lb": None, "moisture_pct": None, "dosage": 0, "dosage_unit": "oz/cwt", "notes": ""},
+        {"kind": "admixture", "name": "Corrosion inhibitor", "source": "", "size": "", "weight_lb": None, "moisture_pct": None, "dosage": 0, "dosage_unit": "oz/cwt", "notes": ""},
+    ]
     try:
-        if await db.mix_designs.find_one({"mix_code": "SCC-8K"}):
+        existing = await db.mix_designs.find_one({"mix_code": "SCC-8K"}, {"_id": 0})
+        if existing:
+            if not existing.get("ingredients"):
+                await db.mix_designs.update_one({"id": existing["id"]}, {"$set": {"ingredients": ingredients}})
+                logger.info("backfilled SCC-8K starter ingredient weights")
             return
         rec = MixDesign(
             mix_code="SCC-8K",
@@ -424,6 +442,7 @@ async def seed_mix_designs():
             target_temp_f=70.0,
             notes="Starter mix for the mixer office. Confirm against the plant's approved mix card.",
             created_by="system-seed",
+            ingredients=ingredients,
         )
         await db.mix_designs.insert_one(rec.model_dump())
         logger.info("seeded mix design SCC-8K")

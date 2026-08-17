@@ -71,6 +71,7 @@ const PRIMARY_NAV = [
   { to: "/twin", label: "Twin", icon: Box, testid: "nav-twin" },
   { to: "/rolls", label: "Rolls", icon: ScanBarcode, testid: "nav-rolls" },
   { to: "/fresh", label: "Fresh Test", icon: FlaskConical, testid: "nav-fresh", accent: true },
+  { to: "/batch", label: "Batch Plant", icon: Factory, testid: "nav-batch" },
   { to: "/inspection", label: "Inspect", icon: ClipboardCheck, testid: "nav-inspection" },
   { to: "/tags", label: "Tags", icon: Tags, testid: "nav-tags" },
   { to: "/tension", label: "Tension", icon: Calculator, testid: "nav-tension" },
@@ -88,7 +89,6 @@ const FIELD_NAV = [
 
 const SECONDARY_NAV = [
   { to: "/ncr", label: "NCR", icon: AlertTriangle, testid: "nav-ncr" },
-  { to: "/batch", label: "Batch Plant", icon: Factory, testid: "nav-batch" },
   { to: "/planner", label: "Planner", icon: CalendarDays, testid: "nav-planner" },
   { to: "/drawings", label: "Drawings", icon: Upload, testid: "nav-drawings" },
   { to: "/camber", label: "Camber", icon: Ruler, testid: "nav-camber" },
@@ -102,7 +102,6 @@ const SECONDARY_NAV = [
 
 const COMMAND_SECONDARY = [
   { to: "/ncr", label: "NCR", icon: AlertTriangle, testid: "nav-ncr" },
-  { to: "/batch", label: "Batch Plant", icon: Factory, testid: "nav-batch" },
   { to: "/planner", label: "Planner", icon: CalendarDays, testid: "nav-planner" },
   { to: "/drawings", label: "Drawings", icon: Upload, testid: "nav-drawings" },
   { to: "/camber", label: "Camber", icon: Ruler, testid: "nav-camber" },

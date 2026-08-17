@@ -17,10 +17,13 @@ from batch_plant import (
     build_recommendations,
     can_confirm,
     can_draft,
+    confirm_blocker,
+    copy_library_into_batch,
     forecast_note,
     hpa_to_inhg,
     is_immutable,
     solar_proxy,
+    weather_failure_env,
     weather_label,
 )
 from company_routes import get_company_doc, public_view
@@ -33,6 +36,7 @@ from models import (
     BatchRecordUpdate,
     MixDesign,
     MixDesignCreate,
+    new_id,
     now_iso,
 )
 from storage import company_logo_path
@@ -70,10 +74,8 @@ def _refuse_silent_edit(rec: dict):
 
 
 async def fetch_weather(lat: float, lon: float) -> dict:
-    """Open-Meteo, no API key. Failures never block batching."""
+    """Open-Meteo, no API key. Failures never block batching. Never log lat/lon."""
     env = {
-        "lat": lat,
-        "lon": lon,
         "source": "open-meteo",
         "env_flag": "",
         "captured_at": now_iso(),
@@ -91,8 +93,8 @@ async def fetch_weather(lat: float, lon: float) -> dict:
             "wind_speed_unit": "mph",
             "timezone": "auto",
         }
-        with httpx.Client(timeout=8.0) as client:
-            res = client.get(url, params=params)
+        async with httpx.AsyncClient(timeout=8.0) as client:
+            res = await client.get(url, params=params)
             res.raise_for_status()
             current = (res.json() or {}).get("current") or {}
         try:
@@ -106,7 +108,6 @@ async def fetch_weather(lat: float, lon: float) -> dict:
         except (TypeError, ValueError):
             env["wind_mph"] = None
         env["weather"] = weather_label(current.get("weather_code"))
-        hour = None
         try:
             iso = str(current.get("time") or "")
             hour = datetime.fromisoformat(iso.replace("Z", "+00:00")).hour
@@ -116,9 +117,9 @@ async def fetch_weather(lat: float, lon: float) -> dict:
         return env
     except Exception:
         logger.exception("open-meteo weather fetch failed")
-        env["source"] = "manual"
-        env["env_flag"] = "estimated/manual"
-        return env
+        failed = weather_failure_env(manual_override=False)
+        failed["env_flag"] = "estimated/manual"
+        return failed
 
 
 @router.get("/batch-plant/weather")
@@ -133,12 +134,7 @@ async def get_weather(lat: float = Query(...), lon: float = Query(...), user=Dep
         raise
     except Exception:
         logger.exception("get_weather failed")
-        return {
-            "source": "manual",
-            "env_flag": "estimated/manual",
-            "captured_at": now_iso(),
-            "manual_override": True,
-        }
+        return weather_failure_env(manual_override=True)
 
 
 @router.get("/mix-designs")
@@ -232,6 +228,9 @@ async def create_batch(payload: BatchRecordCreate, request: Request, user=Depend
                             "mixing_time_sec", "sequence_notes"):
                     if not data.get(key) and prev.get(key) not in (None, "", []):
                         data[key] = prev.get(key)
+        if data.get("mix_design_id"):
+            design = await db.mix_designs.find_one({"id": data["mix_design_id"]}, {"_id": 0})
+            data = copy_library_into_batch(data, design)
         job = await db.jobs.find_one({"id": data["job_id"]}, {"_id": 0})
         pour = await db.pours.find_one({"id": data["pour_id"]}, {"_id": 0})
         if not job or not pour:
@@ -281,6 +280,9 @@ async def confirm_batch(batch_id: str, request: Request, user=Depends(CONFIRM)):
         if is_immutable(rec):
             raise HTTPException(status_code=409, detail="Already confirmed")
         rec = apply_computed_batch(rec)
+        blocked = confirm_blocker(rec)
+        if blocked:
+            raise HTTPException(status_code=400, detail=blocked)
         rec["status"] = "confirmed"
         rec["immutable"] = True
         rec["confirmed_by"] = user.get("name") or user.get("email") or ""
@@ -307,7 +309,7 @@ async def amend_batch(batch_id: str, payload: BatchAmendInput, request: Request,
         child = dict(rec)
         child.update(patch)
         child = apply_computed_batch(child)
-        child["id"] = BatchRecord().id
+        child["id"] = new_id()
         child["parent_id"] = rec["id"]
         child["revision"] = int(rec.get("revision") or 1) + 1
         child["status"] = "draft"
@@ -499,8 +501,9 @@ async def export_batch_csv(batch_id: str, request: Request, user=Depends(get_cur
 async def export_batch_pdf(batch_id: str, request: Request, user=Depends(get_current_user)):
     try:
         rec = await _batch(batch_id)
-        company = public_view(await get_company_doc())
-        logo = company_logo_path("")
+        raw_company = await get_company_doc()
+        company = public_view(raw_company)
+        logo = company_logo_path((raw_company or {}).get("logo_filename") or "") or company_logo_path("")
         await write_audit(action="batch.export", user=user, request=request, entity_type="batch", entity_id=batch_id, extra={"kind": "pdf"})
         logger.info("batch pdf export id=%s by=%s", batch_id, user.get("email"))
         return StreamingResponse(

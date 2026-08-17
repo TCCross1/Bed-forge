@@ -54,6 +54,7 @@ export default function BatchPlant() {
 
   const wcm = waterCementitiousRatio(form.ingredients);
   const locked = Boolean(selected?.immutable || selected?.status === "confirmed");
+  const fieldsLocked = locked || !canDraft;
 
   const loadLists = useCallback(async () => {
     setLoading(true);
@@ -205,6 +206,9 @@ export default function BatchPlant() {
       target_slump_in: mix?.target_slump_in ?? cur.target_slump_in,
       target_spread_in: mix?.target_spread_in ?? cur.target_spread_in,
       target_temp_f: mix?.target_temp_f ?? cur.target_temp_f,
+      ingredients: (mix?.ingredients || []).length
+        ? mix.ingredients.map((row) => ({ ...row }))
+        : cur.ingredients,
     }));
   };
 
@@ -260,6 +264,10 @@ export default function BatchPlant() {
 
   const confirm = async () => {
     if (!canConfirm || !selectedId) return;
+    if (!String(form.mix_code || "").trim()) {
+      toast.error("Mix code is required before confirm");
+      return;
+    }
     setSaving(true);
     try {
       const { data } = await api.post(`/batches/${selectedId}/confirm`);
@@ -407,6 +415,11 @@ export default function BatchPlant() {
         </div>
 
         <div className="space-y-4">
+          {!canDraft && (
+            <div className="min-h-12 px-4 border border-[#1C2230] flex items-center text-sm text-muted-foreground" data-testid="batch-readonly">
+              QC / supervisors are read-only here. Production drafts. Plant manager confirms. Analyst never changes the mix.
+            </div>
+          )}
           <div className={`${cardClass} p-4 sm:p-6 space-y-4`} data-testid="batch-identity">
             <div className="text-[10px] font-mono uppercase tracking-[0.25em] text-[#C9A227]">Pour identity</div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -450,45 +463,45 @@ export default function BatchPlant() {
           <div className={`${cardClass} p-4 sm:p-6 space-y-4`}>
             <div className="flex flex-wrap gap-2 justify-between">
               <div className="text-[10px] font-mono uppercase tracking-[0.25em] text-[#C9A227]">Mix + process</div>
-              <button type="button" data-testid="batch-copy-prev" disabled={locked} onClick={copyPrevious} className="min-h-12 px-4 border border-[#1C2230] text-xs font-semibold uppercase tracking-wider">Copy previous mix</button>
+              <button type="button" data-testid="batch-copy-prev" disabled={fieldsLocked} onClick={copyPrevious} className="min-h-12 px-4 border border-[#1C2230] text-xs font-semibold uppercase tracking-wider">Copy previous mix</button>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <Field label="Mix library">
-                <select value={form.mix_design_id} disabled={locked} onChange={(e) => applyDesign(e.target.value)} className={inputClass}>
+                <select data-testid="batch-mix-library" value={form.mix_design_id} disabled={fieldsLocked} onChange={(e) => applyDesign(e.target.value)} className={inputClass}>
                   <option value="">Custom</option>
                   {designs.map((d) => <option key={d.id} value={d.id}>{d.mix_code}</option>)}
                 </select>
               </Field>
               <Field label="Mix code">
-                <input data-testid="batch-mix-code" disabled={locked} value={form.mix_code} onChange={(e) => setForm({ ...form, mix_code: e.target.value })} className={inputClass} />
+                <input data-testid="batch-mix-code" disabled={fieldsLocked} value={form.mix_code} onChange={(e) => setForm({ ...form, mix_code: e.target.value })} className={inputClass} />
               </Field>
               <Field label="Mixer operator">
-                <input disabled={locked} value={form.mixer_operator} onChange={(e) => setForm({ ...form, mixer_operator: e.target.value })} className={inputClass} />
+                <input disabled={fieldsLocked} value={form.mixer_operator} onChange={(e) => setForm({ ...form, mixer_operator: e.target.value })} className={inputClass} />
               </Field>
             </div>
             <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
-              <Field label="Target psi"><input disabled={locked} inputMode="decimal" value={form.target_strength_psi} onChange={(e) => setForm({ ...form, target_strength_psi: e.target.value })} className={inputClass} /></Field>
-              <Field label="Target air %"><input disabled={locked} inputMode="decimal" value={form.target_air_pct} onChange={(e) => setForm({ ...form, target_air_pct: e.target.value })} className={inputClass} /></Field>
-              <Field label="Target spread in"><input disabled={locked} inputMode="decimal" value={form.target_spread_in} onChange={(e) => setForm({ ...form, target_spread_in: e.target.value })} className={inputClass} /></Field>
-              <Field label="Target slump in"><input disabled={locked} inputMode="decimal" value={form.target_slump_in} onChange={(e) => setForm({ ...form, target_slump_in: e.target.value })} className={inputClass} /></Field>
-              <Field label="Target temp °F"><input disabled={locked} inputMode="decimal" value={form.target_temp_f} onChange={(e) => setForm({ ...form, target_temp_f: e.target.value })} className={inputClass} /></Field>
+              <Field label="Target psi"><input disabled={fieldsLocked} inputMode="decimal" value={form.target_strength_psi} onChange={(e) => setForm({ ...form, target_strength_psi: e.target.value })} className={inputClass} /></Field>
+              <Field label="Target air %"><input disabled={fieldsLocked} inputMode="decimal" value={form.target_air_pct} onChange={(e) => setForm({ ...form, target_air_pct: e.target.value })} className={inputClass} /></Field>
+              <Field label="Target spread in"><input disabled={fieldsLocked} inputMode="decimal" value={form.target_spread_in} onChange={(e) => setForm({ ...form, target_spread_in: e.target.value })} className={inputClass} /></Field>
+              <Field label="Target slump in"><input disabled={fieldsLocked} inputMode="decimal" value={form.target_slump_in} onChange={(e) => setForm({ ...form, target_slump_in: e.target.value })} className={inputClass} /></Field>
+              <Field label="Target temp °F"><input disabled={fieldsLocked} inputMode="decimal" value={form.target_temp_f} onChange={(e) => setForm({ ...form, target_temp_f: e.target.value })} className={inputClass} /></Field>
             </div>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              <Field label="Batch size"><input disabled={locked} inputMode="decimal" value={form.batch_size} onChange={(e) => setForm({ ...form, batch_size: e.target.value })} className={inputClass} /></Field>
+              <Field label="Batch size"><input disabled={fieldsLocked} inputMode="decimal" value={form.batch_size} onChange={(e) => setForm({ ...form, batch_size: e.target.value })} className={inputClass} /></Field>
               <Field label="Unit">
-                <select disabled={locked} value={form.batch_unit} onChange={(e) => setForm({ ...form, batch_unit: e.target.value })} className={inputClass}>
+                <select disabled={fieldsLocked} value={form.batch_unit} onChange={(e) => setForm({ ...form, batch_unit: e.target.value })} className={inputClass}>
                   <option value="yd3">yd³</option>
                   <option value="m3">m³</option>
                 </select>
               </Field>
-              <Field label="Mix time (sec)"><input disabled={locked} inputMode="decimal" value={form.mixing_time_sec} onChange={(e) => setForm({ ...form, mixing_time_sec: e.target.value })} className={inputClass} /></Field>
-              <Field label="Truck / mixer ID"><input disabled={locked} value={form.truck_id} onChange={(e) => setForm({ ...form, truck_id: e.target.value })} className={inputClass} /></Field>
+              <Field label="Mix time (sec)"><input disabled={fieldsLocked} inputMode="decimal" value={form.mixing_time_sec} onChange={(e) => setForm({ ...form, mixing_time_sec: e.target.value })} className={inputClass} /></Field>
+              <Field label="Truck / mixer ID"><input disabled={fieldsLocked} value={form.truck_id} onChange={(e) => setForm({ ...form, truck_id: e.target.value })} className={inputClass} /></Field>
             </div>
             <Field label="Sequence notes">
-              <textarea disabled={locked} data-testid="batch-notes" rows={2} value={form.sequence_notes} onChange={(e) => setForm({ ...form, sequence_notes: e.target.value })} className={`${inputClass} py-2`} placeholder="Charge sequence" />
+              <textarea disabled={fieldsLocked} data-testid="batch-notes" rows={2} value={form.sequence_notes} onChange={(e) => setForm({ ...form, sequence_notes: e.target.value })} className={`${inputClass} py-2`} placeholder="Charge sequence" />
             </Field>
             <Field label="Deviations">
-              <textarea disabled={locked} rows={2} value={form.deviations} onChange={(e) => setForm({ ...form, deviations: e.target.value })} className={`${inputClass} py-2`} />
+              <textarea disabled={fieldsLocked} rows={2} value={form.deviations} onChange={(e) => setForm({ ...form, deviations: e.target.value })} className={`${inputClass} py-2`} />
             </Field>
             <div className="min-h-12 px-4 border border-[#1C2230] flex items-center font-mono" data-testid="batch-wcm">
               w/cm {wcm != null ? wcm : "—"} (water+ice / cement+SCM)
@@ -498,24 +511,24 @@ export default function BatchPlant() {
           <div className={`${cardClass} p-4 sm:p-6 space-y-3`} data-testid="batch-env">
             <div className="flex items-center justify-between gap-2">
               <div className="text-[10px] font-mono uppercase tracking-[0.25em] text-[#C9A227]">Environment</div>
-              <button type="button" data-testid="batch-env-capture" disabled={locked || envBusy} onClick={captureEnv} className="min-h-12 px-4 border border-[#C9A227] text-[#C9A227] text-xs font-semibold uppercase tracking-wider">
+              <button type="button" data-testid="batch-env-capture" disabled={fieldsLocked || envBusy} onClick={captureEnv} className="min-h-12 px-4 border border-[#C9A227] text-[#C9A227] text-xs font-semibold uppercase tracking-wider">
                 {envBusy ? "Capturing…" : "Capture outdoor now"}
               </button>
             </div>
             {form.environment.env_flag && <div className="text-xs text-[#FFD600]">Flag: {form.environment.env_flag} — override any field. Weather down never blocks a batch.</div>}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              <Field label="Ambient °F"><input disabled={locked} inputMode="decimal" value={form.environment.ambient_f || ""} onChange={(e) => setEnv("ambient_f", e.target.value)} className={inputClass} /></Field>
-              <Field label="Mix temp °F"><input disabled={locked} inputMode="decimal" value={form.environment.mix_temp_f || ""} onChange={(e) => setEnv("mix_temp_f", e.target.value)} className={inputClass} /></Field>
-              <Field label="RH %"><input disabled={locked} inputMode="decimal" value={form.environment.rh_pct || ""} onChange={(e) => setEnv("rh_pct", e.target.value)} className={inputClass} /></Field>
-              <Field label="Pressure inHg"><input disabled={locked} inputMode="decimal" value={form.environment.pressure_inhg || ""} onChange={(e) => setEnv("pressure_inhg", e.target.value)} className={inputClass} /></Field>
-              <Field label="Wind mph"><input disabled={locked} inputMode="decimal" value={form.environment.wind_mph || ""} onChange={(e) => setEnv("wind_mph", e.target.value)} className={inputClass} /></Field>
+              <Field label="Ambient °F"><input disabled={fieldsLocked} inputMode="decimal" value={form.environment.ambient_f || ""} onChange={(e) => setEnv("ambient_f", e.target.value)} className={inputClass} /></Field>
+              <Field label="Mix temp °F"><input disabled={fieldsLocked} inputMode="decimal" value={form.environment.mix_temp_f || ""} onChange={(e) => setEnv("mix_temp_f", e.target.value)} className={inputClass} /></Field>
+              <Field label="RH %"><input disabled={fieldsLocked} inputMode="decimal" value={form.environment.rh_pct || ""} onChange={(e) => setEnv("rh_pct", e.target.value)} className={inputClass} /></Field>
+              <Field label="Pressure inHg"><input disabled={fieldsLocked} inputMode="decimal" value={form.environment.pressure_inhg || ""} onChange={(e) => setEnv("pressure_inhg", e.target.value)} className={inputClass} /></Field>
+              <Field label="Wind mph"><input disabled={fieldsLocked} inputMode="decimal" value={form.environment.wind_mph || ""} onChange={(e) => setEnv("wind_mph", e.target.value)} className={inputClass} /></Field>
               <Field label="Weather">
-                <select disabled={locked} value={form.environment.weather || ""} onChange={(e) => setEnv("weather", e.target.value)} className={inputClass}>
+                <select disabled={fieldsLocked} value={form.environment.weather || ""} onChange={(e) => setEnv("weather", e.target.value)} className={inputClass}>
                   <option value="">Tag</option>
                   {["sunny", "mainly sunny", "partly cloudy", "overcast", "rain", "fog", "snow", "thunderstorm"].map((w) => <option key={w} value={w}>{w}</option>)}
                 </select>
               </Field>
-              <Field label="Solar load"><input disabled={locked} value={form.environment.solar_proxy || ""} onChange={(e) => setEnv("solar_proxy", e.target.value)} className={inputClass} /></Field>
+              <Field label="Solar load"><input disabled={fieldsLocked} value={form.environment.solar_proxy || ""} onChange={(e) => setEnv("solar_proxy", e.target.value)} className={inputClass} /></Field>
             </div>
           </div>
 
@@ -524,11 +537,11 @@ export default function BatchPlant() {
             <div className="space-y-2">
               {form.ingredients.map((row, idx) => (
                 <div key={`${row.kind}-${row.name}-${idx}`} className="grid grid-cols-2 sm:grid-cols-6 gap-2">
-                  <input disabled={locked} className={inputClass} value={row.name} onChange={(e) => setIng(idx, "name", e.target.value)} />
-                  <input disabled={locked} className={inputClass} placeholder="source" value={row.source || ""} onChange={(e) => setIng(idx, "source", e.target.value)} />
-                  <input disabled={locked} className={inputClass} inputMode="decimal" placeholder={row.kind === "admixture" ? "dose" : "lb"} value={row.kind === "admixture" ? (row.dosage ?? "") : (row.weight_lb ?? "")} onChange={(e) => setIng(idx, row.kind === "admixture" ? "dosage" : "weight_lb", e.target.value)} />
-                  <input disabled={locked} className={inputClass} placeholder="unit" value={row.dosage_unit || ""} onChange={(e) => setIng(idx, "dosage_unit", e.target.value)} />
-                  <input disabled={locked} className={inputClass} inputMode="decimal" placeholder="moist %" value={row.moisture_pct ?? ""} onChange={(e) => setIng(idx, "moisture_pct", e.target.value)} />
+                  <input disabled={fieldsLocked} className={inputClass} value={row.name} onChange={(e) => setIng(idx, "name", e.target.value)} />
+                  <input disabled={fieldsLocked} className={inputClass} placeholder="source" value={row.source || ""} onChange={(e) => setIng(idx, "source", e.target.value)} />
+                  <input disabled={fieldsLocked} className={inputClass} inputMode="decimal" placeholder={row.kind === "admixture" ? "dose" : "lb"} value={row.kind === "admixture" ? (row.dosage ?? "") : (row.weight_lb ?? "")} onChange={(e) => setIng(idx, row.kind === "admixture" ? "dosage" : "weight_lb", e.target.value)} />
+                  <input disabled={fieldsLocked} className={inputClass} placeholder="unit" value={row.dosage_unit || ""} onChange={(e) => setIng(idx, "dosage_unit", e.target.value)} />
+                  <input disabled={fieldsLocked} className={inputClass} inputMode="decimal" placeholder="moist %" value={row.moisture_pct ?? ""} onChange={(e) => setIng(idx, "moisture_pct", e.target.value)} />
                   <div className="text-[10px] font-mono uppercase text-muted-foreground flex items-center">{row.kind}</div>
                 </div>
               ))}
