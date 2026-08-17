@@ -467,3 +467,82 @@ class DeviceRegistrationCreate(BaseModel):
     device_class: str = "field"
     push_token: str = ""
     model: str = ""
+
+
+# ---------- Strand roll mill traceability ----------
+ROLL_STATUSES = ["draft", "extracted", "confirmed", "assigned", "depleted"]
+LOW_CONFIDENCE = 0.72
+
+
+class StrandRollPhoto(BaseModel):
+    id: str = Field(default_factory=new_id)
+    kind: str = "tag"  # tag | mtc
+    filename: str = ""
+    url: str = ""
+    content_type: str = "image/jpeg"
+    captured_at: str = Field(default_factory=now_iso)
+
+
+class StrandRoll(BaseModel):
+    id: str = Field(default_factory=new_id)
+    reel_number: str = ""
+    heat_number: str = ""
+    lot_number: str = ""
+    pack_weight: str = ""
+    pack_length: str = ""
+    astm_standard: str = ""
+    strand_grade: str = ""
+    strand_type: str = "Low-Relaxation"
+    nominal_diameter: str = ""
+    area_in2: Optional[float] = None
+    cert_values: Dict[str, Any] = Field(default_factory=dict)
+    photos: List[StrandRollPhoto] = Field(default_factory=list)
+    mtc_url: str = ""
+    received_date: str = ""
+    status: str = "draft"
+    extractor: str = ""
+    extractor_confidence: float = 0.0
+    field_confidence: Dict[str, float] = Field(default_factory=dict)
+    raw_text: str = ""
+    notes: str = ""
+    logged_by: str = ""
+    logged_at: str = Field(default_factory=now_iso)
+    confirmed_by: str = ""
+    confirmed_at: Optional[str] = None
+    created_at: str = Field(default_factory=now_iso)
+    updated_at: str = Field(default_factory=now_iso)
+
+
+class StrandRollConfirm(BaseModel):
+    reel_number: Optional[str] = None
+    heat_number: Optional[str] = None
+    lot_number: Optional[str] = None
+    pack_weight: Optional[str] = None
+    pack_length: Optional[str] = None
+    astm_standard: Optional[str] = None
+    strand_grade: Optional[str] = None
+    strand_type: Optional[str] = None
+    nominal_diameter: Optional[str] = None
+    area_in2: Optional[float] = None
+    cert_values: Optional[Dict[str, Any]] = None
+    received_date: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class StrandRollAssignment(BaseModel):
+    id: str = Field(default_factory=new_id)
+    roll_id: str
+    bed_id: str
+    pour_id: Optional[str] = None
+    beam_ids: List[str] = Field(default_factory=list)
+    allocated_length: Optional[float] = None
+    logged_by: str = ""
+    logged_at: str = Field(default_factory=now_iso)
+    created_at: str = Field(default_factory=now_iso)
+
+
+class StrandRollAssignInput(BaseModel):
+    bed_id: str
+    pour_id: Optional[str] = None
+    beam_ids: Optional[List[str]] = None
+    allocated_length: Optional[float] = None

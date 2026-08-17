@@ -16,6 +16,7 @@ import PreDelivery from "./pages/PreDelivery";
 import FormsExport from "./pages/FormsExport";
 import Drawings from "./pages/Drawings";
 import BedPlanner from "./pages/BedPlanner";
+import StrandRolls from "./pages/StrandRolls";
 import ARMeasure from "./pages/ARMeasure";
 
 function Protected({ children }) {
@@ -50,6 +51,7 @@ function AppRoutes() {
       <Route path="/finish" element={<Protected><FinishSheet /></Protected>} />
       <Route path="/release" element={<Protected><PreDelivery /></Protected>} />
       <Route path="/forms" element={<Protected><FormsExport /></Protected>} />
+      <Route path="/rolls" element={<Protected><StrandRolls /></Protected>} />
       <Route path="/measure" element={<Protected><ARMeasure /></Protected>} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

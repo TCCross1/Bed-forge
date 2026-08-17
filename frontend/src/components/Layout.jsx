@@ -15,6 +15,7 @@ import {
   Upload,
   CalendarDays,
   ScanLine,
+  ScanBarcode,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { useDevice } from "../context/DeviceContext";
@@ -50,6 +51,7 @@ export function BrandLockup({ className = "h-12 w-auto", testid = "brand-lockup"
 const PRIMARY_NAV = [
   { to: "/", label: "Board", icon: LayoutGrid, testid: "nav-dashboard" },
   { to: "/twin", label: "Twin", icon: Box, testid: "nav-twin" },
+  { to: "/rolls", label: "Rolls", icon: ScanBarcode, testid: "nav-rolls" },
   { to: "/inspection", label: "Inspect", icon: ClipboardCheck, testid: "nav-inspection" },
   { to: "/tension", label: "Tension", icon: Calculator, testid: "nav-tension" },
   { to: "/forms", label: "Forms", icon: FileSpreadsheet, testid: "nav-forms" },
@@ -57,8 +59,8 @@ const PRIMARY_NAV = [
 
 const FIELD_NAV = [
   { to: "/", label: "Board", icon: LayoutGrid, testid: "nav-dashboard" },
+  { to: "/rolls", label: "Rolls", icon: ScanBarcode, testid: "nav-rolls" },
   { to: "/twin", label: "Twin", icon: Box, testid: "nav-twin" },
-  { to: "/measure", label: "AR", icon: ScanLine, testid: "nav-measure" },
   { to: "/tension", label: "Tension", icon: Calculator, testid: "nav-tension" },
 ];
 
@@ -134,6 +136,7 @@ export default function Layout({ children }) {
   const fieldMore = [
     { to: "/inspection", label: "Inspect", icon: ClipboardCheck, testid: "nav-inspection" },
     { to: "/forms", label: "Forms", icon: FileSpreadsheet, testid: "nav-forms" },
+    { to: "/measure", label: "AR Measure", icon: ScanLine, testid: "nav-measure" },
     ...SECONDARY_NAV.filter((i) => i.to !== "/measure"),
   ];
 

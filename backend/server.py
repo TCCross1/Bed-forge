@@ -23,12 +23,13 @@ from models import (
 )
 from auth import router as auth_router, get_current_user, seed_admin
 from tension import run_tension_calc, calc_theoretical_elongation, evaluate_tension
-from seed import seed_plant, seed_l25390, seed_bed_assignments
+from seed import seed_plant, seed_l25390, seed_bed_assignments, seed_strand_rolls
 from blueprint_routes import router as blueprint_router
 from bed_routes import router as bed_router
 from tension_routes import router as tension_router
 from ar_routes import router as ar_router, emit_sync_event
 from bed_layout import covers, map_production_status
+from strand_roll_routes import router as strand_roll_router, assert_tension_allowed
 import excel_export
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
@@ -123,6 +124,11 @@ async def list_beds(user=Depends(get_current_user)):
 async def update_bed(bed_id: str, payload: BedUpdate, user=Depends(get_current_user)):
     try:
         updates = {k: v for k, v in payload.model_dump().items() if v is not None}
+        if updates.get("status") == "tensioning":
+            bed = await db.beds.find_one({"id": bed_id}, {"_id": 0})
+            if not bed:
+                raise HTTPException(status_code=404, detail="Bed not found")
+            await assert_tension_allowed(bed_id, updates.get("current_pour_id") or bed.get("current_pour_id"))
         updates["updated_at"] = now_iso()
         await db.beds.update_one({"id": bed_id}, {"$set": updates})
         bed = await db.beds.find_one({"id": bed_id}, {"_id": 0})
@@ -248,6 +254,17 @@ async def get_beam(beam_id: str, user=Depends(get_current_user)):
         if spec:
             beam["measurements"] = await db.spec_measurements.find({"spec_id": spec["id"]}, {"_id": 0}).to_list(500)
         beam["ar_measurements"] = await db.ar_measurements.find({"beam_id": beam_id}, {"_id": 0, "photo_data": 0}).sort("created_at", -1).to_list(100)
+        recs = await db.strand_roll_assignments.find({"beam_ids": beam_id}, {"_id": 0}).to_list(50)
+        if not recs and beam.get("bed_id"):
+            recs = await db.strand_roll_assignments.find({"bed_id": beam["bed_id"]}, {"_id": 0}).to_list(50)
+        roll_ids = [r.get("roll_id") for r in recs if r.get("roll_id")]
+        rolls = await db.strand_rolls.find({"id": {"$in": roll_ids}}, {"_id": 0, "raw_text": 0}).to_list(50) if roll_ids else []
+        beam["strand_rolls"] = rolls
+        beam["traceability"] = {
+            "heat_numbers": [r.get("heat_number") for r in rolls if r.get("heat_number")],
+            "reel_numbers": [r.get("reel_number") for r in rolls if r.get("reel_number")],
+            "chain": "Beam → strands → Strand Roll → Heat Number → Mill Test Certificate",
+        }
         if beam.get("product_type_id"):
             beam["product_type"] = await db.product_types.find_one({"id": beam["product_type_id"]}, {"_id": 0})
         return beam
@@ -327,6 +344,7 @@ async def list_tension_reports(user=Depends(get_current_user)):
 async def create_tension_report(payload: TensionReportCreate, user=Depends(get_current_user)):
     try:
         data = payload.model_dump()
+        await assert_tension_allowed(data["bed_id"], data.get("pour_id"))
         theo = calc_theoretical_elongation(
             data["jacking_force_kip"], data["bed_length_ft"],
             data["strand_area_in2"], data["modulus_ksi"],
@@ -535,6 +553,7 @@ app.include_router(blueprint_router)
 app.include_router(bed_router)
 app.include_router(tension_router)
 app.include_router(ar_router)
+app.include_router(strand_roll_router)
 
 app.add_middleware(
     CORSMiddleware,
@@ -563,10 +582,16 @@ async def startup():
     await db.ar_measurements.create_index("created_at")
     await db.sync_events.create_index("created_at")
     await db.devices.create_index([("user_id", 1), ("platform", 1), ("device_class", 1)])
+    await db.strand_rolls.create_index("heat_number")
+    await db.strand_rolls.create_index("logged_at")
+    await db.strand_roll_assignments.create_index("bed_id")
+    await db.strand_roll_assignments.create_index("roll_id")
+    await db.strand_roll_assignments.create_index("pour_id")
     await seed_admin()
     await seed_plant()
     await seed_l25390()
     await seed_bed_assignments()
+    await seed_strand_rolls()
     logger.info("BedForge QC startup complete.")
 
 

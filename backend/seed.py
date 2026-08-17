@@ -266,3 +266,64 @@ async def seed_bed_assignments():
     except Exception:
         logger.exception("seed_bed_assignments failed")
 
+
+async def seed_strand_rolls():
+    """Idempotent mill-traceable rolls so seeded beds can pass the tensioning gate."""
+    try:
+        beds = await db.beds.find({}, {"_id": 0}).sort("bed_number", 1).to_list(20)
+        if not beds:
+            return
+        from models import StrandRoll, StrandRollAssignment
+        for bed in beds:
+            if not bed.get("current_pour_id") and bed.get("status") in ("idle",):
+                continue
+            heat = f"H270-SEED-{bed.get('bed_number')}"
+            if await db.strand_rolls.find_one({"heat_number": heat}):
+                continue
+            beams = await db.beams.find({"bed_id": bed["id"]}, {"_id": 0}).to_list(50)
+            roll = StrandRoll(
+                reel_number=f"R-SEED-{bed.get('bed_number'):02d}",
+                heat_number=heat,
+                lot_number=f"LOT-SEED-{bed.get('bed_number')}",
+                pack_weight="6400 lb",
+                pack_length="14500 ft",
+                astm_standard="ASTM A416",
+                strand_grade="270",
+                strand_type="Low-Relaxation",
+                nominal_diameter="0.50in",
+                area_in2=0.153,
+                received_date=now_iso()[:10],
+                status="assigned",
+                extractor="seed",
+                extractor_confidence=1.0,
+                field_confidence={
+                    "reel_number": 1.0,
+                    "heat_number": 1.0,
+                    "lot_number": 1.0,
+                    "pack_weight": 1.0,
+                    "pack_length": 1.0,
+                    "astm_standard": 1.0,
+                    "strand_grade": 1.0,
+                    "strand_type": 1.0,
+                    "nominal_diameter": 1.0,
+                    "area_in2": 1.0,
+                },
+                logged_by="system-seed",
+                confirmed_by="system-seed",
+                confirmed_at=now_iso(),
+                notes="Seeded mill-tag record so demo beds can tension. Replace by scanning the live coil tag.",
+            )
+            await db.strand_rolls.insert_one(roll.model_dump())
+            rec = StrandRollAssignment(
+                roll_id=roll.id,
+                bed_id=bed["id"],
+                pour_id=bed.get("current_pour_id") or (beams[0].get("pour_id") if beams else None),
+                beam_ids=[b["id"] for b in beams],
+                allocated_length=float(bed.get("length_ft") or 0),
+                logged_by="system-seed",
+            )
+            await db.strand_roll_assignments.insert_one(rec.model_dump())
+        logger.info("seeded strand rolls for %s beds", len(beds))
+    except Exception:
+        logger.exception("seed_strand_rolls failed")
+

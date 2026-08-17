@@ -261,6 +261,19 @@ export default function DigitalTwin() {
         </div>
 
         <div className="space-y-4 sm:space-y-6">
+          {(beam?.traceability?.heat_numbers || []).length > 0 && (
+            <div className={`${cardClass} p-5 sm:p-6`} data-testid="strand-traceability">
+              <h3 className="font-display font-bold uppercase tracking-wider text-lg">Strand heat chain</h3>
+              <p className="text-[10px] font-mono text-muted-foreground mt-1">{beam.traceability.chain}</p>
+              <div className="mt-3 font-mono text-sm text-[#00E676]">
+                {(beam.traceability.heat_numbers || []).map((h) => `HEAT ${h}`).join("  ·  ")}
+              </div>
+              <div className="text-[10px] font-mono text-muted-foreground mt-1">
+                {(beam.traceability.reel_numbers || []).map((r) => `REEL ${r}`).join("  ·  ")}
+              </div>
+              <Link to="/rolls" className="inline-block mt-3 text-[10px] font-mono uppercase tracking-widest text-primary">Open strand rolls</Link>
+            </div>
+          )}
           <div className={`${cardClass} p-5 sm:p-6 space-y-3`} data-testid="assign-to-bed">
             <h3 className="font-display font-bold uppercase tracking-wider text-lg">Assign to Bed</h3>
             <Field label="Casting bed">

@@ -10,7 +10,7 @@ import {
   strandTensionColor,
   strandTensionStatus,
 } from "../lib/beamSpec";
-import { Calculator, CheckCircle2, XCircle, Save, Loader2, Upload } from "lucide-react";
+import { Calculator, CheckCircle2, XCircle, Save, Loader2, Upload, ScanBarcode } from "lucide-react";
 import { toast } from "sonner";
 import { useDevice } from "../context/DeviceContext";
 
@@ -120,6 +120,10 @@ export default function TensionCalculator() {
   };
 
   const saveStrand = async (na = false) => {
+    if (gated) {
+      toast.error(gate.message || "Scan a mill tag before tensioning");
+      return;
+    }
     if (!twin?.spec?.id || selected?.kind !== "strand") return;
     setBusy("strand");
     try {
@@ -145,6 +149,10 @@ export default function TensionCalculator() {
   };
 
   const saveHoldDown = async () => {
+    if (gated) {
+      toast.error(gate.message || "Scan a mill tag before tensioning");
+      return;
+    }
     if (!twin?.spec?.id || selected?.kind !== "hold_down") return;
     setBusy("hold");
     try {
@@ -191,6 +199,10 @@ export default function TensionCalculator() {
   };
 
   const saveReport = async () => {
+    if (gated) {
+      toast.error(gate.message || "Scan a mill tag before tensioning");
+      return;
+    }
     if (!bedId) {
       toast.error("Select a bed to save this report");
       return;
@@ -225,6 +237,8 @@ export default function TensionCalculator() {
   const within = result?.within_tolerance;
   const summary = twin?.summary || {};
   const spec = twin?.spec;
+  const gate = twin?.strand_gate || { ok: true, rolls: [] };
+  const gated = gate.ok === false;
 
   return (
     <Layout>
@@ -234,6 +248,12 @@ export default function TensionCalculator() {
         right={
           <div className="flex flex-wrap gap-2 justify-end">
             <ARMeasureLink beamId={selectedId} purpose="layout" />
+            <Link
+              to="/rolls"
+              className="min-h-12 px-4 border border-[#1C2230] rounded-none flex items-center gap-2 text-sm font-semibold uppercase tracking-wider hover:border-primary hover:text-primary"
+            >
+              <ScanBarcode className="w-4 h-4" /> Rolls
+            </Link>
             <Link
               to="/drawings"
               className="min-h-12 px-4 border border-[#1C2230] rounded-none flex items-center gap-2 text-sm font-semibold uppercase tracking-wider hover:border-primary hover:text-primary"
@@ -245,6 +265,23 @@ export default function TensionCalculator() {
       />
 
       <div className="p-4 sm:p-6 lg:p-8 space-y-4 sm:space-y-6">
+        {gated && (
+          <div className={`${cardClass} p-4 border-[#FF3366]`} data-testid="strand-gate-block">
+            <div className="font-display font-bold uppercase tracking-wider text-[#FF3366]">Tensioning locked</div>
+            <p className="text-sm text-muted-foreground mt-1">{gate.message || "Scan and confirm a mill tag before stressing this bed."}</p>
+            <Link to="/rolls" className="inline-flex mt-3 min-h-12 px-4 bg-primary text-white font-display font-bold uppercase tracking-widest items-center gap-2">
+              <ScanBarcode className="w-4 h-4" /> Scan mill tag
+            </Link>
+          </div>
+        )}
+        {!gated && gate.rolls?.length > 0 && (
+          <div className={`${cardClass} p-4`} data-testid="strand-gate-ok">
+            <div className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground">Mill heat on this bed</div>
+            <div className="font-mono text-sm mt-1 text-[#00E676]">
+              {gate.rolls.map((r) => `HEAT ${r.heat_number}${r.reel_number ? ` · REEL ${r.reel_number}` : ""}`).join("  ·  ")}
+            </div>
+          </div>
+        )}
         <div className={`${cardClass} p-4 grid grid-cols-1 md:grid-cols-3 gap-3`}>
           <Field label="Beam">
             <select data-testid="tension-beam-select" value={selectedId} onChange={(e) => setSelectedId(e.target.value)} className={inputClass}>
@@ -362,7 +399,7 @@ export default function TensionCalculator() {
                   type="button"
                   data-testid="strand-save"
                   onClick={() => saveStrand(false)}
-                  disabled={busy === "strand"}
+                  disabled={gated || busy === "strand"}
                   className="w-full min-h-14 bg-primary text-white font-display font-bold uppercase tracking-widest rounded-none hover:bg-white hover:text-black disabled:opacity-60"
                 >
                   {busy === "strand" ? "Saving…" : "Save strand"}
@@ -371,7 +408,7 @@ export default function TensionCalculator() {
                   type="button"
                   data-testid="strand-na"
                   onClick={() => saveStrand(true)}
-                  disabled={busy === "strand"}
+                  disabled={gated || busy === "strand"}
                   className="w-full min-h-12 border border-[#1C2230] font-semibold uppercase tracking-wider hover:border-primary hover:text-primary"
                 >
                   Mark N/A
@@ -408,7 +445,7 @@ export default function TensionCalculator() {
                   type="button"
                   data-testid="hd-save"
                   onClick={saveHoldDown}
-                  disabled={busy === "hold"}
+                  disabled={gated || busy === "hold"}
                   className="w-full min-h-14 bg-primary text-white font-display font-bold uppercase tracking-widest rounded-none hover:bg-white hover:text-black disabled:opacity-60"
                 >
                   {busy === "hold" ? "Saving…" : "Save hold-down"}
@@ -466,7 +503,7 @@ export default function TensionCalculator() {
               <button
                 data-testid="tc-save"
                 onClick={saveReport}
-                disabled={busy === "save"}
+                disabled={gated || busy === "save"}
                 className="w-full min-h-12 border border-[#1C2230] rounded-none flex items-center justify-center gap-2 font-semibold uppercase tracking-wider hover:border-primary hover:text-primary disabled:opacity-60"
               >
                 {busy === "save" ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}

@@ -90,6 +90,9 @@ class StrandItem(BaseModel):
     recorded_at: Optional[str] = None
     notes: str = ""
     page: Optional[int] = None
+    roll_id: Optional[str] = None
+    heat_number: str = ""
+    reel_number: str = ""
 
     @model_validator(mode="after")
     def sync_pattern_fields(self):

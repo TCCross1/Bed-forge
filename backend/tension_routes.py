@@ -11,6 +11,7 @@ from beam_spec import (
 )
 from db import db
 from models import now_iso
+from strand_roll_routes import assert_tension_allowed, bed_tension_gate
 from tension import strand_capture_result
 
 logger = logging.getLogger(__name__)
@@ -115,6 +116,7 @@ async def get_tension_twin(beam_id: str, user=Depends(get_current_user)):
         bed_length = float((bed or {}).get("length_ft") or (spec.get("geometry") or {}).get("length_ft") or 0)
         strands = _enrich_strands(spec.get("strands") or [], bed_length)
         hold_downs = spec.get("hold_downs") or []
+        gate = await bed_tension_gate(beam.get("bed_id") or "", beam.get("pour_id") or (bed or {}).get("current_pour_id"))
         return {
             "beam": beam,
             "spec": spec,
@@ -123,6 +125,7 @@ async def get_tension_twin(beam_id: str, user=Depends(get_current_user)):
             "strands": strands,
             "hold_downs": hold_downs,
             "summary": _summary(strands, hold_downs),
+            "strand_gate": gate,
         }
     except HTTPException:
         raise
@@ -148,7 +151,13 @@ async def capture_strand_tension(
             raise HTTPException(status_code=404, detail="Strand not found on this BeamSpec")
         beam = await db.beams.find_one({"id": spec.get("beam_id") or ""}, {"_id": 0}) if spec.get("beam_id") else None
         bed = await db.beds.find_one({"id": (beam or {}).get("bed_id") or ""}, {"_id": 0}) if beam else None
+        await assert_tension_allowed((beam or {}).get("bed_id"), (beam or {}).get("pour_id") or (bed or {}).get("current_pour_id"))
         bed_length = float(
+            payload.bed_length_ft
+            or (bed or {}).get("length_ft")
+            or (spec.get("geometry") or {}).get("length_ft")
+            or 0
+        )
             payload.bed_length_ft
             or (bed or {}).get("length_ft")
             or (spec.get("geometry") or {}).get("length_ft")
@@ -176,6 +185,15 @@ async def capture_strand_tension(
             "strands.$.notes": payload.notes if payload.notes else strand.get("notes") or "",
             "updated_at": stamp,
         }
+        if not strand.get("roll_id") and beam:
+            recs = await db.strand_roll_assignments.find({"bed_id": beam.get("bed_id") or ""}, {"_id": 0}).to_list(20)
+            recs = [r for r in recs if not r.get("pour_id") or r.get("pour_id") == beam.get("pour_id")]
+            if recs:
+                linked = await db.strand_rolls.find_one({"id": recs[0].get("roll_id")}, {"_id": 0})
+                if linked:
+                    updates["strands.$.roll_id"] = linked.get("id")
+                    updates["strands.$.heat_number"] = linked.get("heat_number") or ""
+                    updates["strands.$.reel_number"] = linked.get("reel_number") or ""
         await db.beam_specs.update_one(
             {"id": spec_id, "strands.id": strand.get("id")},
             {"$set": updates},
@@ -209,6 +227,9 @@ async def capture_hold_down(
         item = _find_hold_down(spec, hd_id)
         if not item:
             raise HTTPException(status_code=404, detail="Hold-down not found on this BeamSpec")
+        beam = await db.beams.find_one({"id": spec.get("beam_id") or ""}, {"_id": 0}) if spec.get("beam_id") else None
+        if beam and beam.get("bed_id"):
+            await assert_tension_allowed(beam.get("bed_id"), beam.get("pour_id"))
         status = (payload.status or "pending").lower()
         allowed = {"pending", "installed", "stressed", "released", "inspected", "verified", "issue"}
         if status not in allowed:

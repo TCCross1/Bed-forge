@@ -301,6 +301,10 @@ async def update_assignment(assignment_id: str, payload: BedAssignmentUpdate, us
         )
         if beam_hits:
             raise HTTPException(status_code=409, detail="Beam is already assigned on overlapping dates")
+        if updates.get("production_status") == "stressed":
+            from strand_roll_routes import assert_tension_allowed
+            beam_doc = await db.beams.find_one({"id": rec["beam_id"]}, {"_id": 0}) or {}
+            await assert_tension_allowed(bed_id, rec.get("pour_id") or beam_doc.get("pour_id"))
         updates["updated_at"] = now_iso()
         await db.bed_assignments.update_one({"id": assignment_id}, {"$set": updates})
         if updates.get("production_status"):
