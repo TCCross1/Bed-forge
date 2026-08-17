@@ -18,6 +18,10 @@ CONTRACT_ID = "255390"
 PRODUCT_NAME = "KYTC Precast PC I-Beam Type 2"
 LENGTH_FT = 73.333
 DEPTH_IN = 36.0
+# Casting bed layout — Spans 1 & 3. Stations from Marked End.
+HOLD_DOWN_ME_FT = 29.333  # 29'-4"
+HOLD_DOWN_UE_FT = 44.0    # 44'-0"
+HOLD_DOWN_TYPE = "Dayton/Richmond H-56-S"
 
 
 def _hw(kind, name, station_ft, height_in, *, offset_in=0.0, face="top",
@@ -47,20 +51,22 @@ def _hw(kind, name, station_ft, height_in, *, offset_in=0.0, face="top",
 def build_l25390_spec(beam_id=None, job_id=None, pour_id=None, blueprint_id=None,
                       beam_mark="B1") -> BeamSpec:
     length = LENGTH_FT
-    # Draped hold-downs at ~0.4L / 0.6L
-    hd1, hd2 = round(length * 0.40, 2), round(length * 0.60, 2)
+    hd1, hd2 = HOLD_DOWN_ME_FT, HOLD_DOWN_UE_FT
     ll1, ll2 = round(length * 0.20, 2), round(length * 0.80, 2)
 
-    strand_offsets = [-6.0, -3.6, -1.2, 1.2, 3.6, 6.0]
+    # End-view pattern (looking at Marked End). 2" PCI grid.
+    # Straight: 12 strands in the 18" bottom flange, rows at 2" and 4" soffit.
+    # Draped: 8 strands in the 6" web at ±2" (H-56-S pitch). HIGH at ends,
+    # depressed through hold-downs. Stressed in the draped position.
+    straight_offsets = [-5.0, -3.0, -1.0, 1.0, 3.0, 5.0]
     strands = []
     n = 1
-    for row in range(2):
-        soffit = 2.0 + row * 2.25
-        for col, off in enumerate(strand_offsets, start=1):
-            debond = 4.0 if abs(off) >= 5.5 and n <= 4 else 0.0
+    for row, soffit in enumerate((2.0, 4.0), start=1):
+        for col, off in enumerate(straight_offsets, start=1):
+            debond = 4.0 if row == 1 and abs(off) >= 5.0 else 0.0
             strands.append(StrandItem(
                 number=n,
-                row=row + 1,
+                row=row,
                 column=col,
                 size="0.5in",
                 detensioning="straight",
@@ -73,32 +79,33 @@ def build_l25390_spec(beam_id=None, job_id=None, pour_id=None, blueprint_id=None
                 y_in=soffit,
                 debond_me_ft=debond,
                 debond_ue_ft=debond,
-                notes="Bottom flange straight. Outer pair bituminous-debonded 4'-0\" each end." if debond else "",
+                notes="Bottom flange straight. Outer pair bituminous-debonded 4'-0\" each end." if debond else "Bottom flange straight.",
                 page=2,
             ))
             n += 1
-    drape_rows = [
-        (2.0, [-4.8, -1.6, 1.6, 4.8]),
-        (4.25, [-4.8, -1.6, 1.6, 4.8]),
-    ]
-    for row_i, (soffit, offs) in enumerate(drape_rows, start=1):
-        for col, off in enumerate(offs, start=1):
+    draped_rows = (
+        (18.0, 2.0),
+        (22.0, 4.0),
+        (26.0, 6.0),
+        (30.0, 8.0),
+    )
+    for end_y, hold_y in draped_rows:
+        for off in (-2.0, 2.0):
             strands.append(StrandItem(
                 number=n,
-                row=row_i,
-                column=col,
                 size="0.5in",
                 detensioning="draped",
                 draped=True,
                 area_in2=0.153,
                 jacking_kip=31.0,
-                soffit_in=soffit,
-                drape_peak_in=18.0,
-                hold_down_stations_ft=[hd1, hd2],
+                soffit_in=hold_y,
+                hold_down_y_in=hold_y,
+                drape_peak_in=end_y,
+                y_in=end_y,
                 offset_in=off,
                 x_in=off,
-                y_in=soffit,
-                notes="Harped / draped. Hold-downs at 0.4L and 0.6L.",
+                hold_down_stations_ft=[hd1, hd2],
+                notes="Harped / draped. Stressed in draped position. H-56-S hold-downs at 29'-4\" and 44'-0\" ME.",
                 page=2,
             ))
             n += 1
@@ -183,33 +190,33 @@ def build_l25390_spec(beam_id=None, job_id=None, pour_id=None, blueprint_id=None
     # Hold-downs — I-beam clamps, pair at each harped station
     hardware.append(_hw(
         "hold_down", "Hold-down 1", hd1, 2.5,
-        face="bottom", type_code="HD-1", size="I-beam hold-down",
-        material="steel", notes="Draped-strand hold-down at 0.4L. Pair across web.",
+        face="bottom", type_code="H-56-S", size=HOLD_DOWN_TYPE,
+        material="steel", notes="Dayton/Richmond H-56-S pair at 29'-4\" from Marked End. Draped strands depressed here.",
         tolerance_in=1.0, quantity=2, page=2,
     ))
     hardware.append(_hw(
         "hold_down", "Hold-down 2", hd2, 2.5,
-        face="bottom", type_code="HD-2", size="I-beam hold-down",
-        material="steel", notes="Draped-strand hold-down at 0.6L. Pair across web.",
+        face="bottom", type_code="H-56-S", size=HOLD_DOWN_TYPE,
+        material="steel", notes="Dayton/Richmond H-56-S pair at 44'-0\" from Marked End. Draped strands depressed here.",
         tolerance_in=1.0, quantity=2, page=2,
     ))
     hold_downs = [
         HoldDownItem(
             station_from_marked_end=hd1,
             height=2.5,
-            type_spec="I-beam hold-down HD-1",
+            type_spec=HOLD_DOWN_TYPE,
             quantity_at_station=2,
             orientation="transverse",
-            notes="Draped-strand hold-down at 0.4L. Pair across web.",
+            notes="Dayton/Richmond H-56-S. Casting bed layout Spans 1 & 3 — 29'-4\" ME.",
             page=2,
         ),
         HoldDownItem(
             station_from_marked_end=hd2,
             height=2.5,
-            type_spec="I-beam hold-down HD-2",
+            type_spec=HOLD_DOWN_TYPE,
             quantity_at_station=2,
             orientation="transverse",
-            notes="Draped-strand hold-down at 0.6L. Pair across web.",
+            notes="Dayton/Richmond H-56-S. Casting bed layout Spans 1 & 3 — 44'-0\" ME.",
             page=2,
         ),
     ]
@@ -289,7 +296,10 @@ def build_l25390_spec(beam_id=None, job_id=None, pour_id=None, blueprint_id=None
         notes=[
             f"Larue County KY 210 over Fork of Nolin River — Contract {CONTRACT_ID} (job {JOB_NUMBER}).",
             "Plan item 08632 PRECAST PC I BEAM TYPE 2, 733 LF (10 girders @ 73'-4\", two-stage part-width).",
-            "Strands: 20 – ½\" Ø 270k low-relaxation (AASHTO M203). 12 straight + 8 draped.",
+            "Strands: 20 – ½\" Ø 270k low-relaxation (AASHTO M203). 12 straight in bottom flange + 8 draped in web.",
+            "End view: straight at 2\"/4\" soffit on a 2\" grid (±1,3,5\"); draped at ±2\" (web) rising to 18/22/26/30\".",
+            "Draped strands stressed in the draped position. Hold-downs: Dayton/Richmond H-56-S at 29'-4\" and 44'-0\" ME (qty 2 each).",
+            "Detensioning sequence per shop drawing — cut outer straight strands after release; draped remain until hold-downs are released.",
             "Outer 4 straight strands bituminous-debonded 4'-0\" each end; cut and recessed after release.",
             "Release strength 4,500 psi. Design f'c = 7,000 psi. Design camber 1.25\".",
             "Finish: trowel top flange; as-cast sides and soffit; KYTC concrete sealer on exterior girders.",
@@ -306,3 +316,63 @@ def build_l25390_spec(beam_id=None, job_id=None, pour_id=None, blueprint_id=None
         source_pages=3,
     )
     return ensure_tension_geometry(spec)
+
+
+CAPTURE_STRAND_KEYS = (
+    "measured_elongation", "jacking_force", "variance_pct", "within_tolerance",
+    "na", "recorded_by", "recorded_at", "theoretical_elongation", "notes",
+)
+CAPTURE_HD_KEYS = ("status", "verified_by", "verified_at")
+
+
+def merge_l25390_pattern(existing: dict, fresh: BeamSpec) -> dict:
+    """Refresh strand/hold-down geometry from the shop drawing; keep capture data by strand number."""
+    old_by_num = {int(s.get("number")): s for s in (existing.get("strands") or []) if s.get("number") is not None}
+    merged_strands = []
+    for strand in fresh.strands:
+        row = strand.model_dump()
+        prev = old_by_num.get(strand.number)
+        if prev:
+            row["id"] = prev.get("id") or row["id"]
+            row["strand_id"] = prev.get("strand_id") or row["id"]
+            for key in CAPTURE_STRAND_KEYS:
+                if prev.get(key) not in (None, ""):
+                    row[key] = prev[key]
+        merged_strands.append(row)
+    old_hds = list(existing.get("hold_downs") or [])
+    merged_hds = []
+    for i, item in enumerate(fresh.hold_downs):
+        row = item.model_dump()
+        if i < len(old_hds):
+            row["id"] = old_hds[i].get("id") or row["id"]
+            for key in CAPTURE_HD_KEYS:
+                if old_hds[i].get(key) not in (None, "", "pending"):
+                    row[key] = old_hds[i][key]
+            if old_hds[i].get("notes") and "H-56" not in (old_hds[i].get("notes") or ""):
+                row["notes"] = f"{row['notes']} {old_hds[i]['notes']}".strip()
+        merged_hds.append(row)
+    dumped = fresh.model_dump()
+    dumped["id"] = existing.get("id") or dumped["id"]
+    dumped["beam_id"] = existing.get("beam_id") or dumped.get("beam_id")
+    dumped["job_id"] = existing.get("job_id") or dumped.get("job_id")
+    dumped["status"] = existing.get("status") or dumped["status"]
+    dumped["locked_by"] = existing.get("locked_by") or dumped.get("locked_by")
+    dumped["locked_at"] = existing.get("locked_at") or dumped.get("locked_at")
+    dumped["created_at"] = existing.get("created_at") or dumped.get("created_at")
+    dumped["strands"] = merged_strands
+    dumped["hold_downs"] = merged_hds
+    hardware = list(existing.get("hardware") or dumped.get("hardware") or [])
+    for item in hardware:
+        if item.get("kind") == "hold_down":
+            item["type_code"] = "H-56-S"
+            item["size"] = HOLD_DOWN_TYPE
+            st = (item.get("position") or {}).get("station_ft")
+            if st is not None and abs(float(st) - HOLD_DOWN_ME_FT) < 1.5:
+                item["position"]["station_ft"] = HOLD_DOWN_ME_FT
+                item["notes"] = "Dayton/Richmond H-56-S pair at 29'-4\" from Marked End. Draped strands depressed here."
+            elif st is not None and abs(float(st) - HOLD_DOWN_UE_FT) < 1.5:
+                item["position"]["station_ft"] = HOLD_DOWN_UE_FT
+                item["notes"] = "Dayton/Richmond H-56-S pair at 44'-0\" from Marked End. Draped strands depressed here."
+    dumped["hardware"] = hardware
+    dumped["notes"] = fresh.notes
+    return dumped

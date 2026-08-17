@@ -2,7 +2,7 @@ import React, { useMemo, useState, Suspense } from "react";
 import { Canvas } from "@react-three/fiber";
 import { OrbitControls, Environment, Html, ContactShadows } from "@react-three/drei";
 import * as THREE from "three";
-import { hardwareColor, inchesToFt } from "../lib/beamSpec";
+import { hardwareColor, inchesToFt, strandPathPoints } from "../lib/beamSpec";
 import { COMPACT_HARDWARE_KINDS } from "../lib/bedLayout";
 
 function iBeamShape(geo) {
@@ -82,32 +82,17 @@ function BeamBody({ geo, onPick, bodyColor = "#9aa0aa", highlighted = false }) {
   );
 }
 
-function StrandRun({ strand, length }) {
+function StrandRun({ strand, length, holdDowns }) {
   const points = useMemo(() => {
-    const x = inchesToFt(strand.offset_in);
-    const y0 = inchesToFt(strand.soffit_in);
-    const draped = strand.detensioning === "draped";
-    const peak = inchesToFt(strand.drape_peak_in || strand.soffit_in);
-    const pts = [];
-    const steps = 24;
-    for (let i = 0; i <= steps; i += 1) {
-      const t = i / steps;
-      const z = t * length;
-      let y = y0;
-      if (draped) {
-        const mid = 0.5 - t;
-        y = y0 + (peak - y0) * (1 - 4 * mid * mid);
-      }
-      pts.push(new THREE.Vector3(x, y, z));
-    }
-    return pts;
-  }, [strand, length]);
+    return strandPathPoints(strand, length, holdDowns, 48).map((p) => new THREE.Vector3(p.x, p.y, p.z));
+  }, [strand, length, holdDowns]);
   const curve = useMemo(() => new THREE.CatmullRomCurve3(points), [points]);
+  const draped = strand.draped || strand.detensioning === "draped";
   return (
     <mesh>
-      <tubeGeometry args={[curve, 24, 0.02, 6, false]} />
+      <tubeGeometry args={[curve, 32, 0.022, 6, false]} />
       <meshStandardMaterial
-        color={strand.detensioning === "draped" ? "#7E57C2" : "#5C6BC0"}
+        color={draped ? "#7E57C2" : "#5C6BC0"}
         metalness={0.6}
         roughness={0.35}
       />
@@ -310,7 +295,7 @@ export function SpecBeam({
     >
       <BeamBody geo={geo} onPick={onPick || onClick} bodyColor={bodyColor} highlighted={highlighted} />
       {!compact && (spec.strands || []).map((s) => (
-        <StrandRun key={s.id} strand={s} length={length} />
+        <StrandRun key={s.id} strand={s} length={length} holdDowns={spec.hold_downs} />
       ))}
       {!compact && <Stirrups zones={spec.stirrup_zones} geo={geo} />}
       {hardware.map((item) => (

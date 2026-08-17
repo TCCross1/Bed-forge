@@ -55,6 +55,8 @@ def test_l25390_strands_and_hardware():
     assert spec.notes
     assert spec.special_finishes
     assert any(z.shape == "hoop" for z in spec.stirrup_zones)
+    assert spec.hold_downs[0].station_from_marked_end == 29.333
+    assert "H-56-S" in spec.hold_downs[0].type_spec
 
 
 def test_compare_within_and_out_of_tolerance():

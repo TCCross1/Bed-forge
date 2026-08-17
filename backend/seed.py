@@ -127,12 +127,14 @@ async def seed_plant():
 
 
 async def seed_l25390():
-    """Idempotent Larue County / L25390 Type 2 I-beam spec for the digital twin."""
+    """Idempotent Larue County / L25390 Type 2 I-beam spec for the digital twin.
+
+    Always refreshes strand pattern + H-56-S hold-downs from the shop-drawing
+    gold standard so the tension twin cannot drift to a generic layout.
+    """
     try:
-        if await db.beam_specs.find_one({"job_number": "L25390"}):
-            return
         from models import Job
-        from l25390 import build_l25390_spec, PRODUCT_NAME, LENGTH_FT
+        from l25390 import build_l25390_spec, LENGTH_FT, merge_l25390_pattern
 
         job = await db.jobs.find_one({"job_number": "L25390"}, {"_id": 0})
         if not job:
@@ -154,20 +156,40 @@ async def seed_l25390():
                 "job_id": job["id"],
             }})
 
-        spec = build_l25390_spec(
+        fresh = build_l25390_spec(
             beam_id=beam_id,
             job_id=job["id"],
             pour_id=beam.get("pour_id") if beam else None,
             beam_mark=mark,
         )
-        spec.status = "locked"
-        spec.locked_by = "system-seed"
-        spec.locked_at = now_iso()
-        spec.review_notes = "Seeded from Larue County contract 255390 / L25390 Type 2 shop-drawing reference."
-        dumped = spec.model_dump()
+        existing = await db.beam_specs.find_one({"job_number": "L25390"}, {"_id": 0})
+        if existing:
+            dumped = merge_l25390_pattern(existing, fresh)
+            dumped["review_notes"] = (
+                existing.get("review_notes")
+                or "Seeded from Larue County contract 255390 / L25390 Type 2 shop-drawing reference."
+            )
+            await db.beam_specs.update_one({"id": existing["id"]}, {"$set": {
+                "strands": dumped["strands"],
+                "hold_downs": dumped["hold_downs"],
+                "hardware": dumped["hardware"],
+                "notes": dumped["notes"],
+                "geometry": dumped["geometry"],
+                "review_notes": dumped["review_notes"],
+            }})
+            logger.info("l25390 strand pattern refreshed spec=%s strands=%s", existing["id"], len(dumped.get("strands") or []))
+            if beam_id:
+                await db.beams.update_one({"id": beam_id}, {"$set": {"spec_id": existing["id"]}})
+            return
+
+        fresh.status = "locked"
+        fresh.locked_by = "system-seed"
+        fresh.locked_at = now_iso()
+        fresh.review_notes = "Seeded from Larue County contract 255390 / L25390 Type 2 shop-drawing reference."
+        dumped = fresh.model_dump()
         await db.beam_specs.insert_one(dumped)
         if beam_id:
-            await db.beams.update_one({"id": beam_id}, {"$set": {"spec_id": spec.id}})
+            await db.beams.update_one({"id": beam_id}, {"$set": {"spec_id": fresh.id}})
     except Exception:
         logger.exception("seed_l25390 failed")
 

@@ -88,3 +88,59 @@ export function strandTensionColor(strand) {
 export function holdDownColor(item) {
   return HOLD_DOWN_STATUS_COLORS[item?.status] || HOLD_DOWN_STATUS_COLORS.pending;
 }
+
+export function isDraped(strand) {
+  return Boolean(strand?.draped || strand?.detensioning === "draped");
+}
+
+export function strandEndYIn(strand) {
+  if (isDraped(strand)) return Number(strand.drape_peak_in ?? strand.y_in ?? strand.soffit_in ?? 0);
+  return Number(strand.y_in ?? strand.soffit_in ?? 0);
+}
+
+export function strandHoldYIn(strand) {
+  if (isDraped(strand)) return Number(strand.hold_down_y_in ?? strand.soffit_in ?? 2);
+  return strandEndYIn(strand);
+}
+
+export function drapeKeyStations(strand, lengthFt, holdDowns) {
+  const fromStrand = (strand?.hold_down_stations_ft || []).map(Number).filter((n) => Number.isFinite(n) && n > 0);
+  if (fromStrand.length) return fromStrand.slice().sort((a, b) => a - b);
+  const fromHd = (holdDowns || []).map((h) => Number(h.station_from_marked_end)).filter((n) => Number.isFinite(n) && n > 0);
+  if (fromHd.length) return fromHd.slice().sort((a, b) => a - b);
+  const length = Number(lengthFt) || 0;
+  return length ? [+(length * 0.4).toFixed(3), +(length * 0.6).toFixed(3)] : [];
+}
+
+export function strandElevationIn(strand, zFt, lengthFt, holdDowns) {
+  const yEnd = strandEndYIn(strand);
+  if (!isDraped(strand)) return yEnd;
+  const yHold = strandHoldYIn(strand);
+  const length = Number(lengthFt) || 0;
+  const stations = drapeKeyStations(strand, length, holdDowns);
+  const keys = [[0, yEnd], ...stations.map((s) => [s, yHold]), [length, yEnd]];
+  const z = Math.max(0, Math.min(length, Number(zFt) || 0));
+  for (let i = 0; i < keys.length - 1; i += 1) {
+    const [z0, y0] = keys[i];
+    const [z1, y1] = keys[i + 1];
+    if (z <= z1 || i === keys.length - 2) {
+      if (z1 === z0) return y1;
+      return y0 + ((z - z0) / (z1 - z0)) * (y1 - y0);
+    }
+  }
+  return yEnd;
+}
+
+export function strandPathPoints(strand, lengthFt, holdDowns, steps = 48) {
+  const x = inchesToFt(strand.x_in ?? strand.offset_in);
+  const length = Number(lengthFt) || 0;
+  const stations = drapeKeyStations(strand, length, holdDowns);
+  const zs = new Set([0, length]);
+  stations.forEach((s) => zs.add(s));
+  for (let i = 0; i <= steps; i += 1) zs.add((i / steps) * length);
+  return [...zs].sort((a, b) => a - b).map((z) => ({
+    x,
+    y: inchesToFt(strandElevationIn(strand, z, length, holdDowns)),
+    z,
+  }));
+}

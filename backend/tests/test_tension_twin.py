@@ -4,8 +4,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from beam_spec import StrandItem, assign_strand_grid, ensure_tension_geometry, hold_downs_from_hardware
-from l25390 import build_l25390_spec
+from beam_spec import StrandItem, assign_strand_grid, drape_elevation_in, ensure_tension_geometry, hold_downs_from_hardware, strand_end_y_in, strand_hold_y_in
+from l25390 import HOLD_DOWN_ME_FT, HOLD_DOWN_TYPE, HOLD_DOWN_UE_FT, build_l25390_spec
 from tension import strand_capture_result
 
 
@@ -40,6 +40,45 @@ def test_l25390_strand_pattern_is_unique():
     assert all(s.draped == (s.detensioning == "draped") for s in spec.strands)
     ids = [s.id for s in spec.strands]
     assert len(ids) == len(set(ids))
+    end_xy = {(round(s.x_in, 2), round(strand_end_y_in(s), 2)) for s in spec.strands}
+    assert len(end_xy) == 20
+
+
+def test_l25390_end_view_does_not_overlap_draped_on_straight():
+    spec = ensure_tension_geometry(build_l25390_spec())
+    straight = [s for s in spec.strands if not s.draped]
+    draped = [s for s in spec.strands if s.draped]
+    assert len(straight) == 12
+    assert len(draped) == 8
+    assert {round(s.soffit_in, 1) for s in straight} == {2.0, 4.0}
+    assert {round(s.x_in, 1) for s in straight} == {-5.0, -3.0, -1.0, 1.0, 3.0, 5.0}
+    assert {round(s.x_in, 1) for s in draped} == {-2.0, 2.0}
+    assert {round(strand_end_y_in(s), 1) for s in draped} == {18.0, 22.0, 26.0, 30.0}
+    for s in draped:
+        assert strand_end_y_in(s) > strand_hold_y_in(s)
+
+
+def test_draped_path_descends_through_hold_downs():
+    spec = ensure_tension_geometry(build_l25390_spec())
+    draped = next(s for s in spec.strands if s.draped)
+    length = spec.geometry.length_ft
+    y_end = drape_elevation_in(draped, 0.0, length, spec.hold_downs)
+    y_mid_hd = drape_elevation_in(draped, HOLD_DOWN_ME_FT, length, spec.hold_downs)
+    y_far = drape_elevation_in(draped, length, length, spec.hold_downs)
+    y_before = drape_elevation_in(draped, HOLD_DOWN_ME_FT * 0.5, length, spec.hold_downs)
+    assert abs(y_end - strand_end_y_in(draped)) < 0.05
+    assert abs(y_far - strand_end_y_in(draped)) < 0.05
+    assert abs(y_mid_hd - strand_hold_y_in(draped)) < 0.05
+    assert y_end > y_before > y_mid_hd
+
+
+def test_hold_downs_h56s_stations():
+    spec = build_l25390_spec(beam_mark="B2")
+    assert len(spec.hold_downs) == 2
+    assert spec.hold_downs[0].station_from_marked_end == HOLD_DOWN_ME_FT
+    assert spec.hold_downs[1].station_from_marked_end == HOLD_DOWN_UE_FT
+    assert all(HOLD_DOWN_TYPE in (hd.type_spec or "") for hd in spec.hold_downs)
+    assert all(hd.quantity_at_station == 2 for hd in spec.hold_downs)
 
 
 def test_strand_capture_within_and_outside():

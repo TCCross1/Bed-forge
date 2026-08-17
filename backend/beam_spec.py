@@ -75,6 +75,7 @@ class StrandItem(BaseModel):
     x_in: Optional[float] = None
     y_in: Optional[float] = None
     drape_peak_in: Optional[float] = None
+    hold_down_y_in: Optional[float] = None
     hold_down_stations_ft: List[float] = Field(default_factory=list)
     debond_me_ft: float = 0.0
     debond_ue_ft: float = 0.0
@@ -102,7 +103,14 @@ class StrandItem(BaseModel):
             self.x_in = self.offset_in
         else:
             self.offset_in = self.x_in
-        if self.y_in is None:
+        if self.draped:
+            if self.drape_peak_in is None:
+                self.drape_peak_in = self.y_in if self.y_in is not None else self.soffit_in
+            if self.y_in is None:
+                self.y_in = self.drape_peak_in
+            if self.hold_down_y_in is None:
+                self.hold_down_y_in = self.soffit_in
+        elif self.y_in is None:
             self.y_in = self.soffit_in
         else:
             self.soffit_in = self.y_in
@@ -314,20 +322,105 @@ def flatten_hardware(spec: Dict[str, Any]) -> List[Dict[str, Any]]:
     return list(spec.get("hardware") or [])
 
 
+def _as_dict(strand: Any) -> Dict[str, Any]:
+    if isinstance(strand, dict):
+        return strand
+    if hasattr(strand, "model_dump"):
+        return strand.model_dump()
+    return {}
+
+
+def is_draped(strand: Any) -> bool:
+    data = _as_dict(strand)
+    return bool(data.get("draped") or data.get("detensioning") == "draped")
+
+
+def strand_end_y_in(strand: Any) -> float:
+    """Height from soffit at the marked-end strand pattern (shop-drawing end view)."""
+    data = _as_dict(strand)
+    if is_draped(strand):
+        return float(data.get("drape_peak_in") or data.get("y_in") or data.get("soffit_in") or 0)
+    if data.get("y_in") is not None:
+        return float(data["y_in"])
+    return float(data.get("soffit_in") or 0)
+
+
+def strand_hold_y_in(strand: Any) -> float:
+    """Height from soffit at hold-down stations (depressed drape)."""
+    data = _as_dict(strand)
+    if is_draped(strand):
+        if data.get("hold_down_y_in") is not None:
+            return float(data["hold_down_y_in"])
+        return float(data.get("soffit_in") or 2.0)
+    return strand_end_y_in(strand)
+
+
+def drape_key_stations_ft(strand: Any, length_ft: float = 0.0, hold_downs: Optional[List[Any]] = None) -> List[float]:
+    data = _as_dict(strand)
+    raw = [float(s) for s in (data.get("hold_down_stations_ft") or []) if s is not None]
+    stations = sorted(s for s in raw if s > 0)
+    if stations:
+        return stations
+    extra = []
+    for item in hold_downs or []:
+        rec = _as_dict(item)
+        st = rec.get("station_from_marked_end")
+        if st is not None:
+            extra.append(float(st))
+    extra = sorted(s for s in extra if s > 0)
+    if extra:
+        return extra
+    length = float(length_ft or 0)
+    if length > 0:
+        return [round(length * 0.40, 3), round(length * 0.60, 3)]
+    return []
+
+
+def drape_elevation_in(strand: Any, z_ft: float, length_ft: float, hold_downs: Optional[List[Any]] = None) -> float:
+    """Elevation (in from soffit) of a strand at station z_ft from Marked End.
+
+    Straight strands are constant. Draped strands are HIGH at both ends (end-view
+    pattern) and LOW at each hold-down — piecewise linear through those stations.
+    """
+    y_end = strand_end_y_in(strand)
+    if not is_draped(strand):
+        return y_end
+    y_hold = strand_hold_y_in(strand)
+    length = float(length_ft or 0)
+    stations = drape_key_stations_ft(strand, length, hold_downs)
+    keys = [(0.0, y_end)] + [(st, y_hold) for st in stations] + [(length, y_end)]
+    z = max(0.0, min(length, float(z_ft or 0)))
+    for i in range(len(keys) - 1):
+        z0, y0 = keys[i]
+        z1, y1 = keys[i + 1]
+        if z <= z1 or i == len(keys) - 2:
+            if z1 == z0:
+                return y1
+            return y0 + (z - z0) / (z1 - z0) * (y1 - y0)
+    return y_end
+
+
 def assign_strand_grid(strands: List[StrandItem]) -> List[StrandItem]:
-    """Assign row/column from physical x/y so the end-view pattern is unique per beam."""
+    """Assign row/column from the shop-drawing END VIEW (x, end-y)."""
     if not strands:
         return strands
-    heights = sorted({round(float(s.y_in if s.y_in is not None else s.soffit_in), 2) for s in strands})
+    heights = sorted({round(strand_end_y_in(s), 2) for s in strands})
     height_row = {h: i + 1 for i, h in enumerate(heights)}
     by_row: Dict[int, List[StrandItem]] = {}
     for strand in strands:
-        y = round(float(strand.y_in if strand.y_in is not None else strand.soffit_in), 2)
-        strand.row = height_row.get(y, 1)
+        y_end = round(strand_end_y_in(strand), 2)
+        strand.row = height_row.get(y_end, 1)
         strand.x_in = float(strand.x_in if strand.x_in is not None else strand.offset_in)
-        strand.y_in = float(strand.y_in if strand.y_in is not None else strand.soffit_in)
         strand.offset_in = strand.x_in
-        strand.soffit_in = strand.y_in
+        if strand.draped or strand.detensioning == "draped":
+            if strand.drape_peak_in is None:
+                strand.drape_peak_in = y_end
+            strand.y_in = float(strand.drape_peak_in)
+            if strand.hold_down_y_in is None:
+                strand.hold_down_y_in = float(strand.soffit_in or 2.0)
+        else:
+            strand.y_in = float(strand.y_in if strand.y_in is not None else strand.soffit_in)
+            strand.soffit_in = strand.y_in
         if not strand.strand_id:
             strand.strand_id = strand.id
         by_row.setdefault(strand.row, []).append(strand)

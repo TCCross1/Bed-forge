@@ -45,7 +45,7 @@ export default function TensionCalculator() {
   const [beams, setBeams] = useState([]);
   const [selectedId, setSelectedId] = useState(params.get("beam") || "");
   const [twin, setTwin] = useState(null);
-  const [layer, setLayer] = useState("both");
+  const [view, setView] = useState("end");
   const [selected, setSelected] = useState(null);
   const [measured, setMeasured] = useState("");
   const [jacking, setJacking] = useState("");
@@ -110,12 +110,12 @@ export default function TensionCalculator() {
       setMeasured(next.item.measured_elongation != null ? String(next.item.measured_elongation) : "");
       setJacking(String(next.item.jacking_force || next.item.jacking_kip || ""));
       setNotes(next.item.notes || "");
-      setLayer((cur) => (cur === "hold_downs" ? "both" : cur));
+      setView((cur) => (cur === "side" ? cur : "end"));
     }
     if (next?.kind === "hold_down") {
       setHdStatus(next.item.status || "pending");
       setNotes(next.item.notes || "");
-      setLayer((cur) => (cur === "strands" ? "both" : cur));
+      setView("side");
     }
   };
 
@@ -253,16 +253,19 @@ export default function TensionCalculator() {
               ))}
             </select>
           </Field>
-          <div className="md:col-span-2 grid grid-cols-3 gap-2 content-end">
-            {["strands", "hold_downs", "both"].map((key) => (
+          <div className="md:col-span-2 grid grid-cols-2 gap-2 content-end">
+            {[
+              { key: "end", label: "End View" },
+              { key: "side", label: "Side / Drape" },
+            ].map((item) => (
               <button
-                key={key}
+                key={item.key}
                 type="button"
-                data-testid={`tension-layer-${key}`}
-                onClick={() => setLayer(key)}
-                className={`min-h-12 font-condensed uppercase tracking-wider text-sm border border-[#1C2230] ${layer === key ? "bg-primary text-white" : "text-muted-foreground"}`}
+                data-testid={`tension-view-${item.key}`}
+                onClick={() => setView(item.key)}
+                className={`min-h-12 font-condensed uppercase tracking-wider text-sm border border-[#1C2230] ${view === item.key ? "bg-primary text-white" : "text-muted-foreground"}`}
               >
-                {key === "hold_downs" ? "Hold-Downs" : key === "both" ? "Both" : "Strands"}
+                {item.label}
               </button>
             ))}
           </div>
@@ -301,7 +304,9 @@ export default function TensionCalculator() {
         <div className="grid grid-cols-1 xl:grid-cols-[1fr_340px] gap-4">
           <div className={`${cardClass} overflow-hidden`}>
             <div className="px-4 py-3 border-b border-[#1C2230] font-display font-bold uppercase tracking-wider">
-              {spec ? `${spec.product_name} · ${spec.beam_mark}` : "Select a beam with a locked BeamSpec"}
+              {spec
+                ? `${spec.product_name} · ${spec.beam_mark} · ${view === "end" ? "Marked End strand pattern" : "Draped profile + H-56-S"}`
+                : "Select a beam with a locked BeamSpec"}
             </div>
             {loading ? (
               <div className={`${device.field ? "h-[320px]" : "h-[520px]"} flex items-center justify-center text-muted-foreground`}>
@@ -312,7 +317,7 @@ export default function TensionCalculator() {
                 spec={spec}
                 strands={twin.strands || []}
                 holdDowns={twin.hold_downs || []}
-                layer={layer}
+                view={view}
                 selected={selected}
                 onSelect={pick}
                 height={device.field ? 320 : 520}
@@ -335,7 +340,12 @@ export default function TensionCalculator() {
                 </h3>
                 <div className="text-[11px] font-mono text-muted-foreground space-y-1">
                   <div>ROW {selected.item.row} · COL {selected.item.column} · {selected.item.draped || selected.item.detensioning === "draped" ? "DRAPED" : "STRAIGHT"}</div>
-                  <div>X {selected.item.x_in ?? selected.item.offset_in}" · Y {selected.item.y_in ?? selected.item.soffit_in}" SOFFIT</div>
+                  <div>
+                    X {selected.item.x_in ?? selected.item.offset_in}" CL
+                    {selected.item.draped || selected.item.detensioning === "draped"
+                      ? ` · END ${selected.item.drape_peak_in ?? selected.item.y_in}" · HOLD ${selected.item.hold_down_y_in ?? selected.item.soffit_in}"`
+                      : ` · Y ${selected.item.y_in ?? selected.item.soffit_in}" SOFFIT`}
+                  </div>
                   <div>THEO {selected.item.theoretical_elongation ?? "—"}" · {selected.item.size} · {selected.item.area_in2} in²</div>
                   <div>STATUS {strandTensionStatus(selected.item).toUpperCase()}</div>
                 </div>
