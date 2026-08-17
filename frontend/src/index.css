@@ -1,12 +1,10 @@
-@import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;500;600;700;800&family=Barlow:wght@400;500;600;700;800&family=IBM+Plex+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
-
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 body {
   margin: 0;
-  font-family: 'IBM Plex Sans', sans-serif;
+  font-family: Inter, "Segoe UI", Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   background: #0A0C10;
@@ -14,7 +12,7 @@ body {
 }
 
 code, .font-mono {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: ui-monospace, "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
 }
 
 @layer base {
@@ -50,10 +48,10 @@ code, .font-mono {
     @apply bg-background text-foreground;
   }
   h1, h2, h3, h4, .font-display {
-    font-family: 'Barlow', sans-serif;
+    font-family: Inter, "Segoe UI", Arial, sans-serif;
   }
   .font-condensed {
-    font-family: 'Barlow Condensed', sans-serif;
+    font-family: "Arial Narrow", "Roboto Condensed", "Segoe UI", Arial, sans-serif;
   }
 }
 

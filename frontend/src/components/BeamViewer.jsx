@@ -1,6 +1,6 @@
-import React, { Suspense, useMemo, useRef } from "react";
-import { Canvas } from "@react-three/fiber";
-import { Environment, Html, Line, OrbitControls } from "@react-three/drei";
+import React, { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { Canvas, useThree } from "@react-three/fiber";
+import { Html, Line, OrbitControls } from "@react-three/drei";
 import * as THREE from "three";
 
 const inchesToFeet = (value = 0) => value / 12;
@@ -10,6 +10,56 @@ const steelGray = "#7D8795";
 const steelBright = "#B9C2CF";
 const brassGold = "#E3C565";
 const asphaltBlack = "#1A1A1A";
+
+function TwinCanvasFallback({ message = "Digital Twin unavailable on this device." }) {
+  return (
+    <div className="w-full h-full flex items-center justify-center p-6 bg-[#0A0C10] text-center">
+      <div className="max-w-md border border-border rounded-sm bg-card/90 px-5 py-4">
+        <div className="font-display font-bold uppercase tracking-wider text-sm text-white">3D Viewer Fallback</div>
+        <div className="mt-2 text-sm text-muted-foreground font-mono">{message}</div>
+      </div>
+    </div>
+  );
+}
+
+class TwinCanvasErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false };
+  }
+
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+
+  componentDidCatch() {}
+
+  render() {
+    if (this.state.hasError) {
+      return this.props.fallback;
+    }
+    return this.props.children;
+  }
+}
+
+function CanvasContextMonitor({ onContextLost }) {
+  const { gl } = useThree();
+
+  useEffect(() => {
+    const canvas = gl?.domElement;
+    if (!canvas) return undefined;
+
+    const handleContextLost = (event) => {
+      event.preventDefault();
+      onContextLost?.();
+    };
+
+    canvas.addEventListener("webglcontextlost", handleContextLost, false);
+    return () => canvas.removeEventListener("webglcontextlost", handleContextLost, false);
+  }, [gl, onContextLost]);
+
+  return null;
+}
 
 function formatFeet(value = 0, digits = 1) {
   return `${Number(value).toFixed(digits)} ft`;
@@ -669,19 +719,28 @@ function BeamAssembly({ beam, anomalies = [], onSurfacePick, onHardwareSelect, s
 }
 
 function Scene({ children, camera }) {
+  const [contextLost, setContextLost] = useState(false);
+
+  if (contextLost) {
+    return <TwinCanvasFallback message="The 3D canvas lost its graphics context. Reload the page or switch views to retry." />;
+  }
+
   return (
-    <Canvas camera={camera} shadows>
-      <Suspense fallback={null}>
+    <TwinCanvasErrorBoundary fallback={<TwinCanvasFallback message="The 3D viewer could not start, but the Digital Twin page is still available." />}>
+      <Canvas camera={camera} dpr={[1, 1.5]} shadows gl={{ antialias: true, powerPreference: "high-performance" }}>
+        <Suspense fallback={<Html center><div style={{ color: "#A7B0BF", fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", fontSize: 12, letterSpacing: "0.16em", textTransform: "uppercase" }}>Loading twin…</div></Html>}>
+         <CanvasContextMonitor onContextLost={() => setContextLost(true)} />
+         <color attach="background" args={["#0A0C10"]} />
         <ambientLight intensity={0.78} />
         <hemisphereLight intensity={0.56} groundColor="#0e1016" />
         <directionalLight position={[18, 20, 12]} intensity={1.18} castShadow />
         <directionalLight position={[-16, 8, -8]} intensity={0.42} />
         <directionalLight position={[0, 10, -18]} intensity={0.3} />
         {children}
-        <Environment preset="warehouse" />
-        <OrbitControls enablePan enableZoom enableRotate maxPolarAngle={Math.PI * 0.48} makeDefault />
-      </Suspense>
-    </Canvas>
+         <OrbitControls enablePan enableZoom enableRotate maxPolarAngle={Math.PI * 0.48} makeDefault />
+        </Suspense>
+      </Canvas>
+    </TwinCanvasErrorBoundary>
   );
 }
 
