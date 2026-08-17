@@ -19,6 +19,10 @@ function formatInches(value = 0, digits = 0) {
   return `${Number(value).toFixed(digits)} in`;
 }
 
+function formatStation(value = 0) {
+  return `STA ${Number(value).toFixed(1)}`;
+}
+
 function normalizeBlueprint(beam) {
   const depth = beam?.product_type?.depth_in || (beam?.twin_type === "box_beam" ? 30 : 48);
   const width = beam?.product_type?.width_in || (beam?.twin_type === "box_beam" ? 42 : 18);
@@ -82,18 +86,26 @@ function buildIBeam(crossSection) {
   const topWidth = inchesToFeet(crossSection.top_flange_width_in);
   const topThickness = inchesToFeet(crossSection.top_flange_thickness_in);
   const depth = inchesToFeet(crossSection.overall_depth_in);
+  const bottomSlopeRun = Math.min(inchesToFeet(crossSection.bottom_transition_in || 4), Math.max((bottomWidth - webThickness) / 2 - 0.04, 0.06));
+  const bottomSlopeRise = Math.min(inchesToFeet(crossSection.bottom_transition_rise_in || 4.5), Math.max(depth * 0.16, 0.12));
+  const topSlopeRun = Math.min(inchesToFeet(crossSection.top_transition_in || 5), Math.max((topWidth - webThickness) / 2 - 0.04, 0.06));
+  const topSlopeDrop = Math.min(inchesToFeet(crossSection.top_transition_drop_in || 4.5), Math.max(depth * 0.14, 0.12));
   const shape = new THREE.Shape();
   shape.moveTo(-bottomWidth / 2, 0);
   shape.lineTo(bottomWidth / 2, 0);
   shape.lineTo(bottomWidth / 2, bottomThickness);
-  shape.lineTo(webThickness / 2, bottomThickness);
-  shape.lineTo(webThickness / 2, depth - topThickness);
+  shape.lineTo(webThickness / 2 + bottomSlopeRun, bottomThickness);
+  shape.lineTo(webThickness / 2, bottomThickness + bottomSlopeRise);
+  shape.lineTo(webThickness / 2, depth - topThickness - topSlopeDrop);
+  shape.lineTo(webThickness / 2 + topSlopeRun, depth - topThickness);
   shape.lineTo(topWidth / 2, depth - topThickness);
   shape.lineTo(topWidth / 2, depth);
   shape.lineTo(-topWidth / 2, depth);
   shape.lineTo(-topWidth / 2, depth - topThickness);
-  shape.lineTo(-webThickness / 2, depth - topThickness);
-  shape.lineTo(-webThickness / 2, bottomThickness);
+  shape.lineTo(-webThickness / 2 - topSlopeRun, depth - topThickness);
+  shape.lineTo(-webThickness / 2, depth - topThickness - topSlopeDrop);
+  shape.lineTo(-webThickness / 2, bottomThickness + bottomSlopeRise);
+  shape.lineTo(-webThickness / 2 - bottomSlopeRun, bottomThickness);
   shape.lineTo(-bottomWidth / 2, bottomThickness);
   shape.closePath();
   return { shape, width: bottomWidth, depth, topWidth };
@@ -105,17 +117,25 @@ function buildBoxBeam(crossSection) {
   const wall = inchesToFeet(crossSection.wall_thickness_in);
   const innerWidth = inchesToFeet(crossSection.void_width_in);
   const innerDepth = inchesToFeet(crossSection.void_depth_in);
+  const topChamfer = Math.min(inchesToFeet(crossSection.top_chamfer_in || 2.5), Math.max(outerWidth * 0.08, 0.08));
+  const voidHaunch = Math.min(inchesToFeet(crossSection.void_haunch_in || 2), Math.max((innerWidth * 0.16), 0.08));
+  const bottomSlab = wall;
+  const topSlab = Math.max(outerDepth - innerDepth - bottomSlab, wall * 0.9);
   const shape = new THREE.Shape();
   shape.moveTo(-outerWidth / 2, 0);
   shape.lineTo(outerWidth / 2, 0);
-  shape.lineTo(outerWidth / 2, outerDepth);
-  shape.lineTo(-outerWidth / 2, outerDepth);
+  shape.lineTo(outerWidth / 2, outerDepth - topChamfer);
+  shape.lineTo(outerWidth / 2 - topChamfer, outerDepth);
+  shape.lineTo(-outerWidth / 2 + topChamfer, outerDepth);
+  shape.lineTo(-outerWidth / 2, outerDepth - topChamfer);
   shape.closePath();
   const hole = new THREE.Path();
-  hole.moveTo(-innerWidth / 2, wall);
-  hole.lineTo(innerWidth / 2, wall);
-  hole.lineTo(innerWidth / 2, wall + innerDepth);
-  hole.lineTo(-innerWidth / 2, wall + innerDepth);
+  hole.moveTo(-innerWidth / 2, bottomSlab);
+  hole.lineTo(innerWidth / 2, bottomSlab);
+  hole.lineTo(innerWidth / 2, outerDepth - topSlab - voidHaunch);
+  hole.lineTo(innerWidth / 2 - voidHaunch, outerDepth - topSlab);
+  hole.lineTo(-innerWidth / 2 + voidHaunch, outerDepth - topSlab);
+  hole.lineTo(-innerWidth / 2, outerDepth - topSlab - voidHaunch);
   hole.closePath();
   shape.holes.push(hole);
   return { shape, width: outerWidth, depth: outerDepth };
@@ -178,6 +198,43 @@ function Shell({ spec, beam, highlighted, onSurfacePick, onBeamSelect }) {
   );
 }
 
+function SectionRevealLines({ beam, spec }) {
+  if (beam.twin_type === "box_beam") {
+    const wall = inchesToFeet(spec.blueprint.cross_section.wall_thickness_in || 4);
+    const voidWidth = inchesToFeet(spec.blueprint.cross_section.void_width_in || 24);
+    const topSlab = Math.max(spec.depth - inchesToFeet(spec.blueprint.cross_section.void_depth_in || 16) - wall, wall);
+    return (
+      <group>
+        {[-1, 1].map((side) => (
+          <React.Fragment key={side}>
+            <Line points={[[side * (spec.width / 2 - wall), wall, 0.08], [side * (spec.width / 2 - wall), wall, spec.length - 0.08]]} color="#738091" lineWidth={0.8} />
+            <Line points={[[side * (voidWidth / 2), spec.depth - topSlab, 0.08], [side * (voidWidth / 2), spec.depth - topSlab, spec.length - 0.08]]} color="#8A95A5" lineWidth={0.8} />
+          </React.Fragment>
+        ))}
+      </group>
+    );
+  }
+
+  const topThickness = inchesToFeet(spec.blueprint.cross_section.top_flange_thickness_in || 7);
+  const bottomThickness = inchesToFeet(spec.blueprint.cross_section.bottom_flange_thickness_in || 8);
+  const webThickness = inchesToFeet(spec.blueprint.cross_section.web_thickness_in || 7);
+  const bottomWidth = inchesToFeet(spec.blueprint.cross_section.bottom_flange_width_in || 24);
+  return (
+    <group>
+      <Line points={[[-bottomWidth / 2, bottomThickness, 0.08], [bottomWidth / 2, bottomThickness, 0.08]]} color="#7E8B9C" lineWidth={0.8} />
+      <Line points={[[-bottomWidth / 2, bottomThickness, spec.length - 0.08], [bottomWidth / 2, bottomThickness, spec.length - 0.08]]} color="#7E8B9C" lineWidth={0.8} />
+      {[-1, 1].map((side) => (
+        <Line
+          key={side}
+          points={[[side * (webThickness / 2), bottomThickness, spec.length * 0.08], [side * (webThickness / 2), spec.depth - topThickness, spec.length * 0.92]]}
+          color="#8A95A5"
+          lineWidth={0.8}
+        />
+      ))}
+    </group>
+  );
+}
+
 function LiftLoops({ beam, spec, onHardwareSelect }) {
   const radius = Math.max(spec.width * 0.08, 0.12);
   return (spec.blueprint.lift_loops || []).map((item, index) => {
@@ -234,6 +291,12 @@ function CylindricalOpenings({ beam, spec, items, type, color, y, onHardwareSele
           <mesh key={x} position={[x, 0, 0]} rotation={[0, 0, Math.PI / 2]}>
             <cylinderGeometry args={[radius * 1.05, radius * 1.05, 0.04, 18]} />
             <meshStandardMaterial color="#0F172A" roughness={0.7} metalness={0.12} />
+          </mesh>
+        ))}
+        {[-spec.width / 2, spec.width / 2].map((x) => (
+          <mesh key={`${x}-trim`} position={[x * 0.98, 0, 0]}>
+            <boxGeometry args={[0.03, radius * 2.25, radius * 2.25]} />
+            <meshStandardMaterial color="#D2D8E0" roughness={0.46} metalness={0.58} />
           </mesh>
         ))}
       </group>
@@ -318,13 +381,15 @@ function Stirrups({ beam, spec, onHardwareSelect }) {
   const count = Math.max(Math.floor(Math.max(end - start, 0) / spacing) + 1, 0);
   return Array.from({ length: count }).map((_, index) => {
     const z = Math.min(start + index * spacing, end);
+    const isMajor = index === 0 || index === count - 1 || index === Math.floor(count / 2);
+    const barSize = isMajor ? 0.036 : 0.028;
     const payload = { id: `stirrup-${index}`, type: beam.twin_type === "box_beam" ? "Rebar hoop" : "Rebar stirrup", beamMark: beam.mark, spec: { z_ft: z, cover_in: stirrup.cover_in || 2.5, spacing_in: stirrup.spacing_in || 24 } };
     return (
       <group key={payload.id} position={[0, cover, z]} onClick={(event) => clickHardware(event, payload, onHardwareSelect)}>
-        {[[0, 0, 0, width, 0.028, 0.028], [0, height, 0, width, 0.028, 0.028], [-width / 2, height / 2, 0, 0.028, height, 0.028], [width / 2, height / 2, 0, 0.028, height, 0.028]].map((part, i) => (
+        {[[0, 0, 0, width, barSize, barSize], [0, height, 0, width, barSize, barSize], [-width / 2, height / 2, 0, barSize, height, barSize], [width / 2, height / 2, 0, barSize, height, barSize]].map((part, i) => (
           <mesh key={i} position={[part[0], part[1], part[2]]}>
             <boxGeometry args={[part[3], part[4], part[5]]} />
-            <meshStandardMaterial color="#4E5966" roughness={0.72} metalness={0.22} />
+            <meshStandardMaterial color={isMajor ? "#798494" : "#4E5966"} roughness={0.72} metalness={isMajor ? 0.28 : 0.22} />
           </mesh>
         ))}
       </group>
@@ -404,18 +469,21 @@ function calloutLine(points, color = "#73BCFF") {
 }
 
 function DimensionCallouts({ beam, spec }) {
+  const section = spec.blueprint.cross_section || {};
   const depthIn = beam.product_type?.depth_in || Math.round(spec.depth * 12 * 10) / 10;
   const widthIn = beam.product_type?.width_in || Math.round(spec.width * 12 * 10) / 10;
   const lifts = spec.blueprint.lift_loops || [];
   const drains = spec.blueprint.drain_holes || [];
   const inserts = spec.blueprint.inserts || [];
+  const tubes = spec.blueprint.tubes || [];
   const holdDowns = spec.blueprint.hold_downs || [];
   const stirrupSpacing = spec.blueprint.stirrups?.spacing_in;
   const bituminous = spec.blueprint.bituminous_ends || [];
+  const groutGrooves = spec.blueprint.grout_grooves || [];
   const items = [
     {
       key: "length",
-      label: `OAL ${formatFeet(beam.length_ft)}`,
+      label: `OAL ${formatFeet(beam.length_ft)} · ${beam.mark}`,
       color: "#73BCFF",
       line: [[-spec.width * 0.64, spec.depth + 0.2, 0], [-spec.width * 0.64, spec.depth + 0.2, spec.length]],
       tag: [-spec.width * 0.9, spec.depth + 0.56, spec.length / 2],
@@ -453,7 +521,7 @@ function DimensionCallouts({ beam, spec }) {
     const last = inserts[inserts.length - 1]?.x_ft ?? first;
     items.push({
       key: "inserts",
-      label: `INSERTS ${formatFeet(first)} / ${formatFeet(last)}`,
+      label: `INSERTS ${formatStation(first)} / ${formatStation(last)}`,
       color: "#F4B652",
       line: [[-spec.width * 0.52, spec.depth * 0.72, first], [-spec.width * 0.52, spec.depth * 0.72, last]],
       tag: [-spec.width * 0.98, spec.depth * 0.88, (first + last) / 2],
@@ -463,17 +531,27 @@ function DimensionCallouts({ beam, spec }) {
   if (drains.length) {
     items.push({
       key: "drains",
-      label: `DRAINS ${drains.map((item) => formatFeet(item.x_ft)).join(" / ")}`,
+      label: `DRAINS ${drains.map((item) => formatStation(item.x_ft)).join(" / ")}`,
       color: "#A5B0BE",
       line: [[spec.width * 0.5, 0.18, drains[0].x_ft], [spec.width * 0.5, 0.18, drains[drains.length - 1].x_ft]],
       tag: [spec.width * 0.98, 0.48, (drains[0].x_ft + drains[drains.length - 1].x_ft) / 2],
     });
   }
 
+  if (tubes.length) {
+    items.push({
+      key: "tubes",
+      label: `TUBES ${tubes.map((item) => formatStation(item.x_ft)).join(" / ")}`,
+      color: "#B1BCCB",
+      line: [[spec.width * 0.46, spec.depth * 0.56, tubes[0].x_ft], [spec.width * 0.46, spec.depth * 0.56, tubes[tubes.length - 1].x_ft]],
+      tag: [spec.width * 0.98, spec.depth * 0.66, (tubes[0].x_ft + tubes[tubes.length - 1].x_ft) / 2],
+    });
+  }
+
   if (holdDowns.length) {
     items.push({
       key: "hold-downs",
-      label: `HOLD-DOWNS ${holdDowns.length} PCS`,
+      label: `HOLD-DOWNS ${holdDowns.length} PCS · ${formatStation(holdDowns[0].x_ft)}-${formatStation(holdDowns[holdDowns.length - 1].x_ft)}`,
       color: "#DFA26A",
       line: [[0, spec.depth + 0.34, holdDowns[0].x_ft], [0, spec.depth + 0.34, holdDowns[holdDowns.length - 1].x_ft]],
       tag: [0, spec.depth + 0.78, (holdDowns[0].x_ft + holdDowns[holdDowns.length - 1].x_ft) / 2],
@@ -493,10 +571,44 @@ function DimensionCallouts({ beam, spec }) {
   if (bituminous.length) {
     items.push({
       key: "bituminous",
-      label: `BITUMEN ${bituminous.map((item) => formatInches(item.length_in || 18)).join(" EA END")}${bituminous.length > 1 ? " EA END" : ""}`,
+      label: `BITUMEN ${bituminous.map((item) => formatInches(item.length_in || 18)).join(" / ")}`,
       color: "#E5E7EB",
       line: [[0, spec.depth * 0.18, 0], [0, spec.depth * 0.18, inchesToFeet(bituminous[0]?.length_in || 18)]],
       tag: [spec.width * 0.52, spec.depth * 0.34, inchesToFeet(bituminous[0]?.length_in || 18) + 0.5],
+    });
+  }
+
+  if (beam.twin_type === "box_beam") {
+    items.push({
+      key: "void",
+      label: `VOID ${formatInches(section.void_width_in || widthIn - 12)} × ${formatInches(section.void_depth_in || depthIn - 10)}`,
+      color: "#9DB0C4",
+      line: [[0, spec.depth * 0.62, spec.length * 0.22], [0, spec.depth * 0.62, spec.length * 0.78]],
+      tag: [0, spec.depth * 0.82, spec.length * 0.5],
+    });
+    if (groutGrooves.length) {
+      items.push({
+        key: "grout-grooves",
+        label: `GROUT GROOVES ${groutGrooves.map((item) => formatStation(item.x_ft)).join(" / ")}`,
+        color: "#C5D0DE",
+        line: [[0, spec.depth + 0.06, groutGrooves[0].x_ft], [0, spec.depth + 0.06, groutGrooves[groutGrooves.length - 1].x_ft]],
+        tag: [-spec.width * 0.52, spec.depth + 0.36, (groutGrooves[0].x_ft + groutGrooves[groutGrooves.length - 1].x_ft) / 2],
+      });
+    }
+  } else {
+    items.push({
+      key: "section-web",
+      label: `WEB ${formatInches(section.web_thickness_in || 7)} · TOP ${formatInches(section.top_flange_width_in || widthIn)} × ${formatInches(section.top_flange_thickness_in || 7)}`,
+      color: "#C5D0DE",
+      line: [[0, spec.depth * 0.76, spec.length * 0.23], [0, spec.depth * 0.76, spec.length * 0.77]],
+      tag: [0, spec.depth + 0.18, spec.length * 0.5],
+    });
+    items.push({
+      key: "section-bottom",
+      label: `BOT FLG ${formatInches(section.bottom_flange_width_in || widthIn * 1.5)} × ${formatInches(section.bottom_flange_thickness_in || 8)}`,
+      color: "#AAB5C4",
+      line: [[0, spec.depth * 0.08, spec.length * 0.25], [0, spec.depth * 0.08, spec.length * 0.75]],
+      tag: [0, 0.22, spec.length * 0.5],
     });
   }
 
@@ -538,6 +650,7 @@ function BeamAssembly({ beam, anomalies = [], onSurfacePick, onHardwareSelect, s
   return (
     <group ref={groupRef} position={[0, -spec.depth / 2, -spec.length / 2]}>
       <Shell spec={spec} beam={beam} highlighted={highlighted} onSurfacePick={surfacePick} onBeamSelect={onBeamSelect} />
+      <SectionRevealLines beam={beam} spec={spec} />
       <BituminousEnds beam={beam} spec={spec} onHardwareSelect={onHardwareSelect} />
       <StrandPaths beam={beam} spec={spec} onHardwareSelect={onHardwareSelect} />
       <Stirrups beam={beam} spec={spec} onHardwareSelect={onHardwareSelect} />
@@ -591,7 +704,7 @@ export default function BeamTwinViewer({ beam, anomalies = [], onSurfacePick, on
 }
 
 export function BedTwinViewer({ bed, selectedBeamId, onBeamSelect, onHardwareSelect, showCallouts = false }) {
-  const beams = bed?.beams || [];
+  const beams = [...(bed?.beams || [])].sort((a, b) => (a.position_on_bed || 0) - (b.position_on_bed || 0));
   const bedLength = Math.max(...beams.map((item) => item.length_ft || 0), bed?.length_ft || 120);
   const laneWidth = 7;
   const halfSpread = ((Math.max(beams.length, 1) - 1) * laneWidth) / 2;
@@ -612,6 +725,8 @@ export function BedTwinViewer({ bed, selectedBeamId, onBeamSelect, onHardwareSel
           <Line key={index} points={[[-halfSpread - laneWidth / 2 + index * laneWidth, -0.08, -bedLength / 2], [-halfSpread - laneWidth / 2 + index * laneWidth, -0.08, bedLength / 2]]} color="#5D6878" lineWidth={1} />
         ))}
         <Line points={[[-halfSpread - laneWidth / 2, -0.02, 0], [halfSpread + laneWidth / 2, -0.02, 0]]} color="#2F9E44" lineWidth={1.2} />
+        <CalloutTag position={[0, 1.55, -bedLength / 2 - 3.8]} color="#8FC5FF" label="HEAD / MARKED END" />
+        <CalloutTag position={[0, 1.55, bedLength / 2 + 3.2]} color="#8B949E" label="TAIL / STRAND END" />
         {beams.map((item, index) => (
           <group key={item.id} position={[-halfSpread + index * laneWidth, 0, 0]}>
             <BeamAssembly
@@ -623,8 +738,8 @@ export function BedTwinViewer({ bed, selectedBeamId, onBeamSelect, onHardwareSel
               highlighted={item.id === selectedBeamId}
               onBeamSelect={onBeamSelect}
             />
-            <CalloutTag position={[0, 4.2, 0]} color={item.id === selectedBeamId ? "#8FC5FF" : "#E5EDF5"} label={`${item.mark} · POS ${String(item.position_on_bed).padStart(2, "0")}`} />
-            <CalloutTag position={[0, 1.3, -bedLength / 2 - 2.2]} color="#8B949E" label={`LANE ${String(item.position_on_bed).padStart(2, "0")}`} />
+            <CalloutTag position={[0, 4.2, 0]} color={item.id === selectedBeamId ? "#8FC5FF" : "#E5EDF5"} label={`${item.mark} · POS ${String(item.position_on_bed).padStart(2, "0")} · ${formatFeet(item.length_ft)}`} />
+            <CalloutTag position={[0, 1.3, -bedLength / 2 - 2.2]} color="#8B949E" label={`LANE ${String(item.position_on_bed).padStart(2, "0")} · ${item.product_type?.name || item.twin_type}`} />
           </group>
         ))}
         <CalloutTag position={[0, 1.35, -bedLength / 2 - 7]} color="#2F9E44" label={`BED ${bed?.bed_number} · ${bed?.name} · ${beams.length} BEAMS`} />
@@ -653,7 +768,7 @@ export function BedTwinViewer({ bed, selectedBeamId, onBeamSelect, onHardwareSel
               }}
               data-testid={`bed-sequence-${item.position_on_bed}`}
             >
-              <div style={{ fontSize: 10, color: item.id === selectedBeamId ? "#8FC5FF" : "#8B949E", letterSpacing: "0.12em" }}>POS {String(item.position_on_bed).padStart(2, "0")}</div>
+              <div style={{ fontSize: 10, color: item.id === selectedBeamId ? "#8FC5FF" : "#8B949E", letterSpacing: "0.12em" }}>POS {String(item.position_on_bed).padStart(2, "0")} · {item.qc_state?.replace(/_/g, " ")}</div>
               <div style={{ fontSize: 12, fontWeight: 700 }}>{item.mark}</div>
               <div style={{ fontSize: 10, color: "#8B949E" }}>{item.product_type?.name || item.twin_type} · {formatFeet(item.length_ft)}</div>
             </button>

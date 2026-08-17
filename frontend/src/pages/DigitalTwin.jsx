@@ -16,6 +16,10 @@ function SpecRows({ spec }) {
   ));
 }
 
+function stationList(items = []) {
+  return items.length ? items.map((item) => `${Number(item.x_ft || 0).toFixed(1)}'`).join(" · ") : "—";
+}
+
 export default function DigitalTwin() {
   const [params] = useSearchParams();
   const [beams, setBeams] = useState([]);
@@ -102,6 +106,27 @@ export default function DigitalTwin() {
     ["Strand ends", strandCount * 2],
     ["Bituminous pockets", blueprint.bituminous_ends?.length || 0],
   ];
+  const quickDimensions = beam ? [
+    ["OAL", `${beam.length_ft} ft`],
+    ["Depth", `${blueprint.cross_section?.overall_depth_in || blueprint.cross_section?.outer_depth_in || beam.product_type?.depth_in || "—"} in`],
+    ["Width", `${blueprint.cross_section?.top_flange_width_in || blueprint.cross_section?.outer_width_in || beam.product_type?.width_in || "—"} in`],
+    beam.twin_type === "box_beam"
+      ? ["Void", `${blueprint.cross_section?.void_width_in || "—"} × ${blueprint.cross_section?.void_depth_in || "—"} in`]
+      : ["Top flange", `${blueprint.cross_section?.top_flange_width_in || "—"} × ${blueprint.cross_section?.top_flange_thickness_in || "—"} in`],
+    beam.twin_type === "box_beam"
+      ? ["Wall", `${blueprint.cross_section?.wall_thickness_in || "—"} in`]
+      : ["Web / bottom flange", `${blueprint.cross_section?.web_thickness_in || "—"} in / ${blueprint.cross_section?.bottom_flange_width_in || "—"} × ${blueprint.cross_section?.bottom_flange_thickness_in || "—"} in`],
+    ["Stirrups", blueprint.stirrups?.spacing_in ? `@ ${blueprint.stirrups.spacing_in} in from ${blueprint.stirrups.start_ft ?? 0}' to ${blueprint.stirrups.end_ft ?? beam.length_ft}'` : "—"],
+  ] : [];
+  const qcStations = beam ? [
+    ["Lift loops", stationList(blueprint.lift_loops || [])],
+    ["Inserts", stationList(blueprint.inserts || [])],
+    ["Tubes", stationList(blueprint.tubes || [])],
+    ["Drains", stationList(blueprint.drain_holes || [])],
+    ["Hold-downs", stationList(blueprint.hold_downs || [])],
+    ["Grooves", stationList(blueprint.grout_grooves || [])],
+    ["Bituminous", (blueprint.bituminous_ends || []).length ? (blueprint.bituminous_ends || []).map((item) => `${item.end?.toUpperCase() || "END"} ${item.length_in || 0}"`).join(" · ") : "—"],
+  ] : [];
 
   return (
     <Layout>
@@ -189,6 +214,28 @@ export default function DigitalTwin() {
                     ))}
                   </div>
                 </div>
+                <div className="border border-border rounded-sm p-3">
+                  <div className="text-xs uppercase tracking-widest text-muted-foreground mb-3">QC quick dimensions</div>
+                  <div className="space-y-2">
+                    {quickDimensions.map(([label, value]) => (
+                      <div key={label} className="flex items-start justify-between gap-3 text-xs font-mono">
+                        <span className="text-muted-foreground">{label}</span>
+                        <span className="text-right text-white">{value}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <div className="border border-border rounded-sm p-3">
+                  <div className="text-xs uppercase tracking-widest text-muted-foreground mb-3">QC hardware stations</div>
+                  <div className="space-y-2">
+                    {qcStations.map(([label, value]) => (
+                      <div key={label} className="flex items-start justify-between gap-3 text-xs font-mono">
+                        <span className="text-muted-foreground">{label}</span>
+                        <span className="text-right text-white">{value}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
                 {selectedBed && (
                   <div className="border border-border rounded-sm p-3">
                     <div className="text-xs uppercase tracking-widest text-muted-foreground mb-2">Bed order</div>
@@ -196,7 +243,7 @@ export default function DigitalTwin() {
                       {beams.filter((item) => item.bed_id === selectedBedId).sort((a, b) => (a.position_on_bed || 0) - (b.position_on_bed || 0)).map((item) => (
                         <div key={item.id} className={`flex items-center justify-between text-xs font-mono rounded-sm px-2 py-1 border ${item.id === selectedId ? "border-primary text-primary" : "border-border text-muted-foreground"}`}>
                           <span>POS {String(item.position_on_bed || 0).padStart(2, "0")}</span>
-                          <span className={item.id === selectedId ? "text-white" : "text-white/80"}>{item.mark}</span>
+                          <span className={item.id === selectedId ? "text-white" : "text-white/80"}>{item.mark} · {item.length_ft} ft · {item.product_type?.name || item.twin_type}</span>
                         </div>
                       ))}
                     </div>
