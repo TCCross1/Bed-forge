@@ -30,3 +30,13 @@ export function detectDevice() {
 export function nativeARPlugin() {
   return window.Capacitor?.Plugins?.ARMeasure || null;
 }
+
+export function deviceId() {
+  if (typeof window === "undefined") return "";
+  let id = localStorage.getItem("bf_device");
+  if (!id) {
+    id = (crypto.randomUUID && crypto.randomUUID()) || `dev-${Date.now()}`;
+    localStorage.setItem("bf_device", id);
+  }
+  return id;
+}

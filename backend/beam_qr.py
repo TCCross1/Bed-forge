@@ -225,6 +225,7 @@ async def assemble_dossier(beam: dict, *, full: bool) -> dict:
         "pre_delivery": await db.pre_delivery.find({"beam_id": beam_id}, {"_id": 0}).to_list(500),
         "measurements": await db.spec_measurements.find({"spec_id": spec["id"]}, {"_id": 0}).to_list(500) if spec else [],
         "ar_measurements": await db.ar_measurements.find({"beam_id": beam_id}, {"_id": 0, "photo_data": 0}).sort("created_at", -1).to_list(100),
+        "tape_runs": await db.ar_tape_runs.find({"beam_id": beam_id}, {"_id": 0}).sort("created_at", -1).to_list(20),
         "strand_rolls": rolls,
         "traceability": {
             "heat_numbers": [r.get("heat_number") for r in rolls if r.get("heat_number")],

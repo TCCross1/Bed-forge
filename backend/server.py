@@ -7,7 +7,7 @@ load_dotenv(ROOT_DIR / ".env")
 import os
 import logging
 from datetime import datetime, timezone
-from fastapi import FastAPI, APIRouter, Depends, HTTPException
+from fastapi import FastAPI, APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from starlette.middleware.cors import CORSMiddleware
 import io
@@ -22,6 +22,9 @@ from models import (
     FinishSheet, FinishSheetCreate, PreDelivery, PreDeliveryCreate,
 )
 from auth import router as auth_router, get_current_user, seed_admin
+from audit import write_audit
+from control_routes import router as control_router
+from security_core import assert_production_safe, is_production, security_headers_middleware
 from tension import run_tension_calc, calc_theoretical_elongation, evaluate_tension
 from seed import seed_plant, seed_l25390, seed_bed_assignments, seed_strand_rolls, seed_company, seed_beam_qr_tokens
 from blueprint_routes import router as blueprint_router
@@ -34,6 +37,7 @@ from beam_qr import assemble_dossier
 from beam_qr_routes import router as beam_qr_router
 from company_routes import router as company_router
 from cylinder_routes import router as cylinder_router
+from owner_routes import router as owner_router, attach_board_forecasts
 import excel_export
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
@@ -209,6 +213,12 @@ async def dashboard(user=Depends(get_current_user)):
             "failed": len([b for b in beams if b["qc_state"] == "failed"]),
             "open_anomalies": await db.anomalies.count_documents({}),
         }
+        forecast_stats = await attach_board_forecasts(bed_cards)
+        stats.update({
+            "release_expected_pass": forecast_stats.get("expected_pass", 0) + forecast_stats.get("confirmed_pass", 0),
+            "release_borderline": forecast_stats.get("borderline", 0),
+            "release_fail_risk": forecast_stats.get("fail_risk", 0) + forecast_stats.get("confirmed_fail", 0),
+        })
         return {"beds": bed_cards, "stats": stats}
     except Exception:
         logger.exception("dashboard failed user=%s", user.get("email"))
@@ -463,8 +473,13 @@ async def create_anomaly(payload: AnomalyCreate, user=Depends(get_current_user))
 
 
 # ---------------- Forms Export ----------------
+@api.get("/health")
+async def health():
+    return {"ok": True}
+
+
 @api.get("/forms/export/{form_type}")
-async def export_form(form_type: str, beam_id: str = None, user=Depends(get_current_user)):
+async def export_form(form_type: str, request: Request, beam_id: str = None, user=Depends(get_current_user)):
     if form_type not in excel_export.BUILDERS:
         raise HTTPException(status_code=400, detail="Unknown form type")
 
@@ -512,6 +527,7 @@ async def export_form(form_type: str, beam_id: str = None, user=Depends(get_curr
         builder_name, filename = excel_export.BUILDERS[form_type]
         data = getattr(excel_export, builder_name)(context)
         logger.info("form exported type=%s by=%s", form_type, user.get("email"))
+        await write_audit(action="export.form", user=user, request=request, entity_type=form_type, entity_id=beam_id or "")
         return StreamingResponse(
             io.BytesIO(data),
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -534,11 +550,18 @@ app.include_router(strand_roll_router)
 app.include_router(beam_qr_router)
 app.include_router(company_router)
 app.include_router(cylinder_router)
+app.include_router(control_router)
+app.include_router(owner_router)
 
+security_headers_middleware(app)
+
+_cors = os.environ.get("CORS_ORIGINS", "http://localhost:3000")
+if is_production() and (not _cors or _cors.strip() == "*"):
+    _cors = ""
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
-    allow_origins=os.environ.get("CORS_ORIGINS", "*").split(","),
+    allow_origins=[o.strip() for o in _cors.split(",") if o.strip() and o.strip() != "*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -546,6 +569,7 @@ app.add_middleware(
 
 @app.on_event("startup")
 async def startup():
+    assert_production_safe()
     await db.users.create_index("email", unique=True)
     await db.beds.create_index("bed_number")
     await db.beams.create_index("bed_id")
@@ -560,6 +584,9 @@ async def startup():
     await db.bed_assignments.create_index("beam_id")
     await db.ar_measurements.create_index("beam_id")
     await db.ar_measurements.create_index("created_at")
+    await db.ar_measurements.create_index("run_id")
+    await db.ar_tape_runs.create_index("beam_id")
+    await db.ar_tape_runs.create_index("created_at")
     await db.sync_events.create_index("created_at")
     await db.devices.create_index([("user_id", 1), ("platform", 1), ("device_class", 1)])
     await db.strand_rolls.create_index("heat_number")
@@ -572,6 +599,17 @@ async def startup():
     await db.cylinders.create_index("run_id")
     await db.cylinders.create_index("job_number")
     await db.company_settings.create_index("id")
+    await db.audit_log.create_index("created_at")
+    await db.audit_log.create_index("actor_id")
+    await db.audit_log.create_index("action")
+    await db.sessions.create_index("user_id")
+    await db.sessions.create_index("id", unique=True)
+    await db.overrides.create_index([("kind", 1), ("target_id", 1)])
+    await db.login_attempts.create_index("created_at")
+    await db.maturity_samples.create_index("pour_id")
+    await db.maturity_samples.create_index("recorded_at")
+    await db.owner_packages.create_index("pour_id")
+    await db.owner_packages.create_index("created_at")
     await seed_admin()
     await seed_company()
     await seed_plant()

@@ -9,7 +9,7 @@ import { Loader2, Upload, Lock, FileSearch, CheckCircle2, CalendarDays } from "l
 
 export default function Drawings() {
   const { user } = useAuth();
-  const canLock = user?.role === "admin" || user?.role === "qc_supervisor";
+  const canLock = user?.role === "admin" || user?.role === "executive" || user?.role === "qc_supervisor";
   const [beams, setBeams] = useState([]);
   const [beamId, setBeamId] = useState("");
   const [files, setFiles] = useState([]);

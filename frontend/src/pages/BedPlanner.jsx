@@ -34,18 +34,21 @@ export default function BedPlanner() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [dragOverId, setDragOverId] = useState("");
+  const [suggest, setSuggest] = useState(null);
 
   const weekStart = useMemo(() => weekStartMonday(date), [date]);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [calRes, poolRes] = await Promise.all([
+      const [calRes, poolRes, sugRes] = await Promise.all([
         api.get("/beds/calendar", { params: { start: weekStart, days: 7 } }),
         api.get("/planner/pool", { params: { date } }),
+        api.get("/beds/suggest", { params: { date } }).catch(() => ({ data: null })),
       ]);
       setCalendar(calRes.data);
       setPool(poolRes.data);
+      setSuggest(sugRes.data);
       const beds = calRes.data.beds || [];
       const selected = bedId || beds[0]?.id || "";
       if (selected) {
@@ -200,7 +203,7 @@ export default function BedPlanner() {
     <Layout>
       <PageHeader
         title="Bed Twin Planner"
-        subtitle="Assign job beams to a casting bed and day — order on the bed is the production sequence"
+        subtitle="Assign job beams to a casting bed and day. Capacity, live occupancy, and packing with least changeover."
         right={
           <div className="flex flex-wrap gap-2 justify-end">
             <ARMeasureLink beamId={highlightBeam} purpose="layout" />
@@ -269,6 +272,35 @@ export default function BedPlanner() {
           ))}
         </div>
 
+        {(suggest?.suggestions || []).length > 0 && (
+          <div className={`${cardClass} p-4 space-y-2`} data-testid="planner-suggest">
+            <div className="font-display font-bold uppercase tracking-wider">Packing suggestions</div>
+            {(suggest.suggestions || []).slice(0, 4).map((s) => (
+              <div key={s.bed_id} className="border border-[#1C2230] p-3 flex flex-col sm:flex-row sm:items-center gap-2">
+                <div className="min-w-0">
+                  <div className="font-mono text-sm">{s.headline}</div>
+                  <div className="text-[10px] font-mono text-muted-foreground">{s.marks?.join(", ")} · {s.remaining_ft} ft left · {s.utilization_pct}% full</div>
+                </div>
+                {plan && (
+                  <button
+                    type="button"
+                    disabled={busy}
+                    className="min-h-10 px-3 border border-[#1C2230] text-[10px] font-mono uppercase hover:border-primary sm:ml-auto"
+                    onClick={async () => {
+                      for (const id of s.beam_ids || []) {
+                        const beam = (pool.beams || []).find((b) => b.id === id) || { id, beam_id: id };
+                        await assignBeam({ beam_id: id, mark: beam.mark, job_id: beam.job_id, pour_id: beam.pour_id }, s.bed_id, date);
+                      }
+                    }}
+                  >
+                    Apply
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
         {loading && !layout ? (
           <div className="flex items-center justify-center h-64 text-muted-foreground">
             <Loader2 className="w-6 h-6 animate-spin mr-2" /> Loading bed twins…
@@ -327,6 +359,11 @@ export default function BedPlanner() {
               <div className={`${cardClass} overflow-hidden`}>
                 <div className="px-4 py-3 border-b border-[#1C2230] font-display font-bold uppercase tracking-wider">
                   Bed {selectedBed?.bed_number} twin · {date}
+                  {layout?.remaining_ft != null && (
+                    <span className="ml-2 text-[10px] font-mono text-muted-foreground">
+                      {layout.remaining_ft} ft open · {layout.utilization_pct ?? "—"}%
+                    </span>
+                  )}
                 </div>
                 {layout && (
                   <BedViewer
@@ -468,6 +505,11 @@ export default function BedPlanner() {
                           ))}
                           {(!cell || cell.count === 0) && <span className="text-[10px] font-mono text-muted-foreground">OPEN</span>}
                         </div>
+                        {cell && (
+                          <div className="text-[9px] font-mono text-muted-foreground mt-1">
+                            {cell.utilization_pct || 0}% · {cell.remaining_ft ?? "—"} ft
+                          </div>
+                        )}
                       </td>
                     );
                   })}

@@ -2,10 +2,11 @@
 import logging
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 import io
 
+from audit import write_audit
 from auth import get_current_user
 from company_routes import get_company_doc, public_view
 from cylinder_tags import (
@@ -263,7 +264,7 @@ async def list_cylinders(
 
 
 @router.patch("/cylinders/{cylinder_id}/crush")
-async def record_cylinder_crush(cylinder_id: str, payload: CylinderCrushInput, user=Depends(get_current_user)):
+async def record_cylinder_crush(cylinder_id: str, payload: CylinderCrushInput, request: Request, user=Depends(get_current_user)):
     try:
         doc = await db.cylinders.find_one({"id": cylinder_id}, {"_id": 0})
         if not doc:
@@ -286,6 +287,14 @@ async def record_cylinder_crush(cylinder_id: str, payload: CylinderCrushInput, u
         updates["tested_by"] = user.get("name") or ""
         await db.cylinders.update_one({"id": cylinder_id}, {"$set": updates})
         saved = await db.cylinders.find_one({"id": cylinder_id}, {"_id": 0})
+        await write_audit(
+            action="cylinder.crush",
+            user=user,
+            request=request,
+            entity_type="cylinder",
+            entity_id=cylinder_id,
+            after={"crush_psi": saved.get("crush_psi"), "release_ok": saved.get("release_ok")},
+        )
         logger.info(
             "cylinder crush recorded id=%s psi=%s release=%s by=%s",
             cylinder_id, bool(saved.get("crush_psi")), saved.get("release_ok"), user.get("email"),

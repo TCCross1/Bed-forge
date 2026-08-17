@@ -1,0 +1,105 @@
+export const TUTORIAL_SECTIONS = [
+  {
+    id: "what",
+    title: "1. What BedForge is and why the plant uses it",
+    body: [
+      "BedForge is the plant’s paperless quality-control and digital-twin system. Every beam, strand roll, tension reading, inspection, and shipping check lives in one record instead of clipboards, wire-tied finish sheets, and tribal knowledge.",
+      "The plant already survived a serious cyber intrusion that stopped production. BedForge is built so a stolen laptop or a guessed password cannot quietly rewrite heat numbers, unlock a bed, or erase an audit trail. If something changes, we can see who did it, when, and what it looked like before.",
+      "You still do the craft. The software remembers it — from the mill tag on the strand reel to the QR code tied on the finished girder.",
+    ],
+  },
+  {
+    id: "journey",
+    title: "2. How a beam travels through the system",
+    body: [
+      "Think of one girder walking through the plant. BedForge follows that same path.",
+      "Strand roll: a tech photographs the mill tag. Heat number, reel, and grade are captured and confirmed. Until that heat is on the bed, tensioning is locked.",
+      "Planner: a supervisor or plant manager assigns the beam to a bed and a day, sets the marked end, and sequences neighbors.",
+      "Drawings & twin: shop drawings are uploaded. BedForge builds a 3D digital twin (the blueprint made visible) so hardware, strands, and hold-downs match the sheet.",
+      "Tension: jacking force and elongation are recorded against the mill-traceable roll. The gate will refuse to start if the roll is missing — unless a plant manager writes a reason and overrides it (that override is logged forever).",
+      "Inspection / digital tape / camber / finish / release: each QC sheet is a living form on that beam. Layout stations are shot with the iPhone digital tape instead of two people stretching a tape across a live bed.",
+      "QR: when the beam is entered, it gets a permanent laminated identity. Anyone can scan it years later and open the dossier — specs and status in the field, full QC history when you are signed in.",
+    ],
+  },
+  {
+    id: "roles",
+    title: "3. What each role can and cannot do",
+    body: [
+      "QC Tech: log rolls, inspect, measure with the digital tape, fill sheets, scan QR. Cannot change other people’s accounts, unlock a locked spec, or turn off security settings.",
+      "Production: plan beds, run tension, print tags. Cannot approve QC locks or manage users.",
+      "QC Supervisor: lock BeamSpecs, brand cylinder/QR labels, review holds. Cannot disable plant-manager accounts or change the office IP allow-list.",
+      "Plant Manager / Executive (Admin): see and edit anything, override gates with a written reason, manage users and devices, search history, export for auditors, take backups, set retention and legal hold. Every one of those actions is written to an append-only audit log.",
+      "Least privilege is the rule: you get the keys for your job, not a shared plant password on a shop-floor PC.",
+    ],
+  },
+  {
+    id: "daily",
+    title: "4. How to do the daily jobs",
+    body: [
+      "Morning: Cylinder Tags → set today’s jobs, enter beam marks, print labels at Actual Size / 100%. Upload the company logo once; every plant can white-label.",
+      "Strand logging: Rolls → photograph the mill tag → confirm heat/reel → assign to the bed/pour. Do this before anyone tensions.",
+      "Tension: Tension calculator / twin. If the gate blocks you, do not guess a heat number. Log the roll, or ask a plant manager for a logged override.",
+      "Inspection: Inspect on the beam. Work section by section (layout through detailing).",
+      "Digital tape: Digital Tape on an iPhone. One QC tech. Turn on the flashlight, plot the first point on the header / marked-end line, walk the beam, and snap each station when the self-leveling gauge and laser line go green. Finish the run so BedForge lists every point against the twin.",
+      "Camber: Camber sheet after release strength. Finish: post-pour hardware, surface, marked-end ID. Release: pre-delivery, truck, signatures.",
+      "QR labels: QR Labels → pick the pour → print laminate tags. Re-print one beam any time from the Digital Twin.",
+    ],
+  },
+  {
+    id: "twins",
+    title: "5. How the 3D twins and blueprints work",
+    body: [
+      "A shop drawing is the legal picture of the beam. The digital twin is that picture in 3D so the plant can see strands, hold-downs, inserts, and the marked end without squinting at a rolled sheet in the rain.",
+      "Upload drawings on Drawings. BedForge extracts a BeamSpec (geometry, hardware, strand pattern). A supervisor locks the spec when it matches the sheet. After lock, field measurements are compared to design with a tolerance gate.",
+      "The iPhone digital tape is how those field stations get onto the twin. A multi-point run is a list of feet-from-marked-end. BedForge matches each shot to the nearest hardware or hold-down on the blueprint and an assistant flags anything outside that element’s inch tolerance so you rescan instead of arguing with a stretch tape.",
+      "Tap the twin to drop anomalies (cracks, spalls, honeycombing) at a real station. Those marks travel with the beam into storage and to the job site via the QR dossier.",
+      "The twin is not a video game. If the twin and the sheet disagree, the sheet wins until a supervisor corrects and re-locks the spec.",
+    ],
+  },
+  {
+    id: "tape",
+    title: "6. The iPhone digital tape — one tech, out of production’s way",
+    body: [
+      "The old way: two techs stretch a tape from the header down a live bed while production is trying to build the beam. People trip over the tape. Numbers wander. You usually live with a quarter-inch to half-inch of slop because the tape sags, the helpers don’t hold the same end, and nobody is truly level.",
+      "BedForge’s digital tape runs on the iPhone you already carry. It has a flashlight for dark soffits and a self-leveling gauge with a laser line across the camera. The phone will not accept a station until that line is green — level within ±1/8 inch. That is tighter than the stretch-tape habit, and it does not need a second body holding the other end.",
+      "How you shoot: open Digital Tape, pick the beam, start the camera, turn the flashlight on if you need it. Plot the first point on the line / header (the marked end — that origin never moves). Walk the beam. When the gauge shows the laser line is level, snap the next point. Keep walking. Snap every insert, lift loop, hold-down, or layout mark in one run. You stay on the walkway. Production keeps building.",
+      "Multi-point is the point. You do not stop after A-to-B. Each green snap is another station from that same header. When you finish the run, BedForge makes a list: station number, feet from marked end, height delta, level yes/no. That list is compared to the digital 3D twin — more specifically the locked shop-drawing stations on the BeamSpec (hardware and hold-downs, feet from marked end, each with its own inch tolerance).",
+      "An assistant then reads both tables. If a shot falls outside that element’s tolerance, or it was snapped off-level or force-snapped, it is flagged for a rescan. You drop that station, walk back, wait for green, and snap it again. Design points you never reached are listed as not yet shot. Extra shots that do not sit near a blueprint station are called out so you can confirm they were intended.",
+      "The compare still works if the plant has no AI key — the matcher is local and honest. When an AI key is configured, you also get a short QC narrative. It is not allowed to invent numbers. If the flag says rescan, rescan. Do not type a friendlier station to make it pass.",
+    ],
+  },
+  {
+    id: "qr",
+    title: "7. Beam QR codes — the girder’s permanent ID",
+    body: [
+      "Every beam gets a unique token when it is created. The laminated tag shows company logo, job number, beam mark, and a QR that opens /b/{token}.",
+      "Phone camera (iPhone or Android) opens the dossier in the browser. In-app Scan QR does the same on the plant floor.",
+      "Field scan (not signed in): essential specs, status, drawings, view-only twin. Signed-in QC/supervisor: full history.",
+      "The token is not a password to the whole plant. It only unlocks that one beam’s public dossier. Drawings behind it are scoped to that beam.",
+    ],
+  },
+  {
+    id: "secure",
+    title: "8. Why this is secure (plain language)",
+    body: [
+      "After the intrusion, we assume laptops get stolen and passwords get phished. The design answers that.",
+      "In transit: HTTPS (TLS 1.3 on the plant reverse proxy). In rest: drawings, mill photos, and logos are encrypted on disk. Passwords are hashed (never stored as text). Secrets live in environment variables, not in git.",
+      "Sign-in creates a session we can kill. Idle timeout. Optional device binding. Optional office/VPN IP allow-list for plant-manager tools so a stolen admin session on a random coffee-shop network cannot change users.",
+      "There is no standing shared admin password on a shop PC. Demo logins exist only on development plants. Open self-registration is off. Failed sign-ins lock the account after repeated tries.",
+      "Files are not dumped on the public internet. Shop drawings require a login (or a beam QR token scoped to that beam). Exports and backups are logged: who, what, when.",
+      "The audit log is append-only. Nobody gets an API to quietly edit yesterday.",
+    ],
+  },
+  {
+    id: "wrong",
+    title: "9. What to do if something goes wrong",
+    body: [
+      "Forgot password or locked out: a plant manager resets or re-enables you. They cannot see your old password.",
+      "Lost phone / stolen iPad: plant manager → Command → People or Devices → Revoke. All sessions for that person or device die immediately.",
+      "Tension gate blocked: log the strand roll. Do not type a fake heat. Override is a last resort with a written reason.",
+      "Twin looks wrong: compare to the shop drawing. Ask a supervisor to correct and lock the spec.",
+      "Digital tape flagged a rescan: walk back to that station, wait for the green laser line, snap again. Do not force-snap to beat the gate unless the bed truly cannot be leveled — a forced shot stays marked.",
+      "Suspect an attack: disconnect the affected PC, revoke all users from a known-good manager device, take a backup, restore onto clean hardware — never onto the attacked host. Call plant management. The audit log is evidence; do not delete it.",
+    ],
+  },
+];

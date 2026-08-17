@@ -179,7 +179,7 @@ export default function DigitalTwin() {
         subtitle={spec ? `${spec.product_name} · ${spec.geometry?.length_ft}' · ${spec.status}` : "Upload a shop drawing to generate a blueprint-accurate twin"}
         right={
           <div className="flex flex-wrap gap-2 justify-end">
-            <ARMeasureLink beamId={selectedId} purpose="level" />
+            <ARMeasureLink beamId={selectedId} purpose="tape" />
             {beam?.qr_token && (
               <Link
                 to={`/b/${beam.qr_token}`}
@@ -325,7 +325,7 @@ export default function DigitalTwin() {
                 onClick={() => setTab(t)}
                 className={`min-h-12 font-condensed uppercase tracking-wider text-sm ${tab === t ? "bg-primary text-white" : "text-muted-foreground"}`}
               >
-                {t}
+                {t === "measure" ? "tape" : t}
               </button>
             ))}
           </div>
@@ -389,15 +389,34 @@ export default function DigitalTwin() {
                   Δ {measurementMap[selectedHw.id].delta_in}" · {measurementMap[selectedHw.id].within_tolerance ? "PASS" : "FAIL"}
                 </div>
               )}
-              <div className="border-t border-[#1C2230] pt-3" data-testid="twin-ar-history">
+              <div className="border-t border-[#1C2230] pt-3 space-y-3" data-testid="twin-ar-history">
                 <div className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground mb-2 flex items-center gap-2">
-                  <ScanLine className="w-3 h-3" /> AR level history
+                  <ScanLine className="w-3 h-3" /> Digital tape vs twin
                 </div>
+                {(beam?.tape_runs || []).slice(0, 3).map((run) => (
+                  <div key={run.id} className="border border-[#1C2230] p-3 space-y-1">
+                    <div className="font-mono text-[11px]" style={{ color: (run.compare?.rescan_count || 0) ? "#FF3366" : "#00E676" }}>
+                      {run.shot_count} pts · {run.compare?.pass_count || 0} pass · {run.compare?.rescan_count || 0} rescan · {run.engine}
+                    </div>
+                    {run.compare?.ai?.summary && (
+                      <p className="text-xs text-[#D5D9E2] leading-relaxed">{run.compare.ai.summary}</p>
+                    )}
+                    {(run.compare?.needs_rescan || []).slice(0, 6).map((row) => (
+                      <div key={`${run.id}-${row.station_index}`} className="font-mono text-[10px]" style={{ color: "#FF3366" }}>
+                        Rescan #{row.station_index} · {row.element_name || "station"} · {row.measured_station_ft}' vs {row.design_station_ft}' · {row.flag}
+                      </div>
+                    ))}
+                  </div>
+                ))}
+                {!(beam?.tape_runs || []).length && (
+                  <div className="text-xs font-mono text-muted-foreground">No multi-point tape runs on this beam yet. Shoot from Digital Tape — origin on the header, snap on green.</div>
+                )}
                 {(beam?.ar_measurements || []).slice(0, 6).map((m) => (
                   <div key={m.id} className="border-b border-[#1C2230] py-2 font-mono text-[11px]">
                     <span style={{ color: m.level ? "#00E676" : "#FF3366" }}>{m.level ? "LEVEL" : "OFF"}</span>
                     {" · "}{m.distance_ft} ft · Δ{m.delta_height_in}" · {m.engine}
                     {m.forced ? " · FORCED" : ""}
+                    {m.station_index ? ` · #${m.station_index}` : ""}
                   </div>
                 ))}
                 {!(beam?.ar_measurements || []).length && (

@@ -37,7 +37,8 @@ def save_upload(blueprint_id: str, filename: str, data: bytes) -> Path:
     if ext not in ALLOWED_EXT:
         raise ValueError("Unsupported file type. Use PDF or image.")
     dest = blueprint_dir(blueprint_id) / safe_name(filename)
-    dest.write_bytes(data)
+    from security_core import write_protected
+    write_protected(dest, data)
     return dest
 
 
@@ -68,7 +69,8 @@ def save_roll_photo(roll_id: str, filename: str, data: bytes) -> Path:
     if ext not in ROLL_ALLOWED_EXT:
         raise ValueError("Unsupported file type. Use JPEG, PNG, WebP, TIFF, or PDF.")
     dest = roll_dir(roll_id) / safe_name(filename)
-    dest.write_bytes(data)
+    from security_core import write_protected
+    write_protected(dest, data)
     return dest
 
 
@@ -103,7 +105,8 @@ def save_company_logo(filename: str, data: bytes) -> Path:
         except OSError:
             pass
     dest = folder / f"logo{ext}"
-    dest.write_bytes(data)
+    from security_core import write_protected
+    write_protected(dest, data)
     return dest
 
 
@@ -116,3 +119,42 @@ def company_logo_path(filename: str = "") -> Optional[Path]:
         return dest if dest.exists() and dest.is_file() else None
     matches = sorted(p for p in folder.glob("logo.*") if p.is_file())
     return matches[0] if matches else None
+
+
+VAULT_ROOT = Path(__file__).parent / "uploads" / "company"
+VAULT_KINDS = {"drawings", "photos", "forms", "strand-certs", "qr", "packages"}
+
+
+def vault_dir(company_id: str, job_id: str, pour_id: str, beam_id: str, kind: str) -> Path:
+    if kind not in VAULT_KINDS:
+        raise ValueError("Invalid vault kind")
+    root = VAULT_ROOT.resolve()
+    path = (
+        root
+        / safe_id(company_id or "plant")
+        / "jobs"
+        / safe_id(job_id or "unassigned")
+        / "pours"
+        / safe_id(pour_id or "unassigned")
+        / "beams"
+        / safe_id(beam_id or "unassigned")
+        / kind
+    ).resolve()
+    if root not in path.parents and path != root:
+        raise ValueError("Invalid vault path")
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def save_vault_file(company_id: str, job_id: str, pour_id: str, beam_id: str, kind: str, filename: str, data: bytes) -> Path:
+    if len(data) > MAX_BYTES:
+        raise ValueError("File exceeds 25 MB limit")
+    dest = vault_dir(company_id, job_id, pour_id, beam_id, kind) / safe_name(filename)
+    from security_core import write_protected
+    write_protected(dest, data)
+    return dest
+
+
+def file_response(path, filename: str = "", media_type: str = "application/octet-stream"):
+    from security_core import protected_file_response
+    return protected_file_response(path, filename, media_type)

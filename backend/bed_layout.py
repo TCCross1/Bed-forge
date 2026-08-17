@@ -104,6 +104,111 @@ def find_conflicts(
     return bed_hits, beam_hits
 
 
+def utilization_pct(bed_length_ft: float, lengths: List[float]) -> float:
+    usable = float(bed_length_ft) - HEADER_SETBACK_FT - BULKHEAD_SETBACK_FT
+    if usable <= 0:
+        return 0.0
+    used = sum(lengths) + GAP_FT * max(len(lengths) - 1, 0)
+    return round(min(100.0, max(0.0, (used / usable) * 100.0)), 1)
+
+
+def changeover_score(bed_signature: str, beam: dict) -> int:
+    """Lower is better. Same job + twin type = least changeover."""
+    sig = (beam.get("job_id") or "") + "|" + (beam.get("twin_type") or beam.get("product_type_id") or "")
+    if not bed_signature:
+        return 1
+    if sig == bed_signature:
+        return 0
+    if (beam.get("twin_type") or "") and bed_signature.endswith("|" + (beam.get("twin_type") or "")):
+        return 2
+    return 4
+
+
+def suggest_fit(beds: List[dict], occupied: dict, unassigned: List[dict], day: str) -> List[dict]:
+    """Greedy pack: longest beams first onto the bed with least changeover that still fits.
+
+    occupied: bed_id -> list of beam dicts already on that bed for `day`.
+    """
+    remaining_pool = sorted(
+        [b for b in unassigned if b.get("id")],
+        key=lambda b: float(b.get("length_ft") or 0),
+        reverse=True,
+    )
+    state = {}
+    for bed in beds:
+        bid = bed.get("id")
+        on = list(occupied.get(bid) or [])
+        lengths = [float(x.get("length_ft") or 0) for x in on]
+        sig = ""
+        if on:
+            last = on[-1]
+            sig = (last.get("job_id") or "") + "|" + (last.get("twin_type") or last.get("product_type_id") or "")
+        state[bid] = {
+            "bed": bed,
+            "on": on,
+            "lengths": lengths,
+            "signature": sig,
+        }
+
+    placements = {bed.get("id"): [] for bed in beds}
+    skipped = []
+    for beam in remaining_pool:
+        length = float(beam.get("length_ft") or 0)
+        best = None
+        best_key = None
+        for bid, st in state.items():
+            try:
+                pack_stations(st["bed"].get("length_ft") or 300, st["lengths"] + [length])
+            except ValueError:
+                continue
+            leftover = remaining_ft(st["bed"].get("length_ft") or 300, st["lengths"] + [length])
+            score = changeover_score(st["signature"], beam)
+            key = (score, -leftover, st["bed"].get("bed_number") or 99)
+            if best_key is None or key < best_key:
+                best_key = key
+                best = bid
+        if best is None:
+            skipped.append({"id": beam.get("id"), "mark": beam.get("mark"), "length_ft": length, "reason": "no bed with remaining length"})
+            continue
+        st = state[best]
+        st["lengths"].append(length)
+        st["on"].append(beam)
+        if not st["signature"]:
+            st["signature"] = (beam.get("job_id") or "") + "|" + (beam.get("twin_type") or beam.get("product_type_id") or "")
+        placements[best].append(beam)
+
+    suggestions = []
+    for bed in beds:
+        bid = bed.get("id")
+        added = placements.get(bid) or []
+        if not added:
+            continue
+        st = state[bid]
+        leftover = remaining_ft(bed.get("length_ft") or 300, st["lengths"])
+        util = utilization_pct(bed.get("length_ft") or 300, st["lengths"])
+        already = occupied.get(bid) or []
+        if not already:
+            change = "open bed"
+        elif already[-1].get("job_id") == added[0].get("job_id") and (already[-1].get("twin_type") or "") == (added[0].get("twin_type") or ""):
+            change = "least changeover"
+        else:
+            change = "new mix"
+        suggestions.append({
+            "bed_id": bid,
+            "bed_number": bed.get("bed_number"),
+            "date": day,
+            "beam_ids": [b.get("id") for b in added],
+            "marks": [b.get("mark") for b in added],
+            "count": len(added),
+            "remaining_ft": leftover,
+            "utilization_pct": util,
+            "changeover": change,
+            "headline": f"These {len(added)} beam{'s' if len(added) != 1 else ''} fit Bed {bed.get('bed_number')} {day} with {change}",
+        })
+    suggestions.sort(key=lambda s: (0 if s["changeover"] == "least changeover" else 1, -s["count"], s.get("bed_number") or 99))
+    return {"date": day, "suggestions": suggestions, "skipped": skipped}
+
+
 def fallback_spec(beam: dict) -> dict:
     """Minimal BeamSpec-shaped payload so a bed twin can render without a locked drawing."""
     length = float(beam.get("length_ft") or 90)

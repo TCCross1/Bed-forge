@@ -47,7 +47,7 @@ export default function CylinderTags() {
   const { user } = useAuth();
   const company = useCompany();
   const tech = user?.name || "";
-  const canBrand = user?.role === "admin" || user?.role === "qc_supervisor";
+  const canBrand = user?.role === "admin" || user?.role === "executive" || user?.role === "qc_supervisor";
 
   const [step, setStep] = useState("list");
   const [run, setRun] = useState(() => emptyRun(tech));

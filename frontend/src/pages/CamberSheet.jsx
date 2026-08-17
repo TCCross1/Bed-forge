@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import api, { formatApiErrorDetail } from "../lib/api";
 import Layout, { PageHeader, Field, inputClass, cardClass, ARMeasureLink } from "../components/Layout";
+import { releaseForecast } from "../lib/constants";
 import { toast } from "sonner";
 import { Loader2, Ruler, CheckCircle2, XCircle } from "lucide-react";
 
@@ -21,6 +22,8 @@ export default function CamberSheet() {
   const [form, setForm] = useState(EMPTY);
   const [history, setHistory] = useState([]);
   const [cylinders, setCylinders] = useState([]);
+  const [forecast, setForecast] = useState(null);
+  const [tempF, setTempF] = useState("");
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -65,6 +68,11 @@ export default function CamberSheet() {
     } else {
       setCylinders([]);
     }
+    api.get("/release-forecast", { params: { beam_id: beamId } })
+      .then((r) => {
+        if (!cancelled) setForecast(r.data?.forecasts?.[0] || null);
+      })
+      .catch((err) => console.error("[camber] forecast failed", err));
     return () => {
       cancelled = true;
     };
@@ -172,6 +180,47 @@ export default function CamberSheet() {
         </div>
 
         <div className={`${cardClass} p-5 sm:p-8`}>
+          {forecast && (
+            <div className="mb-6 border border-[#1C2230] p-4" data-testid="camber-forecast">
+              <div className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground">Predictive release</div>
+              <div className="font-display font-bold text-xl mt-1" style={{ color: releaseForecast(forecast.status).color }}>
+                {forecast.label}
+              </div>
+              <div className="font-mono text-sm mt-1">
+                Pred {forecast.predicted_psi} psi · req {forecast.required_psi} psi
+                {forecast.crush_psi != null ? ` · crush ${forecast.crush_psi}` : ""}
+              </div>
+              <p className="text-xs text-muted-foreground mt-2">{forecast.advice}</p>
+              {forecast.crush_id && <Link to="/tags" className="inline-block mt-2 text-[10px] font-mono uppercase tracking-widest text-primary">Open crush record</Link>}
+              <div className="mt-3 flex gap-2">
+                <input
+                  type="number"
+                  placeholder="Bed temp °F"
+                  value={tempF}
+                  onChange={(e) => setTempF(e.target.value)}
+                  className={inputClass}
+                  data-testid="maturity-temp"
+                />
+                <button
+                  type="button"
+                  className="min-h-12 px-4 border border-[#1C2230] font-mono text-xs uppercase hover:border-primary"
+                  onClick={async () => {
+                    try {
+                      await api.post("/maturity/samples", { beam_id: beamId, temp_f: parseFloat(tempF), source: "probe" });
+                      toast.success("Temperature logged");
+                      setTempF("");
+                      const r = await api.get("/release-forecast", { params: { beam_id: beamId } });
+                      setForecast(r.data?.forecasts?.[0] || null);
+                    } catch (err) {
+                      toast.error(formatApiErrorDetail(err.response?.data?.detail) || "Failed to log temperature");
+                    }
+                  }}
+                >
+                  Log temp
+                </button>
+              </div>
+            </div>
+          )}
           <h3 className="font-display font-bold uppercase tracking-wider text-lg mb-4">History</h3>
           <div className="space-y-3" data-testid="camber-history">
             {history.length === 0 && <div className="text-sm text-muted-foreground font-mono">No camber readings for this beam.</div>}

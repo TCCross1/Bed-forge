@@ -9,6 +9,7 @@ from auth import get_current_user, require_roles
 from bed_layout import (
     GAP_FT, HEADER_SETBACK_FT, MAX_BEAMS_TYPICAL, covers, end_day, fallback_spec,
     find_conflicts, map_production_status, pack_stations, parse_day, remaining_ft,
+    suggest_fit, utilization_pct,
 )
 from db import db
 from models import (
@@ -17,7 +18,7 @@ from models import (
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["beds"])
-MUTATE = require_roles("admin", "qc_supervisor", "production")
+MUTATE = require_roles("admin", "executive", "qc_supervisor", "production")
 
 
 async def _bed(bed_id: str) -> dict:
@@ -84,6 +85,7 @@ async def _layout_payload(bed: dict, day: str) -> dict:
         "header_setback_ft": HEADER_SETBACK_FT,
         "gap_ft": GAP_FT,
         "remaining_ft": remaining_ft(bed.get("length_ft") or 300, lengths),
+        "utilization_pct": utilization_pct(bed.get("length_ft") or 300, lengths),
         "over_typical": len(rows) > MAX_BEAMS_TYPICAL,
         "assignments": rows,
         "active_beam_id": bed.get("active_beam_id"),
@@ -149,6 +151,7 @@ async def bed_calendar(start: Optional[str] = None, days: int = 7, user=Depends(
             for day in dates:
                 on = [a for a in assignments if a.get("bed_id") == bed["id"] and covers(a, day)]
                 on.sort(key=lambda a: a.get("position_on_bed") or 0)
+                lengths = [float((beams.get(a["beam_id"]) or {}).get("length_ft") or 0) for a in on]
                 cells.append({
                     "bed_id": bed["id"],
                     "bed_number": bed["bed_number"],
@@ -157,6 +160,8 @@ async def bed_calendar(start: Optional[str] = None, days: int = 7, user=Depends(
                     "marks": [beams.get(a["beam_id"], {}).get("mark", "?") for a in on],
                     "statuses": [a.get("production_status") for a in on],
                     "assignment_ids": [a["id"] for a in on],
+                    "remaining_ft": remaining_ft(bed.get("length_ft") or 300, lengths),
+                    "utilization_pct": utilization_pct(bed.get("length_ft") or 300, lengths),
                 })
         return {"start": start_day, "dates": dates, "beds": beds, "cells": cells}
     except Exception:
@@ -196,7 +201,39 @@ async def planner_pool(date: Optional[str] = None, job_id: Optional[str] = None,
         raise HTTPException(status_code=400, detail=str(exc))
     except Exception:
         logger.exception("planner_pool failed")
-        raise HTTPException(status_code=500, detail="Failed to load planner beam pool")
+        raise HTTPException(status_code=500, detail="Failed to load planner pool")
+
+
+@router.get("/beds/suggest")
+async def suggest_beds(date: Optional[str] = None, user=Depends(get_current_user)):
+    try:
+        day = parse_day(date) if date else datetime.now(timezone.utc).date().isoformat()
+        beds = await db.beds.find({}, {"_id": 0}).sort("bed_number", 1).to_list(20)
+        assignments = await db.bed_assignments.find({}, {"_id": 0}).to_list(2000)
+        beams = {b["id"]: b for b in await db.beams.find({}, {"_id": 0}).to_list(2000)}
+        occupied = {}
+        assigned_ids = set()
+        for rec in assignments:
+            if not covers(rec, day):
+                continue
+            beam = dict(beams.get(rec.get("beam_id")) or {})
+            if not beam:
+                continue
+            assigned_ids.add(beam["id"])
+            occupied.setdefault(rec["bed_id"], []).append({**beam, "position_on_bed": rec.get("position_on_bed")})
+        for bid in occupied:
+            occupied[bid].sort(key=lambda b: b.get("position_on_bed") or 0)
+        unassigned = [b for b in beams.values() if b.get("id") not in assigned_ids and b.get("qc_state") != "shipped"]
+        payload = suggest_fit(beds, occupied, unassigned, day)
+        logger.info("bed suggest date=%s suggestions=%s by=%s", day, len(payload.get("suggestions") or []), user.get("email"))
+        return payload
+    except HTTPException:
+        raise
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception:
+        logger.exception("suggest_beds failed")
+        raise HTTPException(status_code=500, detail="Failed to suggest bed packing")
 
 
 @router.get("/bed-assignments")

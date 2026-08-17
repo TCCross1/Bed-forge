@@ -10,7 +10,7 @@ from beam_spec import BeamSpec, BeamSpecPatch, SpecMeasurementCreate, compare_me
 from db import db
 from extract import extract_beam_spec
 from models import now_iso
-from storage import list_files, save_upload, MAX_BYTES
+from storage import file_response, list_files, save_upload, MAX_BYTES
 from beam_spec import Blueprint
 from l25390 import build_l25390_spec
 from corpus import clone_spec, corpus_summaries, load_gold_specs
@@ -114,7 +114,7 @@ async def download_blueprint(blueprint_id: str, user=Depends(get_current_user)):
     if not files:
         raise HTTPException(status_code=404, detail="File missing")
     path = files[0]
-    return FileResponse(path, filename=rec.get("original_name") or path.name)
+    return file_response(path, rec.get("original_name") or path.name, rec.get("content_type") or "application/octet-stream")
 
 
 @router.post("/blueprints/{blueprint_id}/extract")
@@ -265,7 +265,7 @@ async def patch_spec(spec_id: str, payload: BeamSpecPatch, user=Depends(get_curr
 
 
 @router.post("/beam-specs/{spec_id}/lock")
-async def lock_spec(spec_id: str, user=Depends(require_roles("admin", "qc_supervisor"))):
+async def lock_spec(spec_id: str, user=Depends(require_roles("admin", "executive", "qc_supervisor"))):
     spec = await _get_spec(spec_id)
     if spec.get("status") == "locked":
         return spec
@@ -285,6 +285,8 @@ async def lock_spec(spec_id: str, user=Depends(require_roles("admin", "qc_superv
             "qc_state": "in_progress",
         }})
     logger.info("beam spec locked id=%s by=%s", spec_id, user.get("email"))
+    from audit import write_audit
+    await write_audit(action="spec.lock", user=user, entity_type="beam_spec", entity_id=spec_id)
     return await _get_spec(spec_id)
 
 

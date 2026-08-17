@@ -14,7 +14,7 @@ from models import (
     LOW_CONFIDENCE, StrandRoll, StrandRollAssignInput, StrandRollAssignment,
     StrandRollConfirm, StrandRollPhoto, now_iso,
 )
-from storage import ROLL_ALLOWED_EXT, roll_photo_path, save_roll_photo
+from storage import ROLL_ALLOWED_EXT, file_response, roll_photo_path, save_roll_photo
 from strand_gate import GATE_MESSAGE, gate_ok, matching_assignments
 from strand_ocr import extract_roll
 
@@ -64,13 +64,20 @@ async def bed_tension_gate(bed_id: str, pour_id: Optional[str] = None) -> dict:
     }
 
 
+from audit import override_active
+
+
 async def assert_tension_allowed(bed_id: Optional[str], pour_id: Optional[str] = None):
     if not bed_id:
         raise HTTPException(status_code=409, detail=GATE_MESSAGE)
     gate = await bed_tension_gate(bed_id, pour_id)
-    if not gate["ok"]:
-        logger.warning("tension gate blocked bed=%s pour=%s", bed_id, pour_id)
-        raise HTTPException(status_code=409, detail=GATE_MESSAGE)
+    if gate["ok"]:
+        return
+    if await override_active("strand_tension", bed_id):
+        logger.warning("tension gate overridden bed=%s", bed_id)
+        return
+    logger.warning("tension gate blocked bed=%s pour=%s", bed_id, pour_id)
+    raise HTTPException(status_code=409, detail=GATE_MESSAGE)
 
 
 async def _enrich_roll(roll: dict) -> dict:
@@ -349,7 +356,7 @@ async def get_strand_roll_photo(roll_id: str, filename: str, user=Depends(get_cu
         path = roll_photo_path(roll_id, filename)
         if not path.exists() or not path.is_file():
             raise HTTPException(status_code=404, detail="Photo not found")
-        return FileResponse(path)
+        return file_response(path, filename, "image/jpeg")
     except HTTPException:
         raise
     except ValueError:

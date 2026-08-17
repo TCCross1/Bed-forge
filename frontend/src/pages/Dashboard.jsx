@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import api, { formatApiErrorDetail } from "../lib/api";
 import Layout, { PageHeader, cardClass, ARMeasureLink } from "../components/Layout";
 import PlantFloor from "../components/PlantFloor";
-import { bedState, productionStatus, qcState } from "../lib/constants";
+import { bedState, productionStatus, qcState, releaseForecast } from "../lib/constants";
 import { isoToday } from "../lib/bedLayout";
 import { Activity, Layers, CheckCircle2, AlertTriangle, XCircle, Loader2, RefreshCw, Box, LayoutGrid, ScanLine } from "lucide-react";
 import { toast } from "sonner";
@@ -54,10 +54,11 @@ function BedCard({ bed, onOpen, onOpenBeam }) {
         {(bed.beams || []).slice(0, 8).map((b) => {
           const q = qcState(b.qc_state);
           const p = productionStatus(b.production_status);
+          const r = releaseForecast(b.release_forecast?.status);
           return (
             <span
               key={b.id}
-              title={`${b.mark} · ${p.label} · ${q.label}`}
+              title={`${b.mark} · ${p.label} · ${q.label} · ${b.release_forecast?.label || r.label}`}
               className="text-[10px] font-mono px-1.5 py-0.5 rounded-none border"
               style={{ color: p.color, borderColor: `${p.color}55` }}
               onClick={(e) => {
@@ -66,6 +67,9 @@ function BedCard({ bed, onOpen, onOpenBeam }) {
               }}
             >
               {b.mark}
+              {b.release_forecast?.status && b.release_forecast.status !== "unknown" && (
+                <span className="ml-1" style={{ color: r.color }}>· {r.label}</span>
+              )}
             </span>
           );
         })}
@@ -173,13 +177,18 @@ export default function Dashboard() {
           </div>
         ) : (
           <>
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-4 mb-6 sm:mb-8">
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-4 mb-3 sm:mb-4">
               <Stat label="Active Beds" value={s.active_beds} color="#2979FF" icon={Activity} testid="stat-active-beds" />
               <Stat label="Total Beams" value={s.total_beams} color="#FFFFFF" icon={Layers} testid="stat-total-beams" />
               <Stat label="Passed" value={s.passed} color="#00E676" icon={CheckCircle2} testid="stat-passed" />
               <Stat label="In Progress" value={s.in_progress} color="#2979FF" icon={Loader2} testid="stat-inprogress" />
               <Stat label="On Hold" value={s.hold} color="#FFD600" icon={AlertTriangle} testid="stat-hold" />
               <Stat label="Failed" value={s.failed} color="#FF3366" icon={XCircle} testid="stat-failed" />
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4 mb-6 sm:mb-8" data-testid="release-forecast-stats">
+              <Stat label="Release expected pass" value={s.release_expected_pass} color="#00E676" icon={CheckCircle2} testid="stat-release-pass" />
+              <Stat label="Release borderline" value={s.release_borderline} color="#FFD600" icon={AlertTriangle} testid="stat-release-border" />
+              <Stat label="Release fail risk" value={s.release_fail_risk} color="#FF3366" icon={XCircle} testid="stat-release-fail" />
             </div>
 
             {(measurements[0] || events[0]) && (

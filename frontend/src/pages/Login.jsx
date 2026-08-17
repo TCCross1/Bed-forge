@@ -1,10 +1,10 @@
-import React, { useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import React, { useEffect, useState } from "react";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
-import { formatApiErrorDetail } from "../lib/api";
+import api, { formatApiErrorDetail } from "../lib/api";
 import { BrandLockup, BrandMark } from "../components/Layout";
 import { useCompany } from "../context/CompanyContext";
-import { Loader2 } from "lucide-react";
+import { BookOpen, Loader2 } from "lucide-react";
 
 const DEMO = [
   { email: "tccrossmusic@gmail.com", label: "Admin", password: "BedForge2026!" },
@@ -18,10 +18,24 @@ export default function Login() {
   const company = useCompany();
   const navigate = useNavigate();
   const [params] = useSearchParams();
-  const [email, setEmail] = useState("tccrossmusic@gmail.com");
-  const [password, setPassword] = useState("BedForge2026!");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [demo, setDemo] = useState(false);
+
+  useEffect(() => {
+    api.get("/auth/public-config")
+      .then((r) => {
+        const on = Boolean(r.data?.demo);
+        setDemo(on);
+        if (on) {
+          setEmail("tccrossmusic@gmail.com");
+          setPassword("BedForge2026!");
+        }
+      })
+      .catch((err) => console.error("[login] config failed", err));
+  }, []);
 
   const nextPath = () => {
     const next = params.get("next") || "/";
@@ -121,6 +135,11 @@ export default function Login() {
             </button>
           </form>
 
+          <Link to="/guide" className="mt-6 min-h-12 flex items-center justify-center gap-2 text-sm font-semibold uppercase tracking-wider text-primary">
+            <BookOpen className="w-4 h-4" /> How BedForge works
+          </Link>
+
+          {demo && (
           <div className="mt-8 pt-6 border-t border-[#1C2230]">
             <div className="text-xs font-mono uppercase tracking-widest text-muted-foreground mb-3">Quick Demo Login</div>
             <div className="grid grid-cols-2 gap-2">
@@ -136,6 +155,7 @@ export default function Login() {
               ))}
             </div>
           </div>
+          )}
         </div>
       </div>
     </div>

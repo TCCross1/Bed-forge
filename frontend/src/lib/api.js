@@ -1,17 +1,64 @@
 import axios from "axios";
+import { deviceId } from "./device";
+import { enqueueAction, isFieldWrite, shouldQueueError } from "./offlineQueue";
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 export const API = `${BACKEND_URL}/api`;
 
-const api = axios.create({ baseURL: API });
+function readToken() {
+  return sessionStorage.getItem("bf_token") || localStorage.getItem("bf_token") || "";
+}
+
+const api = axios.create({ baseURL: API, withCredentials: true });
 
 api.interceptors.request.use((config) => {
-  const token = localStorage.getItem("bf_token");
+  const token = readToken();
   if (token) config.headers.Authorization = `Bearer ${token}`;
+  const dev = deviceId();
+  if (dev) config.headers["X-Device-Id"] = dev;
   return config;
 });
 
-export function formatApiErrorDetail(detail) {
+api.interceptors.response.use(
+  (res) => res,
+  async (err) => {
+    const status = err.response?.status;
+    const url = err.config?.url || "";
+    const method = err.config?.method || "get";
+    if (status === 401 && !url.includes("/auth/login") && !url.includes("/auth/public-config")) {
+      sessionStorage.removeItem("bf_token");
+      localStorage.removeItem("bf_token");
+    }
+    if (!err.config?.skipOfflineQueue && isFieldWrite(url, method) && shouldQueueError(err)) {
+      try {
+        const raw = err.config?.data;
+        const data = raw && typeof raw === "string" ? JSON.parse(raw) : raw;
+        await enqueueAction({ method, url, data, label: url });
+        err.queuedOffline = true;
+        err.response = {
+          ...(err.response || {}),
+          data: { detail: "Saved on this device — will sync when Wi-Fi returns." },
+        };
+      } catch (queueErr) {
+        console.error("[api] offline enqueue failed", queueErr);
+      }
+    }
+    return Promise.reject(err);
+  }
+);
+
+export function storeToken(token) {
+  if (token) sessionStorage.setItem("bf_token", token);
+  localStorage.removeItem("bf_token");
+}
+
+export function clearToken() {
+  sessionStorage.removeItem("bf_token");
+  localStorage.removeItem("bf_token");
+}
+
+export function formatApiErrorDetail(detail, err) {
+  if (err?.queuedOffline) return "Saved on this device — will sync when Wi-Fi returns.";
   if (detail == null) return "Something went wrong. Please try again.";
   if (typeof detail === "string") return detail;
   if (Array.isArray(detail))

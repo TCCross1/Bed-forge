@@ -18,11 +18,16 @@ import {
   ScanBarcode,
   Tags,
   QrCode,
+  BookOpen,
+  Shield,
+  Package,
+  DollarSign,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { useDevice } from "../context/DeviceContext";
 import { useCompany } from "../context/CompanyContext";
-import { ROLE_LABELS } from "../lib/constants";
+import { ROLE_LABELS, isExec } from "../lib/constants";
+import OfflineBanner from "./OfflineBanner";
 
 export const MARK_SRC = "/brand/bedforge-mark.png";
 export const LOCKUP_SRC = "/brand/bedforge-lockup.png";
@@ -65,6 +70,7 @@ const PRIMARY_NAV = [
   { to: "/tags", label: "Tags", icon: Tags, testid: "nav-tags" },
   { to: "/tension", label: "Tension", icon: Calculator, testid: "nav-tension" },
   { to: "/forms", label: "Forms", icon: FileSpreadsheet, testid: "nav-forms" },
+  { to: "/packages", label: "Packages", icon: Package, testid: "nav-packages" },
 ];
 
 const FIELD_NAV = [
@@ -80,9 +86,10 @@ const SECONDARY_NAV = [
   { to: "/camber", label: "Camber", icon: Ruler, testid: "nav-camber" },
   { to: "/finish", label: "Finish", icon: Sparkles, testid: "nav-finish" },
   { to: "/release", label: "Release", icon: Truck, testid: "nav-release" },
-  { to: "/measure", label: "AR Measure", icon: ScanLine, testid: "nav-measure" },
+  { to: "/measure", label: "Digital Tape", icon: ScanLine, testid: "nav-measure" },
   { to: "/scan", label: "Scan QR", icon: ScanLine, testid: "nav-scan" },
   { to: "/qr", label: "QR Labels", icon: QrCode, testid: "nav-qr" },
+  { to: "/guide", label: "Tutorial", icon: BookOpen, testid: "nav-guide" },
 ];
 
 const COMMAND_SECONDARY = [
@@ -91,9 +98,10 @@ const COMMAND_SECONDARY = [
   { to: "/camber", label: "Camber", icon: Ruler, testid: "nav-camber" },
   { to: "/finish", label: "Finish", icon: Sparkles, testid: "nav-finish" },
   { to: "/release", label: "Release", icon: Truck, testid: "nav-release" },
-  { to: "/measure", label: "AR Review", icon: ScanLine, testid: "nav-measure" },
+  { to: "/measure", label: "Tape Review", icon: ScanLine, testid: "nav-measure" },
   { to: "/scan", label: "Scan QR", icon: ScanLine, testid: "nav-scan" },
   { to: "/qr", label: "QR Labels", icon: QrCode, testid: "nav-qr" },
+  { to: "/guide", label: "Tutorial", icon: BookOpen, testid: "nav-guide" },
 ];
 
 function linkClass(isActive) {
@@ -123,7 +131,7 @@ function NavItems({ items, onNavigate, endHome }) {
   });
 }
 
-export function ARMeasureLink({ beamId, purpose = "level", compact = false }) {
+export function ARMeasureLink({ beamId, purpose = "tape", compact = false }) {
   const qs = new URLSearchParams();
   if (beamId) qs.set("beam", beamId);
   if (purpose) qs.set("purpose", purpose);
@@ -133,7 +141,7 @@ export function ARMeasureLink({ beamId, purpose = "level", compact = false }) {
       data-testid="ar-measure-entry"
       className="min-h-12 px-4 border border-[#1C2230] rounded-none flex items-center gap-2 text-sm font-semibold uppercase tracking-wider hover:border-primary hover:text-primary"
     >
-      <ScanLine className="w-4 h-4" /> {compact ? "AR" : "AR Measure"}
+      <ScanLine className="w-4 h-4" /> {compact ? "Tape" : "Digital Tape"}
     </Link>
   );
 }
@@ -146,15 +154,27 @@ export default function Layout({ children }) {
   const [moreOpen, setMoreOpen] = useState(false);
   const command = device.command;
   const field = device.field;
-  const secondary = command ? COMMAND_SECONDARY : SECONDARY_NAV;
+  const secondary = [
+    ...(command ? COMMAND_SECONDARY : SECONDARY_NAV),
+    ...(isExec(user?.role) ? [
+      { to: "/finance", label: "Dollars", icon: DollarSign, testid: "nav-finance" },
+      { to: "/command", label: "Command", icon: Shield, testid: "nav-command" },
+    ] : []),
+  ];
   const fieldMore = [
+    { to: "/guide", label: "Tutorial", icon: BookOpen, testid: "nav-guide" },
+    ...(isExec(user?.role) ? [
+      { to: "/finance", label: "Dollars", icon: DollarSign, testid: "nav-finance" },
+      { to: "/command", label: "Command", icon: Shield, testid: "nav-command" },
+    ] : []),
     { to: "/scan", label: "Scan QR", icon: ScanLine, testid: "nav-scan" },
     { to: "/qr", label: "QR Labels", icon: QrCode, testid: "nav-qr" },
     { to: "/inspection", label: "Inspect", icon: ClipboardCheck, testid: "nav-inspection" },
     { to: "/tags", label: "Tags", icon: Tags, testid: "nav-tags" },
     { to: "/forms", label: "Forms", icon: FileSpreadsheet, testid: "nav-forms" },
-    { to: "/measure", label: "AR Measure", icon: ScanLine, testid: "nav-measure" },
-    ...SECONDARY_NAV.filter((i) => !["/measure", "/scan", "/qr"].includes(i.to)),
+    { to: "/packages", label: "Packages", icon: Package, testid: "nav-packages" },
+    { to: "/measure", label: "Digital Tape", icon: ScanLine, testid: "nav-measure" },
+    ...SECONDARY_NAV.filter((i) => !["/measure", "/scan", "/qr", "/guide"].includes(i.to)),
   ];
 
   const signOut = () => {
@@ -240,7 +260,10 @@ export default function Layout({ children }) {
           </div>
         )}
 
-        <main className={`flex-1 relative z-10 ${field ? "pb-24" : "pb-0"}`}>{children}</main>
+        <main className={`flex-1 relative z-10 ${field ? "pb-24" : "pb-0"}`}>
+          <OfflineBanner />
+          {children}
+        </main>
       </div>
 
       <nav

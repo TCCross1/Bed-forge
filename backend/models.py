@@ -22,13 +22,15 @@ class UserPublic(BaseModel):
     id: str
     email: str
     name: str
-    role: str  # qc_tech | qc_supervisor | production | admin
+    role: str  # qc_tech | qc_supervisor | production | admin | executive
+    disabled: bool = False
+    must_change_password: bool = False
     created_at: str
 
 
 class RegisterInput(BaseModel):
     email: EmailStr
-    password: str = Field(min_length=6)
+    password: str = Field(min_length=10)
     name: str
     role: str = "qc_tech"
 
@@ -36,6 +38,51 @@ class RegisterInput(BaseModel):
 class LoginInput(BaseModel):
     email: EmailStr
     password: str
+
+
+class PasswordChange(BaseModel):
+    current_password: str
+    new_password: str = Field(min_length=10)
+
+
+class UserAdminCreate(BaseModel):
+    email: EmailStr
+    password: str = Field(min_length=10)
+    name: str
+    role: str = "qc_tech"
+
+
+class UserAdminUpdate(BaseModel):
+    name: Optional[str] = None
+    role: Optional[str] = None
+    disabled: Optional[bool] = None
+    must_change_password: Optional[bool] = None
+
+
+class OverrideRequest(BaseModel):
+    kind: str
+    target_id: str
+    reason: str = Field(min_length=8)
+    hours: int = 8
+
+
+class SecuritySettingsUpdate(BaseModel):
+    session_minutes: Optional[int] = None
+    idle_minutes: Optional[int] = None
+    ip_allowlist: Optional[List[str]] = None
+    office_ip_enforced: Optional[bool] = None
+    bind_device: Optional[bool] = None
+    retention_days: Optional[int] = None
+    camber_tolerance_in: Optional[float] = None
+    length_tolerance_in: Optional[float] = None
+    legal_hold: Optional[bool] = None
+    ncr_cost_usd: Optional[float] = None
+    scrap_cost_usd: Optional[float] = None
+    bed_day_cost_usd: Optional[float] = None
+    overtime_hold_usd: Optional[float] = None
+    required_release_psi: Optional[float] = None
+    maturity_su_psi: Optional[float] = None
+    maturity_k_hours: Optional[float] = None
 
 
 # ---------- Product Types ----------
@@ -438,6 +485,9 @@ class ARMeasurement(BaseModel):
     note: str = ""
     photo_data: str = ""
     element_id: Optional[str] = None
+    run_id: Optional[str] = None
+    station_index: Optional[int] = None
+    origin_label: str = ""
     created_by: str = ""
     created_at: str = Field(default_factory=now_iso)
 
@@ -462,6 +512,43 @@ class ARMeasurementCreate(BaseModel):
     note: str = ""
     photo_data: str = ""
     element_id: Optional[str] = None
+    run_id: Optional[str] = None
+    station_index: Optional[int] = None
+    origin_label: str = ""
+
+
+class TapeShotIn(BaseModel):
+    station_index: int = 1
+    point_b: Dict[str, float] = Field(default_factory=lambda: {"x": 0.0, "y": 0.0, "z": 0.0})
+    distance_ft: Optional[float] = None
+    station_ft: Optional[float] = None
+    delta_height_in: Optional[float] = None
+    level: Optional[bool] = None
+    forced: bool = False
+    confidence: float = 0.0
+    sample_count: int = 12
+    note: str = ""
+    element_id: Optional[str] = None
+    warning: str = ""
+
+
+class TapeRunCreate(BaseModel):
+    beam_id: Optional[str] = None
+    bed_id: Optional[str] = None
+    purpose: str = "tape"
+    origin_label: str = "header"
+    point_a: Dict[str, float] = Field(default_factory=lambda: {"x": 0.0, "y": 0.0, "z": 0.0})
+    shots: List[TapeShotIn] = Field(default_factory=list)
+    engine: str = "web"
+    device_class: str = "field"
+    device_model: str = ""
+    lidar: bool = False
+    note: str = ""
+
+
+class TapeRunPreview(BaseModel):
+    beam_id: Optional[str] = None
+    shots: List[TapeShotIn] = Field(default_factory=list)
 
 
 class DeviceRegistration(BaseModel):
@@ -573,6 +660,22 @@ class CompanySettings(BaseModel):
     updated_by: str = ""
     updated_at: str = Field(default_factory=now_iso)
     created_at: str = Field(default_factory=now_iso)
+    session_minutes: int = 480
+    idle_minutes: int = 30
+    ip_allowlist: List[str] = Field(default_factory=list)
+    office_ip_enforced: bool = False
+    bind_device: bool = False
+    retention_days: int = 2555
+    camber_tolerance_in: float = 0.125
+    length_tolerance_in: float = 0.5
+    legal_hold: bool = False
+    ncr_cost_usd: float = 2500.0
+    scrap_cost_usd: float = 8000.0
+    bed_day_cost_usd: float = 3500.0
+    overtime_hold_usd: float = 1800.0
+    required_release_psi: float = 4000.0
+    maturity_su_psi: float = 8500.0
+    maturity_k_hours: float = 18.0
 
 
 class CompanySettingsUpdate(BaseModel):
@@ -610,3 +713,19 @@ class CylinderCrushInput(BaseModel):
     required_psi: Optional[float] = None
     release_ok: Optional[bool] = None
     notes: Optional[str] = None
+
+
+class MaturitySampleCreate(BaseModel):
+    pour_id: Optional[str] = None
+    bed_id: Optional[str] = None
+    beam_id: Optional[str] = None
+    temp_f: float
+    recorded_at: Optional[str] = None
+    source: str = "probe"
+    note: str = ""
+
+
+class OwnerPackageCreate(BaseModel):
+    pour_id: str
+    include_excel: bool = True
+    note: str = ""

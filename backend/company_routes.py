@@ -8,7 +8,7 @@ from fastapi.responses import FileResponse
 from auth import get_current_user, require_roles
 from db import db
 from models import CompanySettings, CompanySettingsUpdate, now_iso
-from storage import LOGO_ALLOWED_EXT, company_logo_path, save_company_logo
+from storage import LOGO_ALLOWED_EXT, company_logo_path, file_response, save_company_logo
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["company"])
@@ -65,7 +65,7 @@ async def get_company(user=Depends(get_current_user)):
 
 
 @router.patch("/company")
-async def update_company(payload: CompanySettingsUpdate, user=Depends(require_roles("admin", "qc_supervisor"))):
+async def update_company(payload: CompanySettingsUpdate, user=Depends(require_roles("admin", "executive", "qc_supervisor"))):
     try:
         doc = await get_company_doc()
         updates = {k: v.strip() if isinstance(v, str) else v for k, v in payload.model_dump().items() if v is not None}
@@ -76,6 +76,8 @@ async def update_company(payload: CompanySettingsUpdate, user=Depends(require_ro
         await db.company_settings.update_one({"id": "plant"}, {"$set": updates})
         saved = await get_company_doc()
         logger.info("company settings updated by=%s fields=%s", user.get("email"), list(updates.keys()))
+        from audit import write_audit
+        await write_audit(action="company.update", user=user, entity_type="company", entity_id="plant", after=list(updates.keys()))
         return {**public_view(saved), "updated_by": saved.get("updated_by") or ""}
     except HTTPException:
         raise
@@ -85,7 +87,7 @@ async def update_company(payload: CompanySettingsUpdate, user=Depends(require_ro
 
 
 @router.post("/company/logo")
-async def upload_company_logo(file: UploadFile = File(...), user=Depends(require_roles("admin", "qc_supervisor"))):
+async def upload_company_logo(file: UploadFile = File(...), user=Depends(require_roles("admin", "executive", "qc_supervisor"))):
     try:
         raw = await file.read()
         name = file.filename or "logo.png"
@@ -124,7 +126,7 @@ async def serve_company_logo():
         if not path or not path.exists() or not path.is_file():
             raise HTTPException(status_code=404, detail="No company logo uploaded")
         media = (doc or {}).get("logo_content_type") or "image/png"
-        return FileResponse(path, media_type=media)
+        return file_response(path, path.name, media)
     except HTTPException:
         raise
     except ValueError:

@@ -18,7 +18,7 @@ from beam_qr import (
 from company_routes import get_company_doc, public_view
 from db import db
 from models import QrLabelRequest
-from storage import company_logo_path, list_files
+from storage import file_response, company_logo_path, list_files
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["beam-qr"])
@@ -93,7 +93,7 @@ async def public_beam_drawing(token: str, blueprint_id: str):
         files = list_files(blueprint_id)
         if not files:
             raise HTTPException(status_code=404, detail="Drawing file missing")
-        return FileResponse(files[0], filename=rec.get("original_name") or files[0].name)
+        return file_response(files[0], rec.get("original_name") or files[0].name, rec.get("content_type") or "application/octet-stream")
     except HTTPException:
         raise
     except Exception:
