@@ -6,6 +6,7 @@ load_dotenv(ROOT_DIR / ".env")
 
 import os
 import logging
+from datetime import datetime, timezone
 from fastapi import FastAPI, APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from starlette.middleware.cors import CORSMiddleware
@@ -17,11 +18,13 @@ from models import (
     Bed, BedUpdate, Beam, BeamCreate, BeamUpdate,
     Inspection, InspectionCreate, TensionReport, TensionReportCreate, TensionCalcInput,
     CamberReading, CamberReadingCreate, Anomaly, AnomalyCreate,
+    BatchRecord, BatchRecordCreate, NCR, NCRCreate, NCRUpdate, LicenseState, LicenseActivateInput, now_iso,
 )
 from auth import router as auth_router, get_current_user, seed_admin
 from tension import run_tension_calc, calc_theoretical_elongation, evaluate_tension
 from seed import seed_plant
 import excel_export
+import package_export
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
@@ -40,6 +43,62 @@ async def enrich_beam(beam: dict, include_details: bool = False) -> dict:
         data["inspections"] = await db.inspections.find({"beam_id": beam_id}, {"_id": 0}).to_list(500)
         data["camber_readings"] = await db.camber_readings.find({"beam_id": beam_id}, {"_id": 0}).to_list(500)
     return data
+
+
+async def build_package_context(package_type: str, pour_id: str = None, beam_id: str = None, job_id: str = None) -> dict:
+    beams = await db.beams.find({}, {"_id": 0}).to_list(1000)
+    jobs = {item["id"]: item for item in await db.jobs.find({}, {"_id": 0}).to_list(500)}
+    pours = {item["id"]: item for item in await db.pours.find({}, {"_id": 0}).to_list(500)}
+    beds = {item["id"]: item for item in await db.beds.find({}, {"_id": 0}).to_list(100)}
+    product_types = {item["id"]: item for item in await db.product_types.find({}, {"_id": 0}).to_list(500)}
+    inspections = await db.inspections.find({}, {"_id": 0}).to_list(5000)
+    anomalies = await db.anomalies.find({}, {"_id": 0}).to_list(5000)
+    camber_readings = await db.camber_readings.find({}, {"_id": 0}).to_list(5000)
+    tension_reports = await db.tension_reports.find({}, {"_id": 0}).to_list(5000)
+    batch_records = await db.batch_records.find({}, {"_id": 0}).to_list(500)
+    ncrs = await db.ncrs.find({}, {"_id": 0}).to_list(500)
+
+    if package_type == "single_beam":
+        if not beam_id and beams:
+            beam_id = beams[0]["id"]
+        selected_beams = [beam for beam in beams if beam["id"] == beam_id]
+    elif package_type == "full_job":
+        if not job_id and beams:
+            job_id = beams[0].get("job_id")
+        selected_beams = [beam for beam in beams if beam.get("job_id") == job_id]
+    else:
+        if not pour_id and beams:
+            pour_id = beams[0].get("pour_id")
+        selected_beams = [beam for beam in beams if beam.get("pour_id") == pour_id]
+
+    if not selected_beams:
+        raise HTTPException(status_code=404, detail="No beams found for package request")
+
+    for beam in selected_beams:
+        beam["product_type"] = product_types.get(beam.get("product_type_id"), {})
+
+    selected_pour_id = pour_id or selected_beams[0].get("pour_id")
+    selected_job_id = job_id or selected_beams[0].get("job_id")
+    selected_bed_ids = sorted({beam["bed_id"] for beam in selected_beams})
+
+    for reading in camber_readings:
+        reading["beam_mark"] = next((beam["mark"] for beam in selected_beams if beam["id"] == reading["beam_id"]), reading.get("beam_id"))
+    for report in tension_reports:
+        report["bed_number"] = beds.get(report["bed_id"], {}).get("bed_number")
+
+    return {
+        "package_type": package_type,
+        "job": jobs.get(selected_job_id, {}),
+        "pour": pours.get(selected_pour_id, {}),
+        "beds": [beds[bed_id] for bed_id in selected_bed_ids if bed_id in beds],
+        "beams": selected_beams,
+        "inspections": [item for item in inspections if item.get("beam_id") in {beam["id"] for beam in selected_beams}],
+        "anomalies": [item for item in anomalies if item.get("beam_id") in {beam["id"] for beam in selected_beams}],
+        "camber_readings": [item for item in camber_readings if item.get("beam_id") in {beam["id"] for beam in selected_beams}],
+        "tension_reports": [item for item in tension_reports if not selected_bed_ids or item.get("bed_id") in selected_bed_ids],
+        "batch_record": next((item for item in batch_records if item.get("pour_id") == selected_pour_id), None),
+        "ncrs": [item for item in ncrs if item.get("beam_id") in {beam["id"] for beam in selected_beams} or item.get("pour_id") == selected_pour_id],
+    }
 
 
 @api.get("/")
@@ -257,6 +316,104 @@ async def create_anomaly(payload: AnomalyCreate, user=Depends(get_current_user))
     return an.model_dump()
 
 
+# ---------------- Batch Plant ----------------
+@api.get("/batch-records")
+async def list_batch_records(user=Depends(get_current_user)):
+    return await db.batch_records.find({}, {"_id": 0}).to_list(500)
+
+
+@api.post("/batch-records")
+async def create_batch_record(payload: BatchRecordCreate, user=Depends(get_current_user)):
+    record = BatchRecord(**payload.model_dump(), created_by=user["name"])
+    await db.batch_records.insert_one(record.model_dump())
+    return record.model_dump()
+
+
+# ---------------- NCR ----------------
+@api.get("/ncrs")
+async def list_ncrs(user=Depends(get_current_user)):
+    return await db.ncrs.find({}, {"_id": 0}).to_list(500)
+
+
+@api.post("/ncrs")
+async def create_ncr(payload: NCRCreate, user=Depends(get_current_user)):
+    count = await db.ncrs.count_documents({})
+    ncr = NCR(
+        code=f"NCR-{datetime.now(timezone.utc).strftime('%y')}-{count + 1:03d}",
+        **payload.model_dump(),
+        audit_trail=[{"status": "open", "user": user["name"], "note": "Created", "at": now_iso()}],
+    )
+    await db.ncrs.insert_one(ncr.model_dump())
+    return ncr.model_dump()
+
+
+@api.patch("/ncrs/{ncr_id}")
+async def update_ncr(ncr_id: str, payload: NCRUpdate, user=Depends(get_current_user)):
+    current = await db.ncrs.find_one({"id": ncr_id}, {"_id": 0})
+    if not current:
+        raise HTTPException(status_code=404, detail="NCR not found")
+    updates = {k: v for k, v in payload.model_dump().items() if v is not None}
+    audit = list(current.get("audit_trail", []))
+    if updates.get("status") and updates["status"] != current.get("status"):
+        audit.append({"status": updates["status"], "user": user["name"], "note": "Workflow update", "at": now_iso()})
+    updates["audit_trail"] = audit
+    updates["updated_at"] = now_iso()
+    await db.ncrs.update_one({"id": ncr_id}, {"$set": updates})
+    return await db.ncrs.find_one({"id": ncr_id}, {"_id": 0})
+
+
+# ---------------- Licensing ----------------
+@api.get("/license")
+async def get_license(user=Depends(get_current_user)):
+    license_state = await db.licenses.find_one({"id": "license"}, {"_id": 0})
+    if license_state:
+        expires_at = license_state.get("expires_at")
+        if expires_at and expires_at < now_iso()[:10] and license_state.get("status") != "expired":
+            license_state["status"] = "expired"
+            await db.licenses.update_one({"id": "license"}, {"$set": {"status": "expired", "updated_at": now_iso()}})
+        return license_state
+    created = LicenseState(
+        status="trial",
+        tier="trial",
+        feature_flags={
+            "digital_twin": True,
+            "package_export": True,
+            "ncr": True,
+            "batch_plant": True,
+            "licensing": True,
+        },
+    )
+    await db.licenses.insert_one(created.model_dump())
+    return created.model_dump()
+
+
+@api.post("/license/activate")
+async def activate_license(payload: LicenseActivateInput, user=Depends(get_current_user)):
+    features = {
+        "digital_twin": True,
+        "package_export": True,
+        "ncr": payload.tier in ("standard", "enterprise"),
+        "batch_plant": payload.tier in ("standard", "enterprise"),
+        "licensing": True,
+        "advanced_exports": payload.tier == "enterprise",
+    }
+    updates = LicenseState(
+        status="active",
+        tier=payload.tier,
+        license_key=payload.license_key,
+        expires_at=payload.expires_at,
+        feature_flags=features,
+        last_checked_at=now_iso(),
+        updated_at=now_iso(),
+    )
+    current = await db.licenses.find_one({"id": "license"}, {"_id": 0})
+    if current:
+        await db.licenses.update_one({"id": "license"}, {"$set": updates.model_dump()})
+    else:
+        await db.licenses.insert_one(updates.model_dump())
+    return updates.model_dump()
+
+
 # ---------------- Forms Export ----------------
 @api.get("/forms/export/{form_type}")
 async def export_form(form_type: str, beam_id: str = None, user=Depends(get_current_user)):
@@ -298,6 +455,25 @@ async def export_form(form_type: str, beam_id: str = None, user=Depends(get_curr
         io.BytesIO(data),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f"attachment; filename={filename}.xlsx"},
+    )
+
+
+@api.get("/packages/export/pdf")
+async def export_package_pdf(
+    package_type: str = "pour_complete",
+    pour_id: str = None,
+    beam_id: str = None,
+    job_id: str = None,
+    user=Depends(get_current_user),
+):
+    if package_type not in ("pour_complete", "single_beam", "full_job"):
+        raise HTTPException(status_code=400, detail="Unknown package type")
+    context = await build_package_context(package_type, pour_id=pour_id, beam_id=beam_id, job_id=job_id)
+    data = package_export.build_package_pdf(context)
+    return StreamingResponse(
+        io.BytesIO(data),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename={package_type}.pdf"},
     )
 
 

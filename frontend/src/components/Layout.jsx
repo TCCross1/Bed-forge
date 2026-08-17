@@ -1,8 +1,9 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
-import { LayoutGrid, Box, ClipboardCheck, Calculator, FileSpreadsheet, LogOut, HardHat } from "lucide-react";
+import { LayoutGrid, Box, ClipboardCheck, Calculator, FileSpreadsheet, LogOut, HardHat, ShieldAlert, Factory, KeyRound } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { ROLE_LABELS } from "../lib/constants";
+import api from "../lib/api";
 
 const NAV = [
   { to: "/", label: "Dashboard", icon: LayoutGrid, testid: "nav-dashboard" },
@@ -10,11 +11,20 @@ const NAV = [
   { to: "/inspection", label: "New Inspection", icon: ClipboardCheck, testid: "nav-inspection" },
   { to: "/tension", label: "Tension Calc", icon: Calculator, testid: "nav-tension" },
   { to: "/forms", label: "Forms Export", icon: FileSpreadsheet, testid: "nav-forms" },
+  { to: "/ncr", label: "NCR Board", icon: ShieldAlert, testid: "nav-ncr" },
+  { to: "/batch", label: "Batch Plant", icon: Factory, testid: "nav-batch" },
+  { to: "/licensing", label: "Licensing", icon: KeyRound, testid: "nav-licensing" },
 ];
 
 export default function Layout({ children }) {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
+  const [license, setLicense] = useState(null);
+
+  useEffect(() => {
+    if (!user) return;
+    api.get("/license").then((res) => setLicense(res.data)).catch(() => {});
+  }, [user]);
 
   return (
     <div className="min-h-screen flex bg-background grain">
@@ -55,6 +65,11 @@ export default function Layout({ children }) {
         </nav>
 
         <div className="border-t border-border p-4">
+          {license && (
+            <div className={`mb-3 rounded-sm border px-3 py-2 text-[11px] font-mono uppercase tracking-wider ${license.status === "expired" ? "border-destructive text-destructive" : "border-primary/40 text-primary"}`}>
+              {license.status} · {license.tier}
+            </div>
+          )}
           <div className="mb-3">
             <div className="text-sm font-semibold truncate" data-testid="current-user-name">{user?.name}</div>
             <div className="text-xs text-primary font-mono uppercase tracking-wider">{ROLE_LABELS[user?.role] || user?.role}</div>

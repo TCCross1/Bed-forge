@@ -128,6 +128,7 @@ class Beam(BaseModel):
     position_on_bed: int = 1
     status: str = "casting"  # production status
     qc_state: str = "pending"
+    traceability: Dict[str, Any] = Field(default_factory=dict)
     created_at: str = Field(default_factory=now_iso)
 
 
@@ -140,11 +141,13 @@ class BeamCreate(BaseModel):
     twin_type: str = "i_beam"
     length_ft: float = 100.0
     position_on_bed: int = 1
+    traceability: Dict[str, Any] = Field(default_factory=dict)
 
 
 class BeamUpdate(BaseModel):
     status: Optional[str] = None
     qc_state: Optional[str] = None
+    traceability: Optional[Dict[str, Any]] = None
 
 
 # ---------- Inspections (QIR sections) ----------
@@ -242,3 +245,115 @@ class AnomalyCreate(BaseModel):
     length_in: float = 0.0
     note: str = ""
     photo_url: str = ""
+
+
+# ---------- Batch Plant ----------
+class BatchRecord(BaseModel):
+    id: str = Field(default_factory=new_id)
+    pour_id: str
+    job_id: Optional[str] = None
+    bed_ids: List[str] = Field(default_factory=list)
+    beam_ids: List[str] = Field(default_factory=list)
+    ticket_number: str
+    mix_design: str
+    ambient_temp_f: float = 70.0
+    concrete_temp_f: float = 72.0
+    humidity_pct: float = 50.0
+    wind_mph: float = 4.0
+    weather: str = "Clear"
+    ingredients: List[Dict[str, Any]] = Field(default_factory=list)
+    admixtures: List[Dict[str, Any]] = Field(default_factory=list)
+    cylinders: List[Dict[str, Any]] = Field(default_factory=list)
+    notes: str = ""
+    created_by: str = ""
+    created_at: str = Field(default_factory=now_iso)
+
+
+class BatchRecordCreate(BaseModel):
+    pour_id: str
+    job_id: Optional[str] = None
+    bed_ids: List[str] = Field(default_factory=list)
+    beam_ids: List[str] = Field(default_factory=list)
+    ticket_number: str
+    mix_design: str
+    ambient_temp_f: float = 70.0
+    concrete_temp_f: float = 72.0
+    humidity_pct: float = 50.0
+    wind_mph: float = 4.0
+    weather: str = "Clear"
+    ingredients: List[Dict[str, Any]] = Field(default_factory=list)
+    admixtures: List[Dict[str, Any]] = Field(default_factory=list)
+    cylinders: List[Dict[str, Any]] = Field(default_factory=list)
+    notes: str = ""
+
+
+# ---------- NCR ----------
+NCR_STATES = ["open", "investigation", "corrective_action", "verification", "closed"]
+
+
+class NCR(BaseModel):
+    id: str = Field(default_factory=new_id)
+    code: str
+    title: str
+    severity: str = "major"
+    status: str = "open"
+    beam_id: Optional[str] = None
+    pour_id: Optional[str] = None
+    batch_record_id: Optional[str] = None
+    anomaly_ids: List[str] = Field(default_factory=list)
+    inspection_id: Optional[str] = None
+    source_measurement: Dict[str, Any] = Field(default_factory=dict)
+    investigation: str = ""
+    corrective_action: str = ""
+    verification: str = ""
+    owner: str = ""
+    linked_photo_urls: List[str] = Field(default_factory=list)
+    audit_trail: List[Dict[str, Any]] = Field(default_factory=list)
+    created_at: str = Field(default_factory=now_iso)
+    updated_at: str = Field(default_factory=now_iso)
+
+
+class NCRCreate(BaseModel):
+    title: str
+    severity: str = "major"
+    beam_id: Optional[str] = None
+    pour_id: Optional[str] = None
+    batch_record_id: Optional[str] = None
+    anomaly_ids: List[str] = Field(default_factory=list)
+    inspection_id: Optional[str] = None
+    source_measurement: Dict[str, Any] = Field(default_factory=dict)
+    investigation: str = ""
+    corrective_action: str = ""
+    verification: str = ""
+    owner: str = ""
+    linked_photo_urls: List[str] = Field(default_factory=list)
+
+
+class NCRUpdate(BaseModel):
+    title: Optional[str] = None
+    severity: Optional[str] = None
+    status: Optional[str] = None
+    investigation: Optional[str] = None
+    corrective_action: Optional[str] = None
+    verification: Optional[str] = None
+    owner: Optional[str] = None
+    linked_photo_urls: Optional[List[str]] = None
+
+
+# ---------- Licensing ----------
+class LicenseState(BaseModel):
+    id: str = "license"
+    status: str = "trial"  # trial | active | expired
+    tier: str = "trial"  # trial | standard | enterprise
+    license_key: str = ""
+    expires_at: str = ""
+    feature_flags: Dict[str, bool] = Field(default_factory=dict)
+    last_checked_at: str = Field(default_factory=now_iso)
+    updated_at: str = Field(default_factory=now_iso)
+    created_at: str = Field(default_factory=now_iso)
+
+
+class LicenseActivateInput(BaseModel):
+    license_key: str
+    tier: str = "standard"
+    expires_at: str

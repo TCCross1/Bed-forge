@@ -2,6 +2,7 @@
 from db import db
 from models import (
     ProductType, Job, Pour, Bed, Beam, Anomaly, TensionReport, CamberReading,
+    Inspection, BatchRecord, NCR, LicenseState,
     now_iso,
 )
 from tension import calc_theoretical_elongation, evaluate_tension
@@ -213,6 +214,11 @@ async def seed_plant():
                 position_on_bed=pos,
                 status=bed.status,
                 qc_state=qc_states[beam_index % len(qc_states)],
+                traceability={
+                    "strand_rolls": [f"SR-{bed.bed_number:02d}{pos:02d}-A", f"SR-{bed.bed_number:02d}{pos:02d}-B"],
+                    "release_tag": f"REL-{bed.bed_number:02d}{pos:02d}",
+                    "cast_sequence": pos,
+                },
             )
             await db.beams.insert_one(beam.model_dump())
             beam_index += 1
@@ -240,6 +246,25 @@ async def seed_plant():
             )
             await db.camber_readings.insert_one(cr.model_dump())
 
+            for section, note in [
+                ("pre_pour", "Bed cleaned, soffit forms aligned, release applied."),
+                ("strand", "Pattern verified against shop sheet; pull records matched."),
+                ("concrete", "Batch ticket, slump, air, and cylinders recorded."),
+                ("finish", "Edges rubbed and dimensions checked after strip."),
+                ("camber", "3-point camber verified at release."),
+                ("pre_delivery", "Marked end, dunnage, and shipping points approved."),
+            ]:
+                await db.inspections.insert_one(
+                    Inspection(
+                        beam_id=beam.id,
+                        section=section,
+                        status="hold" if beam.qc_state == "hold" and section == "finish" else "pass",
+                        inspector="Dana Reyes",
+                        notes=note,
+                        data={"signature": "Dana Reyes", "verified_at": now_iso()},
+                    ).model_dump()
+                )
+
     # A tension report per active bed
     for bed in beds:
         if bed.status in ("tensioning", "casting", "curing"):
@@ -258,3 +283,75 @@ async def seed_plant():
                 num_strands=24,
             )
             await db.tension_reports.insert_one(tr.model_dump())
+
+    active_beds = [bed for bed in beds if bed.current_pour_id]
+    active_beams = await db.beams.find({"pour_id": pour.id}, {"_id": 0}).to_list(500)
+    if active_beds:
+        batch = BatchRecord(
+            pour_id=pour.id,
+            job_id=job.id,
+            bed_ids=[bed.id for bed in active_beds],
+            beam_ids=[beam["id"] for beam in active_beams],
+            ticket_number="BT-118-01",
+            mix_design="8500psi HPC",
+            ambient_temp_f=78,
+            concrete_temp_f=72,
+            humidity_pct=58,
+            wind_mph=7,
+            weather="Partly Cloudy",
+            ingredients=[
+                {"name": "Type III Cement", "target_lb": 940, "actual_lb": 938},
+                {"name": "Coarse Aggregate", "target_lb": 1780, "actual_lb": 1788},
+                {"name": "Fine Aggregate", "target_lb": 1335, "actual_lb": 1330},
+                {"name": "Water", "target_lb": 282, "actual_lb": 280},
+            ],
+            admixtures=[
+                {"name": "Mid-range Water Reducer", "dosage_oz": 112},
+                {"name": "Air Entrainer", "dosage_oz": 8},
+            ],
+            cylinders=[
+                {"id": "CYL-118-A", "age_hr": 18, "strength_psi": 6120},
+                {"id": "CYL-118-B", "age_hr": 28, "strength_psi": 6840},
+            ],
+            notes="Environmental snapshot captured from bed-side station.",
+            created_by="Marcus Hill",
+        )
+        await db.batch_records.insert_one(batch.model_dump())
+
+    hold_beam = next((beam for beam in active_beams if beam["qc_state"] in ("hold", "failed")), None)
+    if hold_beam:
+        linked_anomalies = await db.anomalies.find({"beam_id": hold_beam["id"]}, {"_id": 0}).to_list(50)
+        ncr = NCR(
+            code="NCR-26-011",
+            title="Finish crack and edge repair review",
+            severity="major",
+            status="investigation",
+            beam_id=hold_beam["id"],
+            pour_id=pour.id,
+            anomaly_ids=[item["id"] for item in linked_anomalies],
+            source_measurement={"type": "finish", "detail": "Transverse crack outside finish tolerance"},
+            investigation="QC and production reviewed strip timing, vibration pattern, and end release sequence.",
+            corrective_action="Repair crack, add hold-down check at next setup, and re-inspect after patch cure.",
+            owner="Dana Reyes",
+            linked_photo_urls=["photo://beam-crack-01", "photo://beam-crack-02"],
+            audit_trail=[
+                {"status": "open", "user": "Tyler Chen", "note": "Created from failed finish review", "at": now_iso()},
+                {"status": "investigation", "user": "Dana Reyes", "note": "Root-cause review started", "at": now_iso()},
+            ],
+        )
+        await db.ncrs.insert_one(ncr.model_dump())
+
+    await db.licenses.insert_one(
+        LicenseState(
+            status="trial",
+            tier="trial",
+            expires_at=now_iso()[:10],
+            feature_flags={
+                "digital_twin": True,
+                "package_export": True,
+                "ncr": True,
+                "batch_plant": True,
+                "licensing": True,
+            },
+        ).model_dump()
+    )
