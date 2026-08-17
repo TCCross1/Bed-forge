@@ -184,7 +184,7 @@ export default function Dashboard() {
               <Stat label="In Progress" value={s.in_progress} color="#2979FF" icon={Loader2} testid="stat-inprogress" />
               <Stat label="On Hold" value={s.hold} color="#FFD600" icon={AlertTriangle} testid="stat-hold" />
               <Stat label="Failed" value={s.failed} color="#FF3366" icon={XCircle} testid="stat-failed" />
-              <Link to="/ncr" className="block" data-testid="stat-open-ncrs">
+              <Link to="/ncr?status=open" className="block" data-testid="stat-open-ncrs">
                 <Stat label="Open NCRs" value={s.open_ncrs} color={(s.overdue_ncrs || 0) > 0 ? "#FF3366" : "#FF9100"} icon={AlertTriangle} testid="stat-open-ncrs-value" />
               </Link>
             </div>
@@ -237,7 +237,7 @@ export default function Dashboard() {
                   <p className="text-xs text-muted-foreground mt-1">File from a fail toast or here. Does not bypass tension or release gates.</p>
                 </div>
                 <Link
-                  to="/ncr"
+                  to="/ncr?status=open"
                   data-testid="board-ncr"
                   className="min-h-12 px-5 border border-[#FF9100] text-[#FF9100] font-display font-bold uppercase tracking-widest flex items-center justify-center shrink-0"
                 >

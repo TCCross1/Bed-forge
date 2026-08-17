@@ -13,17 +13,21 @@ from company_routes import get_company_doc, public_view
 from db import db
 from models import NCR, NCRCreate, NCRTransition, NCRUpdate, now_iso, new_id
 from ncr import (
-    close_blockers,
+    OPEN_STATUSES,
+    can_create,
+    can_raise_severity,
     frequency_insights,
     is_immutable,
+    match_open_source,
     ncr_from_anomaly,
+    photo_filenames,
     public_ncr,
     sanitize_category,
     sanitize_severity,
     sanitize_status,
-    validate_transition,
+    transition_blockers,
 )
-from storage import company_logo_path, save_vault_file
+from storage import company_logo_path, file_response, save_vault_file, vault_file_path
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["ncr"])
@@ -40,6 +44,16 @@ def _history_row(user: dict, action: str, note: str = "", status: str = "") -> d
         "status": status,
         "note": (note or "")[:500],
     }
+
+
+def _media_type(filename: str) -> str:
+    ext = ("." + filename.rsplit(".", 1)[-1].lower()) if "." in (filename or "") else ".jpg"
+    return {
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".png": "image/png",
+        ".webp": "image/webp",
+    }.get(ext, "image/jpeg")
 
 
 async def _ncr(ncr_id: str) -> dict:
@@ -63,10 +77,25 @@ async def _fill_identity(data: dict) -> dict:
     return data
 
 
+async def _existing_open(source_type: str = "", source_id: str = "", anomaly_id: str = "") -> Optional[dict]:
+    q_or = []
+    if anomaly_id:
+        q_or.append({"anomaly_id": anomaly_id})
+    if source_id and source_type not in ("", "manual"):
+        q_or.append({"source_type": source_type, "source_id": source_id})
+    if not q_or:
+        return None
+    rows = await db.ncrs.find({"$or": q_or, "status": {"$in": list(OPEN_STATUSES)}}, {"_id": 0}).to_list(20)
+    return match_open_source(rows, source_type=source_type, source_id=source_id, anomaly_id=anomaly_id)
+
+
 async def open_ncr_from_anomaly(anomaly: dict, user: dict, request: Optional[Request] = None) -> dict:
     """One NCR per twin pin. Never a second disconnected defect row."""
-    existing = await db.ncrs.find_one({"anomaly_id": anomaly.get("id")}, {"_id": 0})
+    if not can_create((user or {}).get("role") or ""):
+        raise HTTPException(status_code=403, detail="Not allowed to file an NCR")
+    existing = await _existing_open(source_type="anomaly", source_id=anomaly.get("id") or "", anomaly_id=anomaly.get("id") or "")
     if existing:
+        logger.info("ncr from anomaly idempotent id=%s anomaly=%s", existing.get("id"), anomaly.get("id"))
         return public_ncr(existing)
     beam = await db.beams.find_one({"id": anomaly.get("beam_id")}, {"_id": 0}) if anomaly.get("beam_id") else None
     payload = ncr_from_anomaly(anomaly, beam)
@@ -149,20 +178,22 @@ async def get_ncr(ncr_id: str, user=Depends(get_current_user)):
 @router.post("/ncrs")
 async def create_ncr(payload: NCRCreate, request: Request, user=Depends(get_current_user)):
     try:
+        if not can_create(user.get("role") or ""):
+            raise HTTPException(status_code=403, detail="Not allowed to file an NCR")
         data = payload.model_dump()
         if not (data.get("description") or "").strip():
             raise HTTPException(status_code=400, detail="Describe the non-conformance")
         if not (data.get("containment") or "").strip():
             raise HTTPException(status_code=400, detail="Record the immediate containment action")
         data = await _fill_identity(data)
-        if data.get("anomaly_id"):
-            existing = await db.ncrs.find_one({"anomaly_id": data["anomaly_id"]}, {"_id": 0})
-            if existing:
-                return public_ncr(existing)
-        if data.get("source_id") and data.get("source_type") not in ("", "manual"):
-            existing = await db.ncrs.find_one({"source_type": data["source_type"], "source_id": data["source_id"]}, {"_id": 0})
-            if existing:
-                return public_ncr(existing)
+        existing = await _existing_open(
+            source_type=data.get("source_type") or "",
+            source_id=data.get("source_id") or "",
+            anomaly_id=data.get("anomaly_id") or "",
+        )
+        if existing:
+            logger.info("ncr create idempotent id=%s source=%s by=%s", existing.get("id"), data.get("source_type"), user.get("email"))
+            return public_ncr(existing)
         rec = NCR(
             **{k: v for k, v in data.items() if k in NCR.model_fields},
             category=sanitize_category(data.get("category")),
@@ -196,6 +227,8 @@ async def update_ncr(ncr_id: str, payload: NCRUpdate, request: Request, user=Dep
             patch["category"] = sanitize_category(patch["category"])
         if "severity" in patch:
             patch["severity"] = sanitize_severity(patch["severity"])
+            if not can_raise_severity(user.get("role") or "", rec.get("severity"), patch["severity"]):
+                raise HTTPException(status_code=403, detail="Only a supervisor can raise NCR severity")
         rec.update(patch)
         rec["updated_at"] = now_iso()
         rec.setdefault("history", []).append(_history_row(user, "edit", "Fields updated", rec.get("status")))
@@ -215,9 +248,7 @@ async def transition_ncr(ncr_id: str, payload: NCRTransition, request: Request, 
     try:
         rec = await _ncr(ncr_id)
         dest = sanitize_status(payload.status)
-        err = validate_transition(rec.get("status"), dest, user.get("role") or "")
-        if err:
-            raise HTTPException(status_code=409, detail=err)
+        role = user.get("role") or ""
         if payload.root_cause:
             rec["root_cause"] = payload.root_cause.strip()[:2000]
         if payload.corrective_action:
@@ -228,15 +259,14 @@ async def transition_ncr(ncr_id: str, payload: NCRTransition, request: Request, 
             rec["verification_how"] = payload.verification_how.strip()[:2000]
         if payload.signoff:
             rec["signoff"] = payload.signoff.strip()[:120]
+        block = transition_blockers(rec, dest, role, payload.note)
+        if block:
+            code = 400 if "Written reason" in block else 409
+            raise HTTPException(status_code=code, detail=block)
         if dest == "closed":
-            block = close_blockers(rec, user.get("role") or "")
-            if block:
-                raise HTTPException(status_code=409, detail=block)
             rec["closed_at"] = now_iso()
             rec["closed_by"] = user.get("email") or ""
         if dest == "investigating" and sanitize_status(rec.get("status")) in ("closed", "rejected"):
-            if not (payload.note or "").strip():
-                raise HTTPException(status_code=400, detail="Written reason required to reopen a closed NCR")
             rec["closed_at"] = None
             rec["closed_by"] = ""
         rec["status"] = dest
@@ -264,6 +294,8 @@ async def transition_ncr(ncr_id: str, payload: NCRTransition, request: Request, 
 @router.post("/ncrs/{ncr_id}/photos")
 async def upload_ncr_photo(ncr_id: str, request: Request, file: UploadFile = File(...), user=Depends(get_current_user)):
     try:
+        if not can_create(user.get("role") or ""):
+            raise HTTPException(status_code=403, detail="Not allowed to attach NCR photos")
         rec = await _ncr(ncr_id)
         if is_immutable(rec):
             raise HTTPException(status_code=409, detail="Closed NCRs cannot take new photos")
@@ -277,20 +309,42 @@ async def upload_ncr_photo(ncr_id: str, request: Request, file: UploadFile = Fil
         beam_id = (rec.get("beam_ids") or ["unassigned"])[0]
         fname = f"ncr-{ncr_id[:8]}-{new_id()[:6]}{ext}"
         save_vault_file("plant", rec.get("job_id") or "unassigned", rec.get("pour_id") or "unassigned", beam_id, "photos", fname, raw)
-        photos = list(rec.get("photos") or [])
+        photos = photo_filenames(rec)
         photos.append(fname)
         rec["photos"] = photos
         rec["updated_at"] = now_iso()
         rec.setdefault("history", []).append(_history_row(user, "photo", fname, rec.get("status")))
         await db.ncrs.replace_one({"id": ncr_id}, rec)
-        await write_audit(action="ncr.photo", user=user, request=request, entity_type="ncr", entity_id=ncr_id, extra={"filename": fname, "bytes": len(raw)})
-        logger.info("ncr photo id=%s name=%s bytes=%s by=%s", ncr_id, fname, len(raw), user.get("email"))
+        await write_audit(action="ncr.photo", user=user, request=request, entity_type="ncr", entity_id=ncr_id, extra={"filename": fname})
+        logger.info("ncr photo attached id=%s name=%s by=%s", ncr_id, fname, user.get("email"))
         return public_ncr(rec)
     except HTTPException:
         raise
     except Exception:
         logger.exception("upload_ncr_photo failed")
         raise HTTPException(status_code=500, detail="Failed to attach photo")
+
+
+@router.get("/ncrs/{ncr_id}/photos/{filename}")
+async def get_ncr_photo(ncr_id: str, filename: str, user=Depends(get_current_user)):
+    try:
+        rec = await _ncr(ncr_id)
+        names = photo_filenames(rec)
+        if filename not in names:
+            raise HTTPException(status_code=404, detail="Photo not found")
+        beam_id = (rec.get("beam_ids") or ["unassigned"])[0]
+        path = vault_file_path("plant", rec.get("job_id") or "unassigned", rec.get("pour_id") or "unassigned", beam_id, "photos", filename)
+        if not path.exists() or not path.is_file():
+            raise HTTPException(status_code=404, detail="Photo not found")
+        logger.info("ncr photo served id=%s name=%s by=%s", ncr_id, filename, user.get("email"))
+        return file_response(path, filename, _media_type(filename))
+    except HTTPException:
+        raise
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid photo path")
+    except Exception:
+        logger.exception("get_ncr_photo failed")
+        raise HTTPException(status_code=500, detail="Failed to load photo")
 
 
 @router.get("/ncrs/{ncr_id}/export.csv")

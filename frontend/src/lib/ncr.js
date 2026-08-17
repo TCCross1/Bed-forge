@@ -27,8 +27,22 @@ export const NCR_STATUSES = [
   { id: "rejected", label: "Rejected", next: null },
 ];
 
+export function canCreateNcr(role) {
+  return ["qc_tech", "qc_supervisor", "production", "admin", "executive"].includes(role);
+}
+
 export function canManageNcr(role) {
   return ["qc_supervisor", "admin", "executive"].includes(role);
+}
+
+export function canCloseNcr(role, severity) {
+  if (severity === "major" || severity === "critical") return canManageNcr(role);
+  return canCreateNcr(role);
+}
+
+export function ncrPhotoPath(ncrId, filename) {
+  if (!ncrId || !filename) return "";
+  return `/ncrs/${ncrId}/photos/${filename}`;
 }
 
 export function ncrDraftUrl(prompt = {}) {
@@ -44,6 +58,8 @@ export function ncrDraftUrl(prompt = {}) {
   if (prompt.category) q.set("category", prompt.category);
   if (prompt.severity) q.set("severity", prompt.severity);
   if (prompt.description) q.set("desc", prompt.description);
+  if (prompt.title) q.set("title", prompt.title);
+  if (prompt.status) q.set("status", prompt.status);
   return `/ncr?${q.toString()}`;
 }
 

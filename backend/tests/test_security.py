@@ -85,3 +85,11 @@ def test_vault_path_stays_inside_company_tree():
         assert False, "should reject kind"
     except ValueError:
         pass
+
+
+def test_vault_file_path_rejects_escape():
+    from storage import vault_file_path
+    dest = vault_file_path("plant", "job-1", "pour-1", "beam-1", "photos", "ncr-abc.jpg")
+    assert dest.name == "ncr-abc.jpg"
+    assert dest.parent.name == "photos"
+

@@ -31,6 +31,8 @@ ANOMALY_CATEGORY = {
     "other": "visual",
 }
 
+SEV_RANK = {"minor": 0, "major": 1, "critical": 2}
+
 
 def parse_iso(value: str) -> Optional[datetime]:
     if not value:
@@ -72,14 +74,24 @@ def can_manage(role: str) -> bool:
     return (role or "") in MANAGE_ROLES
 
 
+def can_create(role: str) -> bool:
+    return (role or "") in CREATE_ROLES
+
+
 def can_close(role: str, severity: str) -> bool:
     sev = sanitize_severity(severity)
     if sev in ("major", "critical"):
         return can_manage(role)
-    return (role or "") in CREATE_ROLES
+    return can_create(role)
 
 
 def can_reopen(role: str) -> bool:
+    return can_manage(role)
+
+
+def can_raise_severity(role: str, current: str, nxt: str) -> bool:
+    if SEV_RANK.get(sanitize_severity(nxt), 0) <= SEV_RANK.get(sanitize_severity(current), 0):
+        return True
     return can_manage(role)
 
 
@@ -87,20 +99,22 @@ def allowed_next(status: str) -> tuple:
     return TRANSITIONS.get(sanitize_status(status), ())
 
 
-def validate_transition(current: str, nxt: str, role: str) -> Optional[str]:
+def validate_transition(current: str, nxt: str, role: str, severity: str = "minor") -> Optional[str]:
     cur = sanitize_status(current)
     dest = sanitize_status(nxt)
     if dest not in allowed_next(cur):
         return f"Cannot move from {cur} to {dest}"
-    if dest == "closed" and not can_close(role, "minor"):
-        return "Not allowed to close this NCR"
+    if dest == "closed" and not can_close(role, severity):
+        return "QC supervisor or plant manager must close Major and Critical NCRs"
+    if dest == "rejected" and not can_manage(role):
+        return "Only a supervisor can reject an NCR"
     if cur in ("closed", "rejected") and dest == "investigating" and not can_reopen(role):
         return "Only a supervisor can reopen a closed NCR"
     return None
 
 
 def close_blockers(rec: dict, role: str) -> Optional[str]:
-    """None if close is allowed. Message otherwise."""
+    """None if close is allowed. Message otherwise — routes map this to HTTP 409."""
     sev = sanitize_severity((rec or {}).get("severity"))
     if not can_close(role, sev):
         return "QC supervisor or plant manager must close Major and Critical NCRs"
@@ -114,14 +128,75 @@ def close_blockers(rec: dict, role: str) -> Optional[str]:
         if not str((rec or {}).get("signoff") or "").strip():
             return "Electronic sign-off is required before closing a Major or Critical NCR"
     cat = sanitize_category((rec or {}).get("category"))
-    photos = (rec or {}).get("photos") or []
+    photos = photo_filenames(rec)
     if photos_required(cat) and not photos:
         return "Photos are required for this NCR category"
     return None
 
 
+def transition_blockers(rec: dict, dest: str, role: str, note: str = "") -> Optional[str]:
+    """Single gate used by the transition route. Non-None means HTTP 409 (or 400 for empty reopen note)."""
+    rec = rec or {}
+    err = validate_transition(rec.get("status"), dest, role, rec.get("severity"))
+    if err:
+        return err
+    nxt = sanitize_status(dest)
+    if nxt == "closed":
+        return close_blockers(rec, role)
+    if nxt == "investigating" and sanitize_status(rec.get("status")) in ("closed", "rejected"):
+        if not str(note or "").strip():
+            return "Written reason required to reopen a closed NCR"
+    return None
+
+
+def close_http_code(rec: dict, role: str) -> int:
+    return 409 if close_blockers(rec, role) else 200
+
+
 def is_immutable(rec: dict) -> bool:
     return sanitize_status((rec or {}).get("status")) in ("closed", "rejected")
+
+
+def photo_filenames(rec: Optional[dict]) -> List[str]:
+    out: List[str] = []
+    for item in (rec or {}).get("photos") or []:
+        if isinstance(item, str) and item.strip():
+            out.append(item.strip())
+        elif isinstance(item, dict) and item.get("filename"):
+            out.append(str(item["filename"]).strip())
+    return out
+
+
+def ncr_photo_url(ncr_id: str, filename: str) -> str:
+    name = str(filename or "").strip()
+    nid = str(ncr_id or "").strip()
+    if not name or not nid:
+        return ""
+    return f"/api/ncrs/{nid}/photos/{name}"
+
+
+def match_open_source(
+    rows: List[dict],
+    *,
+    source_type: str = "",
+    source_id: str = "",
+    anomaly_id: str = "",
+) -> Optional[dict]:
+    """Return the open NCR for this source so a second fail prompt does not spawn a duplicate."""
+    aid = str(anomaly_id or "").strip()
+    st = str(source_type or "").strip()
+    sid = str(source_id or "").strip()
+    if not aid and (not sid or st in ("", "manual")):
+        return None
+    for rec in rows or []:
+        if sanitize_status(rec.get("status")) not in OPEN_STATUSES:
+            continue
+        if aid and str(rec.get("anomaly_id") or "") == aid:
+            return rec
+        if sid and st not in ("", "manual"):
+            if str(rec.get("source_type") or "") == st and str(rec.get("source_id") or "") == sid:
+                return rec
+    return None
 
 
 def age_hours(rec: dict, now: Optional[datetime] = None) -> float:
@@ -282,6 +357,9 @@ def public_ncr(doc: dict) -> dict:
     out["status"] = sanitize_status(out.get("status"))
     out["severity"] = sanitize_severity(out.get("severity"))
     out["category"] = sanitize_category(out.get("category"))
+    names = photo_filenames(out)
+    out["photos"] = names
+    out["photo_urls"] = [ncr_photo_url(out.get("id") or "", name) for name in names]
     out["overdue"] = is_overdue(out)
     out["escalated"] = is_escalated(out)
     out["immutable"] = is_immutable(out)

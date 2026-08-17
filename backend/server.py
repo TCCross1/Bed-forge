@@ -763,6 +763,7 @@ async def startup():
     await db.ncrs.create_index("job_id")
     await db.ncrs.create_index("anomaly_id")
     await db.ncrs.create_index("created_at")
+    await db.ncrs.create_index([("source_type", 1), ("source_id", 1)])
     await seed_admin()
     await seed_company()
     await seed_plant()

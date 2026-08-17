@@ -155,6 +155,14 @@ def save_vault_file(company_id: str, job_id: str, pour_id: str, beam_id: str, ki
     return dest
 
 
+def vault_file_path(company_id: str, job_id: str, pour_id: str, beam_id: str, kind: str, filename: str) -> Path:
+    folder = vault_dir(company_id, job_id, pour_id, beam_id, kind)
+    dest = (folder / safe_name(filename)).resolve()
+    if folder.resolve() not in dest.parents and dest != folder.resolve():
+        raise ValueError("Invalid vault path")
+    return dest
+
+
 def file_response(path, filename: str = "", media_type: str = "application/octet-stream"):
     from security_core import protected_file_response
     return protected_file_response(path, filename, media_type)

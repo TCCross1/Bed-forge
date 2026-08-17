@@ -6,7 +6,7 @@ import api, { formatApiErrorDetail } from "../lib/api";
 import Layout, { Field, PageHeader, cardClass, inputClass } from "../components/Layout";
 import { useAuth } from "../context/AuthContext";
 import {
-  NCR_CATEGORIES, NCR_SEVERITIES, NCR_STATUSES, canManageNcr,
+  NCR_CATEGORIES, NCR_SEVERITIES, NCR_STATUSES, canCloseNcr, canCreateNcr, canManageNcr, ncrPhotoPath,
 } from "../lib/ncr";
 
 const EMPTY = {
@@ -34,10 +34,34 @@ function sevColor(s) {
   return (NCR_SEVERITIES.find((x) => x.id === s) || {}).color || "#8B93A7";
 }
 
+function PhotoThumb({ ncrId, filename }) {
+  const [src, setSrc] = useState("");
+  useEffect(() => {
+    if (!ncrId || !filename) return undefined;
+    let alive = true;
+    let objectUrl = "";
+    api.get(ncrPhotoPath(ncrId, filename), { responseType: "blob" })
+      .then((r) => {
+        objectUrl = URL.createObjectURL(r.data);
+        if (alive) setSrc(objectUrl);
+      })
+      .catch((err) => console.error("[ncr] photo load failed", err));
+    return () => {
+      alive = false;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [ncrId, filename]);
+  if (!src) {
+    return <div className="h-24 bg-[#0A0C10] border border-[#1C2230]" />;
+  }
+  return <img src={src} alt="" className="h-24 w-full object-cover border border-[#1C2230]" />;
+}
+
 export default function NCRDesk() {
   const { user } = useAuth();
   const [params] = useSearchParams();
   const manage = canManageNcr(user?.role);
+  const canFile = canCreateNcr(user?.role);
   const [jobs, setJobs] = useState([]);
   const [pours, setPours] = useState([]);
   const [beams, setBeams] = useState([]);
@@ -48,7 +72,11 @@ export default function NCRDesk() {
   const [form, setForm] = useState({ ...EMPTY });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [filter, setFilter] = useState({ status: "", severity: "", overdue: false });
+  const [filter, setFilter] = useState({
+    status: params.get("status") || "",
+    severity: params.get("severity") && !params.get("source") ? (params.get("severity") || "") : "",
+    overdue: params.get("overdue") === "1",
+  });
   const [note, setNote] = useState("");
 
   const query = useMemo(() => ({
@@ -62,10 +90,14 @@ export default function NCRDesk() {
     category: params.get("category") || "",
     severity: params.get("severity") || "",
     desc: params.get("desc") || "",
+    title: params.get("title") || "",
   }), [params]);
 
   const selected = rows.find((r) => r.id === selectedId) || null;
   const locked = Boolean(selected?.immutable);
+  const photos = selected?.photos || [];
+  const canCloseThis = canCloseNcr(user?.role, form.severity || selected?.severity);
+  const majorNeedsRoot = ["major", "critical"].includes(form.severity) && !String(form.root_cause || "").trim();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -134,6 +166,10 @@ export default function NCRDesk() {
   const set = (key, value) => setForm((cur) => ({ ...cur, [key]: value }));
 
   const saveNew = async () => {
+    if (!canFile) {
+      toast.error("Not allowed to file an NCR");
+      return;
+    }
     if (!form.description.trim()) {
       toast.error("Describe the non-conformance");
       return;
@@ -177,6 +213,18 @@ export default function NCRDesk() {
 
   const move = async (status) => {
     if (!selectedId) return;
+    if (status === "closed" && majorNeedsRoot) {
+      toast.error("Root cause is required before closing a Major or Critical NCR");
+      return;
+    }
+    if (status === "closed" && !canCloseThis) {
+      toast.error("QC supervisor or plant manager must close Major and Critical NCRs");
+      return;
+    }
+    if (status === "investigating" && selected?.immutable && !note.trim()) {
+      toast.error("Written reason required to reopen a closed NCR");
+      return;
+    }
     setSaving(true);
     try {
       await api.post(`/ncrs/${selectedId}/transition`, {
@@ -193,7 +241,9 @@ export default function NCRDesk() {
       await load();
     } catch (err) {
       console.error("[ncr] transition failed", err);
-      toast.error(formatApiErrorDetail(err.response?.data?.detail) || "Could not move NCR");
+      const statusCode = err?.response?.status;
+      const detail = formatApiErrorDetail(err.response?.data?.detail) || "Could not move NCR";
+      toast.error(statusCode === 409 ? detail : detail);
     } finally {
       setSaving(false);
     }
@@ -234,13 +284,14 @@ export default function NCRDesk() {
     return true;
   });
   const statusMeta = NCR_STATUSES.find((s) => s.id === (selected?.status || "open"));
+  const sourceLabel = query.source && !selectedId ? (query.title || `Fail from ${query.source}`) : "";
 
   return (
     <Layout>
       <PageHeader
         title="Non-conformance"
         subtitle="Twin pins, failed checks, and mix deviations become one closable record. Does not bypass tension or release gates."
-        right={<Link to="/guide?section=qc" className="min-h-12 px-4 border border-[#1C2230] flex items-center text-sm font-semibold uppercase tracking-wider">Tutorial</Link>}
+        right={<Link to="/guide?section=ncr" className="min-h-12 px-4 border border-[#1C2230] flex items-center text-sm font-semibold uppercase tracking-wider hover:border-[#C9A227] hover:text-[#C9A227]">Tutorial</Link>}
       />
       <div className="p-4 sm:p-6 lg:p-8 grid grid-cols-1 xl:grid-cols-[320px_1fr] gap-4">
         <div className="space-y-3">
@@ -282,6 +333,27 @@ export default function NCRDesk() {
         </div>
 
         <div className={`${cardClass} p-4 sm:p-6 space-y-4`}>
+          {sourceLabel && (
+            <div className="border border-[#FF9100]/50 bg-[#FF9100]/10 px-3 py-3" data-testid="ncr-source-banner">
+              <div className="text-[10px] font-mono uppercase tracking-widest text-[#FF9100]">Opened from a fail</div>
+              <p className="text-sm mt-1">{sourceLabel}. Containment is required. Filing again on the same source returns the open record.</p>
+            </div>
+          )}
+
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-1" data-testid="ncr-workflow">
+            {NCR_STATUSES.filter((s) => s.id !== "rejected").map((s) => {
+              const active = (selected?.status || "open") === s.id;
+              return (
+                <div
+                  key={s.id}
+                  className={`min-h-12 px-2 py-2 border text-[10px] font-mono uppercase tracking-wider flex items-center justify-center text-center ${active ? "border-primary text-primary" : "border-[#1C2230] text-muted-foreground"}`}
+                >
+                  {s.label}
+                </div>
+              );
+            })}
+          </div>
+
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <Field label="Category">
               <select className={inputClass} disabled={locked} value={form.category} onChange={(e) => set("category", e.target.value)}>
@@ -330,11 +402,18 @@ export default function NCRDesk() {
           <Field label="Immediate containment">
             <textarea data-testid="ncr-containment" className={`${inputClass} py-2`} rows={2} disabled={locked} value={form.containment} onChange={(e) => set("containment", e.target.value)} />
           </Field>
-          {form.category !== "documentation" && !selected?.photos?.length && (
+          {form.category !== "documentation" && !photos.length && (
             <p className="text-xs text-[#FF9100]">Photos are required for this category before close — snap after filing.</p>
           )}
           <Field label="Root cause (required to close Major/Critical)">
-            <textarea className={`${inputClass} py-2`} rows={2} disabled={locked} value={form.root_cause} onChange={(e) => set("root_cause", e.target.value)} />
+            <textarea
+              data-testid="ncr-root-cause"
+              className={`${inputClass} py-2 ${majorNeedsRoot ? "border-[#FF3366]" : ""}`}
+              rows={2}
+              disabled={locked}
+              value={form.root_cause}
+              onChange={(e) => set("root_cause", e.target.value)}
+            />
           </Field>
           <Field label="Corrective action">
             <textarea className={`${inputClass} py-2`} rows={2} disabled={locked} value={form.corrective_action} onChange={(e) => set("corrective_action", e.target.value)} />
@@ -367,10 +446,16 @@ export default function NCRDesk() {
               {form.batch_id && <Link to={`/batch`} className="min-h-12 px-4 border border-[#1C2230] flex items-center text-xs font-semibold uppercase">Batch</Link>}
             </div>
           )}
-          {selected?.photos?.length > 0 && <div className="text-[10px] font-mono text-muted-foreground">{selected.photos.length} photo(s) on file</div>}
+          {photos.length > 0 && (
+            <div className="grid grid-cols-3 sm:grid-cols-6 gap-2" data-testid="ncr-photos">
+              {photos.map((name) => (
+                <PhotoThumb key={name} ncrId={selectedId} filename={name} />
+              ))}
+            </div>
+          )}
 
           {!selectedId && (
-            <button type="button" data-testid="ncr-save" disabled={saving} onClick={saveNew} className="w-full min-h-14 bg-primary text-white font-display font-bold uppercase tracking-widest">
+            <button type="button" data-testid="ncr-save" disabled={saving || !canFile} onClick={saveNew} className="w-full min-h-14 bg-primary text-white font-display font-bold uppercase tracking-widest">
               {saving ? <Loader2 className="w-4 h-4 animate-spin inline" /> : "File NCR"}
             </button>
           )}
@@ -380,20 +465,44 @@ export default function NCRDesk() {
           {selected && !locked && statusMeta?.next && (
             <div className="space-y-2">
               <input className={inputClass} value={note} onChange={(e) => setNote(e.target.value)} placeholder="Transition note (audited)" />
-              <button type="button" data-testid="ncr-advance" disabled={saving} onClick={() => move(statusMeta.next)} className="w-full min-h-14 bg-[#00E676] text-black font-display font-bold uppercase tracking-widest">
-                Advance to {statusMeta.next.replace(/_/g, " ")}
-              </button>
+              {statusMeta.next === "closed" && !canCloseThis ? (
+                <p className="text-xs text-[#FF3366]">A supervisor must close Major and Critical after root cause, CA, and sign-off. The server will 409 a silent close.</p>
+              ) : (
+                <button
+                  type="button"
+                  data-testid="ncr-advance"
+                  disabled={saving}
+                  onClick={() => move(statusMeta.next)}
+                  className="w-full min-h-14 bg-[#00E676] text-black font-display font-bold uppercase tracking-widest"
+                >
+                  {statusMeta.next === "closed" ? "Close NCR" : `Advance to ${statusMeta.next.replace(/_/g, " ")}`}
+                </button>
+              )}
               {selected.status === "open" && manage && (
                 <button type="button" disabled={saving} onClick={() => move("rejected")} className="w-full min-h-12 border border-[#FF3366] text-[#FF3366] text-xs font-semibold uppercase">Reject</button>
               )}
             </div>
           )}
           {selected?.immutable && manage && (
-            <button type="button" disabled={saving} onClick={() => move("investigating")} className="w-full min-h-12 border border-[#FFD600] text-[#FFD600] text-xs font-semibold uppercase">
-              Reopen (audited)
-            </button>
+            <div className="space-y-2">
+              <input className={inputClass} value={note} onChange={(e) => setNote(e.target.value)} placeholder="Written reason to reopen (audited)" />
+              <button type="button" disabled={saving} onClick={() => move("investigating")} className="w-full min-h-12 border border-[#FFD600] text-[#FFD600] text-xs font-semibold uppercase">
+                Reopen (audited)
+              </button>
+            </div>
           )}
           {selected?.immutable && !manage && <p className="text-xs text-muted-foreground">Closed. A supervisor reopens with a written reason.</p>}
+
+          {selected?.history?.length > 0 && (
+            <div className="border border-[#1C2230] p-3 space-y-1">
+              <div className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground">History</div>
+              {selected.history.slice(-8).map((h, i) => (
+                <div key={`${h.at}-${i}`} className="text-[11px] font-mono text-muted-foreground">
+                  {(h.at || "").slice(0, 16)} · {h.by || "—"} · {h.action} {h.status ? `→ ${h.status}` : ""} {h.note ? `· ${h.note}` : ""}
+                </div>
+              ))}
+            </div>
+          )}
 
           {insights.length > 0 && (
             <div className="border border-[#1C2230] p-3 space-y-2" data-testid="ncr-insights">

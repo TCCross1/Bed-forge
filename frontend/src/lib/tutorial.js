@@ -1,7 +1,7 @@
 /** In-app Master Tutorial — bundled, searchable, no network required. */
 
 export const TUTORIAL_SECTION_IDS = [
-  "what", "morning", "beds", "tension", "fresh", "batch", "qc", "tags", "supervisors", "security", "problems",
+  "what", "morning", "beds", "tension", "fresh", "batch", "qc", "ncr", "tags", "supervisors", "security", "problems",
 ];
 
 export const TUTORIAL_SECTIONS = [
@@ -87,6 +87,16 @@ export const TUTORIAL_SECTIONS = [
       "Finish sheet: post-pour checklist. Strands cut/recessed/grouted, hardware, surface, lifting devices. Marked End ID is required — it should match the spec (L25390 / L25390-B1 / ME on the demo). Verify it on the beam, not from memory.",
       "Pre-delivery: last gate before the truck. Dimensional, camber, finish, hardware, marked-end, cracks documented. Truck number, destination, three sign-offs (QC, production, carrier). Incomplete checks will not release. Crush or predicted strength must meet required psi — an NCR does not bypass that gate.",
       "NCR: every fail, hold, twin pin, low break, or mix deviation becomes one closable record. File from the fail toast or /ncr. Any signed-in tech can create. Major/Critical need root cause, corrective action, and supervisor verification to close. Photos except documentation-only. Closed records are immutable until a supervisor reopens with a written reason.",
+    ],
+  },
+  {
+    id: "ncr",
+    title: "7b. Non-conformance reports (NCR)",
+    why: "A fail without a closable record is a rumor. Root cause is how we stop the next one — and how we answer a DOT years later.",
+    body: [
+      "Open NCR from the Board count (open list), Review & release in the sidebar, More on the phone, or the File NCR toast after a fail — fresh test, cylinder, QIR, tension, camber, finish, or a twin pin. Do not look for it on the gold Fresh Test field tab; that tab stays Fresh.",
+      "Workflow: Open → Investigating → Corrective action → Verification → Closed. QC can file. Supervisors and plant managers close Major and Critical. You cannot close Major/Critical without a written root cause — the server returns 409 and the desk toasts it. Minor can close on a lighter path once photos are on file (except documentation-only).",
+      "Photos attach the same way mill-tag photos do: encrypted in the plant vault, served by name, never logged as bytes. Filing the same fail twice returns the open NCR instead of a duplicate. Closed records are immutable until a supervisor reopens with a written reason. An NCR does not bypass tension or release gates. The analyst may show frequency — it never auto-closes and never changes the mix.",
     ],
   },
   {

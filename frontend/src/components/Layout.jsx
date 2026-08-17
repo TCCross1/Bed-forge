@@ -188,7 +188,7 @@ export default function Layout({ children }) {
     { to: "/forms", label: "Forms", icon: FileSpreadsheet, testid: "nav-forms" },
     { to: "/packages", label: "Packages", icon: Package, testid: "nav-packages" },
     { to: "/measure", label: "Digital Tape", icon: ScanLine, testid: "nav-measure" },
-    ...SECONDARY_NAV.filter((i) => !["/measure", "/scan", "/qr", "/guide"].includes(i.to)),
+    ...SECONDARY_NAV.filter((i) => !["/measure", "/scan", "/qr", "/guide", "/ncr"].includes(i.to)),
   ];
 
   const signOut = () => {

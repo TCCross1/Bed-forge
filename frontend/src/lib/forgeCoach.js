@@ -97,9 +97,9 @@ export const ARTICLES = [
     id: "ncr",
     tags: ["ncr", "nonconformance", "non-conformance", "defect", "anomaly", "hold", "fail", "root cause", "corrective"],
     title: "Non-conformance (NCR)",
-    tutorial: "qc",
+    tutorial: "ncr",
     route: "/ncr",
-    body: "Every fail becomes one record: twin pin, out-of-tolerance shot, fresh-test fail, low cylinder, or a tech filing by hand. Open NCR from the sidebar, Board count, or the File NCR toast after a fail. Photos for most categories. Major/Critical need root cause, CA, and supervisor verification to close. The analyst may show frequency — it never auto-closes and never changes the mix. An NCR does not bypass tension or release gates.",
+    body: "Every fail becomes one record: twin pin, out-of-tolerance shot, fresh-test fail, low cylinder, or a tech filing by hand. Open NCR from the sidebar, Board open-count, More, or the File NCR toast after a fail. Workflow is open → investigating → corrective action → verification → closed. Photos for most categories. Major/Critical need root cause, CA, and supervisor verification — the server 409s a silent close. The analyst may show frequency — it never auto-closes and never changes the mix. An NCR does not bypass tension or release gates.",
   },
   {
     id: "override",
@@ -210,6 +210,7 @@ export const ROUTE_WALKS = {
     { testid: "ncr-new", label: "File NCR — glove-size target" },
     { testid: "ncr-description", label: "Describe what you found" },
     { testid: "ncr-save", label: "File — then add photos and containment" },
+    { testid: "ncr-root-cause", label: "Root cause — required to close Major" },
   ],
 };
 
@@ -329,7 +330,7 @@ export function localAnswer(question, route = "/", role = "qc_tech") {
       source: "local",
       text: retrieveArticles("ncr nonconformance")[0]?.body
         + " Open NCR. Any tech can file. Major and Critical stay open until a supervisor verifies root cause. The toast after a fail is the fastest path.",
-      tutorial: "qc",
+      tutorial: "ncr",
       navigateTo: "/ncr",
       highlights: walkForRoute("/ncr"),
       articles: retrieveArticles("ncr"),
