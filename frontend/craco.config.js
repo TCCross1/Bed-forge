@@ -1,56 +1,100 @@
 // craco.config.js
-const fs = require("fs");
-if (typeof fs.realpath !== "function") {
-  fs.realpath = function bedforgeRealpath(p, options, cb) {
-    if (typeof options === "function") {
-      cb = options;
-      options = {};
-    }
-    try {
-      (cb || (() => {}))(null, fs.realpathSync(p, options));
-    } catch (err) {
-      (cb || (() => {}))(err);
-    }
-  };
-}
-if (typeof fs.realpath.native !== "function") {
-  fs.realpath.native = fs.realpath;
-}
+// Load graceful-fs against the native fs object before any realpath.native
+// guards. webpack-dev-server requires graceful-fs; if that first load happens
+// after we replace fs.realpath with a getter, Node 20 can throw
+// `TypeError: polyfills is not a function` from a circular CJS clone.
+require("graceful-fs");
 
-// CRA always requires workbox-webpack-plugin at webpack.config load time.
-// Nested fs-extra/graceful-fs can crash Node 20 (`fs.realpath` undefined).
-// BedForge uses IndexedDB offline queue, not a Workbox service worker.
-// Do NOT wrap Module._load — if webpack already wrapped it, a second wrap
-// infinite-loops every require() and hangs `npm run build`.
+const fs = require("fs");
+const Module = require("module");
 const path = require("path");
-try {
-  const resolved = require.resolve("workbox-webpack-plugin");
-  if (!require.cache[resolved] || !require.cache[resolved].__bedforgeStub) {
-    const stub = require("./scripts/workbox-stub");
-    require.cache[resolved] = {
-      id: resolved,
-      filename: resolved,
-      loaded: true,
-      exports: stub,
-      children: [],
-      paths: [],
-      __bedforgeStub: true,
+
+function ensureRealpathNative(target) {
+  if (!target) return;
+  if (typeof target.realpath !== "function") {
+    target.realpath = function bedforgeRealpath(p, options, cb) {
+      if (typeof options === "function") {
+        cb = options;
+        options = {};
+      }
+      try {
+        (cb || (() => {}))(null, target.realpathSync(p, options));
+      } catch (err) {
+        (cb || (() => {}))(err);
+      }
     };
   }
-} catch (err) {
-  // Plugin not installed — CRA may still require it; alias below covers webpack.
+  if (typeof target.realpath.native !== "function") {
+    target.realpath.native = target.realpath;
+  }
 }
+
+ensureRealpathNative(fs);
+{
+  let currentRealpath = fs.realpath;
+  ensureRealpathNative({ realpath: currentRealpath, realpathSync: fs.realpathSync });
+  Object.defineProperty(fs, "realpath", {
+    configurable: true,
+    enumerable: true,
+    get() {
+      return currentRealpath;
+    },
+    set(next) {
+      currentRealpath = next;
+      if (typeof next === "function" && typeof next.native !== "function") {
+        next.native = typeof fs.realpathSync === "function" ? fs.realpathSync : next;
+      }
+    },
+  });
+}
+
+class BedforgeNoopPlugin {
+  apply() {}
+}
+
+function stubCjsModule(request, exports) {
+  try {
+    const resolved = require.resolve(request);
+    if (require.cache[resolved] && require.cache[resolved].__bedforgeStub) {
+      return;
+    }
+    const cached = new Module(resolved);
+    cached.filename = resolved;
+    cached.loaded = true;
+    cached.exports = exports;
+    cached.__bedforgeStub = true;
+    require.cache[resolved] = cached;
+  } catch (err) {
+    console.warn("[bedforge] stub skipped for", request, err && err.message);
+  }
+}
+
+// CRA always requires workbox + fork-ts-checker at webpack.config load time.
+// Nested fs-extra/graceful-fs can crash Node 20 (`fs.realpath.native` undefined).
+// BedForge uses IndexedDB offline queue, not a Workbox service worker.
+// Do NOT wrap Module._load — a second wrap hangs `craco start`.
+const workboxStub = require("./scripts/workbox-stub");
+stubCjsModule("workbox-webpack-plugin", workboxStub);
+stubCjsModule("fork-ts-checker-webpack-plugin", BedforgeNoopPlugin);
+stubCjsModule("react-dev-utils/ForkTsCheckerWebpackPlugin", BedforgeNoopPlugin);
+stubCjsModule("react-dev-utils/ForkTsCheckerWarningWebpackPlugin", BedforgeNoopPlugin);
 
 require("dotenv").config();
 
-// Check if we're in development/preview mode (not production build)
-// Craco sets NODE_ENV=development for start, NODE_ENV=production for build
 const isDevServer = process.env.NODE_ENV !== "production";
 
-// Environment variable overrides
 const config = {
   enableHealthCheck: process.env.ENABLE_HEALTH_CHECK === "true",
 };
+
+function getWebpackDevServerMajor() {
+  try {
+    const version = require("webpack-dev-server/package.json").version;
+    return Number.parseInt(String(version).split(".")[0], 10) || 4;
+  } catch (err) {
+    return 4;
+  }
+}
 
 function makeDevServerV5Compatible(devServerConfig) {
   const {
@@ -99,7 +143,16 @@ function makeDevServerV5Compatible(devServerConfig) {
   return compatibleConfig;
 }
 
-// Conditionally load health check modules only if enabled
+function withCorpHeader(devServerConfig) {
+  return {
+    ...devServerConfig,
+    headers: {
+      ...devServerConfig.headers,
+      "Cross-Origin-Resource-Policy": "same-origin",
+    },
+  };
+}
+
 let WebpackHealthPlugin;
 let setupHealthEndpoints;
 let healthPluginInstance;
@@ -122,28 +175,26 @@ let webpackConfig = {
   },
   webpack: {
     alias: {
-      '@': path.resolve(__dirname, 'src'),
-      'workbox-webpack-plugin': path.resolve(__dirname, 'scripts/workbox-stub.js'),
+      "@": path.resolve(__dirname, "src"),
+      "workbox-webpack-plugin": path.resolve(__dirname, "scripts/workbox-stub.js"),
     },
     configure: (webpackConfig) => {
       if (process.env.NODE_ENV === "production") {
         webpackConfig.cache = false;
       }
 
-      // Add ignored patterns to reduce watched directories
-        webpackConfig.watchOptions = {
-          ...webpackConfig.watchOptions,
-          ignored: [
-            '**/node_modules/**',
-            '**/.git/**',
-            '**/build/**',
-            '**/dist/**',
-            '**/coverage/**',
-            '**/public/**',
+      webpackConfig.watchOptions = {
+        ...webpackConfig.watchOptions,
+        ignored: [
+          "**/node_modules/**",
+          "**/.git/**",
+          "**/build/**",
+          "**/dist/**",
+          "**/coverage/**",
+          "**/public/**",
         ],
       };
 
-      // Add health check plugin to webpack if enabled
       if (config.enableHealthCheck && healthPluginInstance) {
         webpackConfig.plugins.push(healthPluginInstance);
       }
@@ -153,17 +204,14 @@ let webpackConfig = {
 };
 
 webpackConfig.devServer = (devServerConfig) => {
-  // Add health check endpoints if enabled
   if (config.enableHealthCheck && setupHealthEndpoints && healthPluginInstance) {
     const originalSetupMiddlewares = devServerConfig.setupMiddlewares;
 
     devServerConfig.setupMiddlewares = (middlewares, devServer) => {
-      // Call original setup if exists
       if (originalSetupMiddlewares) {
         middlewares = originalSetupMiddlewares(middlewares, devServer);
       }
 
-      // Setup health endpoints
       setupHealthEndpoints(devServer, healthPluginInstance);
 
       return middlewares;
@@ -173,13 +221,12 @@ webpackConfig.devServer = (devServerConfig) => {
   return devServerConfig;
 };
 
-// Wrap with visual edits (automatically adds babel plugin, dev server, and overlay in dev mode)
 if (isDevServer) {
   try {
     const { withVisualEdits } = require("@emergentbase/visual-edits/craco");
     webpackConfig = withVisualEdits(webpackConfig);
   } catch (err) {
-    if (err.code === 'MODULE_NOT_FOUND' && err.message.includes('@emergentbase/visual-edits/craco')) {
+    if (err.code === "MODULE_NOT_FOUND" && err.message.includes("@emergentbase/visual-edits/craco")) {
       console.warn(
         "[visual-edits] @emergentbase/visual-edits not installed — visual editing disabled."
       );
@@ -190,7 +237,13 @@ if (isDevServer) {
 }
 
 const configureDevServer = webpackConfig.devServer;
-webpackConfig.devServer = (devServerConfig) =>
-  makeDevServerV5Compatible(configureDevServer(devServerConfig));
+const webpackDevServerMajor = getWebpackDevServerMajor();
+webpackConfig.devServer = (devServerConfig) => {
+  const nextConfig = configureDevServer(devServerConfig);
+  if (webpackDevServerMajor >= 5) {
+    return makeDevServerV5Compatible(nextConfig);
+  }
+  return withCorpHeader(nextConfig);
+};
 
 module.exports = webpackConfig;
