@@ -1,5 +1,46 @@
 // craco.config.js
+const fs = require("fs");
+if (typeof fs.realpath !== "function") {
+  fs.realpath = function bedforgeRealpath(p, options, cb) {
+    if (typeof options === "function") {
+      cb = options;
+      options = {};
+    }
+    try {
+      (cb || (() => {}))(null, fs.realpathSync(p, options));
+    } catch (err) {
+      (cb || (() => {}))(err);
+    }
+  };
+}
+if (typeof fs.realpath.native !== "function") {
+  fs.realpath.native = fs.realpath;
+}
+
+// CRA always requires workbox-webpack-plugin at webpack.config load time.
+// Nested fs-extra/graceful-fs can crash Node 20 (`fs.realpath` undefined).
+// BedForge uses IndexedDB offline queue, not a Workbox service worker.
+// Do NOT wrap Module._load — if webpack already wrapped it, a second wrap
+// infinite-loops every require() and hangs `npm run build`.
 const path = require("path");
+try {
+  const resolved = require.resolve("workbox-webpack-plugin");
+  if (!require.cache[resolved] || !require.cache[resolved].__bedforgeStub) {
+    const stub = require("./scripts/workbox-stub");
+    require.cache[resolved] = {
+      id: resolved,
+      filename: resolved,
+      loaded: true,
+      exports: stub,
+      children: [],
+      paths: [],
+      __bedforgeStub: true,
+    };
+  }
+} catch (err) {
+  // Plugin not installed — CRA may still require it; alias below covers webpack.
+}
+
 require("dotenv").config();
 
 // Check if we're in development/preview mode (not production build)
@@ -82,8 +123,12 @@ let webpackConfig = {
   webpack: {
     alias: {
       '@': path.resolve(__dirname, 'src'),
+      'workbox-webpack-plugin': path.resolve(__dirname, 'scripts/workbox-stub.js'),
     },
     configure: (webpackConfig) => {
+      if (process.env.NODE_ENV === "production") {
+        webpackConfig.cache = false;
+      }
 
       // Add ignored patterns to reduce watched directories
         webpackConfig.watchOptions = {

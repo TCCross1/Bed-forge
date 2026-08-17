@@ -10,6 +10,7 @@ import { isoToday } from "../lib/bedLayout";
 import { ELEMENT_COLORS, KIND_LABELS, hardwareColor, latestMeasurements } from "../lib/beamSpec";
 import { toast } from "sonner";
 import { Loader2, MapPin, Ruler, Upload, CalendarDays, ScanLine, QrCode } from "lucide-react";
+import { toastNcrFromResponse } from "../lib/ncr";
 
 export default function DigitalTwin() {
   const { user } = useAuth();
@@ -91,7 +92,7 @@ export default function DigitalTwin() {
     }
     setSaving(true);
     try {
-      await api.post("/anomalies", {
+      const { data } = await api.post("/anomalies", {
         beam_id: selectedId,
         type: form.type,
         severity: form.severity,
@@ -103,7 +104,8 @@ export default function DigitalTwin() {
           z: +pickPos.x.toFixed(2),
         },
       });
-      toast.success("Anomaly captured on twin");
+      toast.success(data?.ncr_id ? "Anomaly pinned — NCR opened" : "Anomaly captured on twin");
+      toastNcrFromResponse(data);
       setPickPos(null);
       setForm({ type: "crack", severity: "minor", note: "", length_in: 0 });
       await loadBeam(selectedId);
@@ -132,6 +134,7 @@ export default function DigitalTwin() {
         measured_station_ft: val,
       });
       toast.success(data.within_tolerance ? "WITHIN TOLERANCE" : "OUT OF TOLERANCE");
+      toastNcrFromResponse(data);
       setMeasuredFt("");
       await loadBeam(selectedId);
     } catch (err) {

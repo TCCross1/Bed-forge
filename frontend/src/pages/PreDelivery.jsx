@@ -5,6 +5,8 @@ import Layout, { PageHeader, Field, inputClass, cardClass } from "../components/
 import { toast } from "sonner";
 import { Loader2, Truck } from "lucide-react";
 import { pickBeamId, useBeamQuery } from "../lib/useBeamQuery";
+import { useAuth } from "../context/AuthContext";
+import { toastNcrFromError, toastNcrFromResponse } from "../lib/ncr";
 
 const CHECKS = [
   { key: "dimensional_check", label: "Dimensional check complete" },
@@ -90,16 +92,18 @@ export default function PreDelivery() {
     }
     setSaving(true);
     try {
-      await api.post("/pre-delivery", {
+      const { data } = await api.post("/pre-delivery", {
         ...form,
         beam_id: beamId,
         released,
       });
       toast.success(released ? "Beam released for delivery" : "Pre-delivery record saved");
+      toastNcrFromResponse(data);
       const r = await api.get("/pre-delivery", { params: { beam_id: beamId } });
       setHistory(r.data || []);
     } catch (err) {
       console.error("[pre-delivery] save failed", err);
+      toastNcrFromError(err);
       toast.error(formatApiErrorDetail(err.response?.data?.detail) || "Failed to save pre-delivery");
     } finally {
       setSaving(false);

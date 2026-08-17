@@ -223,6 +223,52 @@ def _advice(code: str, predicted: float, required: float, assumed: bool) -> str:
     return "Log pour time and a temperature reading to forecast release."
 
 
+def evaluate_release_gate(
+    *,
+    required_psi: float = DEFAULT_REQUIRED_PSI,
+    crush_psi: Optional[float] = None,
+    predicted_psi: Optional[float] = None,
+    override_active: bool = False,
+) -> Dict[str, Any]:
+    """Allow release if crush or predicted meets required. Override is audited. Never auto-pass."""
+    if override_active:
+        return {
+            "allow": True,
+            "via": "override",
+            "reason": "release_strength override on file",
+            "prompt_ncr": False,
+            "required_psi": float(required_psi or 0),
+            "crush_psi": crush_psi,
+            "predicted_psi": predicted_psi,
+        }
+    req = float(required_psi if required_psi not in (None, "") else DEFAULT_REQUIRED_PSI)
+    crush = None
+    pred = None
+    try:
+        if crush_psi is not None:
+            crush = float(crush_psi)
+    except (TypeError, ValueError):
+        crush = None
+    try:
+        if predicted_psi is not None:
+            pred = float(predicted_psi)
+    except (TypeError, ValueError):
+        pred = None
+    if crush is not None and crush >= req:
+        return {"allow": True, "via": "crush", "reason": "cylinder crush meets required", "prompt_ncr": False, "required_psi": req, "crush_psi": crush, "predicted_psi": pred}
+    if pred is not None and pred >= req:
+        return {"allow": True, "via": "predicted", "reason": "predicted strength meets required", "prompt_ncr": False, "required_psi": req, "crush_psi": crush, "predicted_psi": pred}
+    return {
+        "allow": False,
+        "via": "gate",
+        "reason": f"Release blocked — crush {crush if crush is not None else 'none'} / predicted {pred if pred is not None else 'none'} vs required {req:.0f} psi",
+        "prompt_ncr": True,
+        "required_psi": req,
+        "crush_psi": crush,
+        "predicted_psi": pred,
+    }
+
+
 def next_morning_iso(now: Optional[datetime] = None, hour: int = 6) -> str:
     stamp = now or datetime.now(timezone.utc)
     local = stamp

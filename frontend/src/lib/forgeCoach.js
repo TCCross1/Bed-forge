@@ -78,6 +78,30 @@ export const ARTICLES = [
     body: "Morning: jobs, beam marks, break ages, print Actual Size 100%. Logo prints when uploaded. Crush later feeds camber/strength and the Board’s release forecast. A cylinder with no beam mark is orphan lab data.",
   },
   {
+    id: "spread",
+    tags: ["spread", "slump", "j-ring", "jring", "truck", "fresh", "scc", "flow", "t50", "air", "blocking"],
+    title: "Fresh test at the truck",
+    tutorial: "fresh",
+    route: "/fresh",
+    body: "Truck’s here: tap gold Fresh on the field bar (or Fresh Test in More / sidebar). Job and pour are dropdowns — last pour is remembered. Default is Spread (SCC slump-flow). Tap Slump if the state still wants the cone. Tap J-Ring for passing ability; unconstrained spread is reused. Stamp time, save, stay for the next load.",
+  },
+  {
+    id: "batch",
+    tags: ["batch", "plant", "mixer", "mix", "aea", "w/cm", "weather", "air", "admixture", "confirm"],
+    title: "Batch plant tickets",
+    tutorial: "batch",
+    route: "/batch",
+    body: "Mixer office: Batch Plant. Draft the load — ingredients, w/cm, outdoor conditions (capture + override). Link the Fresh Test instead of retyping. Plant manager confirms; then it is permanent. Analyst may suggest AEA on a hot dry day. It never changes the mix. QC and production are read-only on confirmed tickets.",
+  },
+  {
+    id: "ncr",
+    tags: ["ncr", "nonconformance", "non-conformance", "defect", "anomaly", "hold", "fail", "root cause", "corrective"],
+    title: "Non-conformance (NCR)",
+    tutorial: "qc",
+    route: "/ncr",
+    body: "Every fail becomes one record: twin pin, out-of-tolerance shot, fresh-test fail, low cylinder, or a tech filing by hand. Open NCR from the sidebar, Board count, or the File NCR toast after a fail. Photos for most categories. Major/Critical need root cause, CA, and supervisor verification to close. The analyst may show frequency — it never auto-closes and never changes the mix. An NCR does not bypass tension or release gates.",
+  },
+  {
     id: "override",
     tags: ["override", "unlock", "bypass", "gate", "command", "manager"],
     title: "Overrides",
@@ -172,6 +196,21 @@ export const ROUTE_WALKS = {
   "/packages": [
     { testid: "nav-packages", label: "Generate the branded DOT / owner package for a pour" },
   ],
+  "/fresh": [
+    { testid: "fresh-identity", label: "Job and pour dropdowns — last pour is remembered" },
+    { testid: "fresh-type-spread", label: "Spread is the default for this SCC plant" },
+    { testid: "fresh-save", label: "Save — stay for the next truck" },
+  ],
+  "/batch": [
+    { testid: "batch-identity", label: "Job, pour, beams" },
+    { testid: "batch-ingredients", label: "Weights and admixture dosages" },
+    { testid: "batch-confirm", label: "Plant manager confirms — then it is permanent" },
+  ],
+  "/ncr": [
+    { testid: "ncr-new", label: "File NCR — glove-size target" },
+    { testid: "ncr-description", label: "Describe what you found" },
+    { testid: "ncr-save", label: "File — then add photos and containment" },
+  ],
 };
 
 const STOP = new Set(["the", "a", "an", "and", "or", "to", "of", "in", "on", "for", "is", "it", "how", "what", "why", "do", "i", "we", "my", "this", "that"]);
@@ -204,12 +243,15 @@ export function retrieveArticles(question, limit = 4) {
 export function suggestedPrompts(route = "/", role = "qc_tech") {
   const path = String(route || "/").split("?")[0];
   const byRoute = {
-    "/": ["Walk me through my first day", "Why do we log strand heats?", "Show me tension"],
+    "/": ["Walk me through my first day", "Truck’s here — how do I log spread?", "Why do we log strand heats?"],
+    "/fresh": ["Truck’s here — how do I log spread?", "What is J-ring?", "Walk me through this screen"],
+    "/batch": ["How do I log a batch?", "Can the analyst change the mix?", "Who confirms a batch?"],
     "/rolls": ["How do I log a mill tag?", "What if the camera cannot read the heat?", "Why is tension locked?"],
     "/tension": ["Explain the L25390 strand pattern", "What is ±5%?", "Walk me through this screen"],
     "/inspection": ["How do I run a QIR?", "What does HOLD mean?"],
     "/camber": ["Which camber points do I take?", "What if release strength is short?"],
     "/finish": ["What is Marked End ID?", "Walk me through this screen"],
+    "/ncr": ["How do I file an NCR?", "Who can close a Major?", "Walk me through this screen"],
     "/release": ["What is required before the truck leaves?"],
     "/tags": ["How do I print cylinder tags?"],
     "/qr": ["How do beam QR codes work?"],
@@ -258,6 +300,39 @@ export function localAnswer(question, route = "/", role = "qc_tech") {
       tutorial: null,
       highlights: steps,
       articles: retrieveArticles(q),
+    };
+  }
+  if (/truck'?s here|log spread|slump flow|j-?ring|fresh test/.test(q.toLowerCase())) {
+    return {
+      source: "local",
+      text: retrieveArticles("fresh spread truck")[0]?.body
+        + " Open Fresh. Measure two diameters. Save. J-ring is the difference between unconstrained spread and the ring flow.",
+      tutorial: "fresh",
+      navigateTo: "/fresh",
+      highlights: walkForRoute("/fresh"),
+      articles: retrieveArticles("spread j-ring"),
+    };
+  }
+  if (/log a batch|batch plant|can the analyst change|who confirms a batch/.test(q.toLowerCase())) {
+    return {
+      source: "local",
+      text: retrieveArticles("batch plant mixer")[0]?.body
+        + " The analyst cannot confirm a batch or change dosages. Production drafts. Admin/executive confirms.",
+      tutorial: "batch",
+      navigateTo: "/batch",
+      highlights: walkForRoute("/batch"),
+      articles: retrieveArticles("batch mix"),
+    };
+  }
+  if (/file an ncr|non-?conformance|who can close a major|ncr desk/.test(q.toLowerCase())) {
+    return {
+      source: "local",
+      text: retrieveArticles("ncr nonconformance")[0]?.body
+        + " Open NCR. Any tech can file. Major and Critical stay open until a supervisor verifies root cause. The toast after a fail is the fastest path.",
+      tutorial: "qc",
+      navigateTo: "/ncr",
+      highlights: walkForRoute("/ncr"),
+      articles: retrieveArticles("ncr"),
     };
   }
   if (/show me tension|tension tutorial|drape|hold-down/.test(q.toLowerCase())) {

@@ -2,7 +2,7 @@ import axios from "axios";
 import { deviceId } from "./device";
 import { enqueueAction, isFieldWrite, serializeRequestBody, shouldQueueError } from "./offlineQueue";
 
-const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
+const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || "";
 export const API = `${BACKEND_URL}/api`;
 
 function readToken() {
@@ -25,7 +25,7 @@ api.interceptors.response.use(
     const status = err.response?.status;
     const url = err.config?.url || "";
     const method = err.config?.method || "get";
-    if (status === 401 && !url.includes("/auth/login") && !url.includes("/auth/public-config")) {
+    if (status === 401 && !url.includes("/auth/login") && !url.includes("/auth/public-config") && !url.includes("/auth/demo-login")) {
       sessionStorage.removeItem("bf_token");
       localStorage.removeItem("bf_token");
     }
@@ -62,6 +62,7 @@ export function formatApiErrorDetail(detail, err) {
   if (typeof detail === "string") return detail;
   if (Array.isArray(detail))
     return detail.map((e) => (e && typeof e.msg === "string" ? e.msg : JSON.stringify(e))).filter(Boolean).join(" ");
+  if (detail && typeof detail.message === "string") return detail.message;
   if (detail && typeof detail.msg === "string") return detail.msg;
   return String(detail);
 }

@@ -22,6 +22,9 @@ import {
   Shield,
   Package,
   DollarSign,
+  FlaskConical,
+  Factory,
+  AlertTriangle,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { useDevice } from "../context/DeviceContext";
@@ -67,6 +70,7 @@ const PRIMARY_NAV = [
   { to: "/", label: "Board", icon: LayoutGrid, testid: "nav-dashboard" },
   { to: "/twin", label: "Twin", icon: Box, testid: "nav-twin" },
   { to: "/rolls", label: "Rolls", icon: ScanBarcode, testid: "nav-rolls" },
+  { to: "/fresh", label: "Fresh Test", icon: FlaskConical, testid: "nav-fresh", accent: true },
   { to: "/inspection", label: "Inspect", icon: ClipboardCheck, testid: "nav-inspection" },
   { to: "/tags", label: "Tags", icon: Tags, testid: "nav-tags" },
   { to: "/tension", label: "Tension", icon: Calculator, testid: "nav-tension" },
@@ -77,11 +81,14 @@ const PRIMARY_NAV = [
 const FIELD_NAV = [
   { to: "/", label: "Board", icon: LayoutGrid, testid: "nav-dashboard" },
   { to: "/rolls", label: "Rolls", icon: ScanBarcode, testid: "nav-rolls" },
+  { to: "/fresh", label: "Fresh", icon: FlaskConical, testid: "nav-fresh", accent: true },
   { to: "/twin", label: "Twin", icon: Box, testid: "nav-twin" },
   { to: "/tension", label: "Tension", icon: Calculator, testid: "nav-tension" },
 ];
 
 const SECONDARY_NAV = [
+  { to: "/ncr", label: "NCR", icon: AlertTriangle, testid: "nav-ncr" },
+  { to: "/batch", label: "Batch Plant", icon: Factory, testid: "nav-batch" },
   { to: "/planner", label: "Planner", icon: CalendarDays, testid: "nav-planner" },
   { to: "/drawings", label: "Drawings", icon: Upload, testid: "nav-drawings" },
   { to: "/camber", label: "Camber", icon: Ruler, testid: "nav-camber" },
@@ -94,6 +101,8 @@ const SECONDARY_NAV = [
 ];
 
 const COMMAND_SECONDARY = [
+  { to: "/ncr", label: "NCR", icon: AlertTriangle, testid: "nav-ncr" },
+  { to: "/batch", label: "Batch Plant", icon: Factory, testid: "nav-batch" },
   { to: "/planner", label: "Planner", icon: CalendarDays, testid: "nav-planner" },
   { to: "/drawings", label: "Drawings", icon: Upload, testid: "nav-drawings" },
   { to: "/camber", label: "Camber", icon: Ruler, testid: "nav-camber" },
@@ -105,12 +114,14 @@ const COMMAND_SECONDARY = [
   { to: "/guide", label: "Tutorial", icon: BookOpen, testid: "nav-guide" },
 ];
 
-function linkClass(isActive) {
-  return `flex items-center gap-3 px-4 min-h-12 rounded-none font-medium tracking-wide transition-colors duration-100 ${
-    isActive
-      ? "bg-primary text-white"
-      : "text-muted-foreground hover:bg-secondary hover:text-white"
-  }`;
+function linkClass(isActive, accent) {
+  if (isActive) {
+    return "flex items-center gap-3 px-4 min-h-12 rounded-none font-medium tracking-wide transition-colors duration-100 bg-primary text-white";
+  }
+  if (accent) {
+    return "flex items-center gap-3 px-4 min-h-12 rounded-none font-medium tracking-wide transition-colors duration-100 text-[#C9A227] border border-[#C9A227]/40 hover:bg-[#C9A227]/10 hover:text-[#C9A227]";
+  }
+  return "flex items-center gap-3 px-4 min-h-12 rounded-none font-medium tracking-wide transition-colors duration-100 text-muted-foreground hover:bg-secondary hover:text-white";
 }
 
 function NavItems({ items, onNavigate, endHome }) {
@@ -123,7 +134,7 @@ function NavItems({ items, onNavigate, endHome }) {
         end={endHome && item.to === "/"}
         data-testid={item.testid}
         onClick={onNavigate}
-        className={({ isActive }) => linkClass(isActive)}
+        className={({ isActive }) => linkClass(isActive, item.accent || item.to === "/fresh")}
       >
         <Icon className="w-5 h-5 shrink-0" />
         <span className="font-condensed text-base uppercase tracking-wider">{item.label}</span>
@@ -163,6 +174,9 @@ export default function Layout({ children }) {
     ] : []),
   ];
   const fieldMore = [
+    { to: "/fresh", label: "Fresh Test — Spread / Slump", icon: FlaskConical, testid: "nav-fresh-more" },
+    { to: "/ncr", label: "NCR — file / close", icon: AlertTriangle, testid: "nav-ncr-more" },
+    { to: "/batch", label: "Batch Plant", icon: Factory, testid: "nav-batch-more" },
     { to: "/guide", label: "Tutorial", icon: BookOpen, testid: "nav-guide" },
     ...(isExec(user?.role) ? [
       { to: "/finance", label: "Dollars", icon: DollarSign, testid: "nav-finance" },
@@ -279,10 +293,11 @@ export default function Layout({ children }) {
         className={`${field ? "block" : "hidden"} fixed bottom-0 inset-x-0 z-30 border-t border-[#1C2230] bg-[#0C0E13]/95 backdrop-blur pb-[env(safe-area-inset-bottom)]`}
         data-testid="mobile-bottom-nav"
       >
-        <div className="grid grid-cols-5">
+        <div className="grid grid-cols-6">
           {FIELD_NAV.map((item) => {
             const Icon = item.icon;
             const active = item.to === "/" ? location.pathname === "/" : location.pathname.startsWith(item.to);
+            const idleColor = item.accent ? "text-[#C9A227]" : "text-muted-foreground";
             return (
               <NavLink
                 key={item.to}
@@ -290,7 +305,7 @@ export default function Layout({ children }) {
                 end={item.to === "/"}
                 data-testid={`${item.testid}-mobile`}
                 className={`flex flex-col items-center justify-center min-h-14 gap-0.5 transition-colors duration-100 ${
-                  active ? "text-primary" : "text-muted-foreground"
+                  active ? "text-primary" : idleColor
                 }`}
               >
                 <Icon className="w-5 h-5" />

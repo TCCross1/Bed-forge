@@ -4,6 +4,7 @@ import api, { formatApiErrorDetail } from "../lib/api";
 import Layout, { PageHeader, Field, inputClass, cardClass, ARMeasureLink } from "../components/Layout";
 import { releaseForecast } from "../lib/constants";
 import { toast } from "sonner";
+import { toastNcrFromResponse } from "../lib/ncr";
 import { Loader2, Ruler, CheckCircle2, XCircle } from "lucide-react";
 import { pickBeamId, useBeamQuery } from "../lib/useBeamQuery";
 
@@ -110,7 +111,7 @@ export default function CamberSheet() {
     }
     setSaving(true);
     try {
-      await api.post("/camber-readings", {
+      const { data } = await api.post("/camber-readings", {
         beam_id: beamId,
         design_camber_in: parseFloat(form.design_camber_in) || 0,
         measured_camber_in: Number.isFinite(measured) ? measured : 0,
@@ -122,6 +123,7 @@ export default function CamberSheet() {
         notes: form.notes,
       });
       toast.success("Camber / strength sheet saved");
+      toastNcrFromResponse(data);
       setForm(EMPTY);
       const r = await api.get("/camber-readings", { params: { beam_id: beamId } });
       setHistory(r.data || []);

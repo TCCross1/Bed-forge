@@ -8,7 +8,7 @@ import os
 import logging
 from datetime import datetime, timezone
 from fastapi import FastAPI, APIRouter, Depends, HTTPException, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from starlette.middleware.cors import CORSMiddleware
 import io
 
@@ -22,11 +22,11 @@ from models import (
     FinishSheet, FinishSheetCreate, PreDelivery, PreDeliveryCreate,
 )
 from auth import router as auth_router, get_current_user, seed_admin
-from audit import write_audit
+from audit import write_audit, override_active
 from control_routes import router as control_router
 from security_core import assert_production_safe, is_production, security_headers_middleware
 from tension import run_tension_calc, calc_theoretical_elongation, evaluate_tension
-from seed import seed_plant, seed_l25390, seed_bed_assignments, seed_strand_rolls, seed_company, seed_beam_qr_tokens
+from seed import seed_plant, seed_l25390, seed_bed_assignments, seed_strand_rolls, seed_company, seed_beam_qr_tokens, seed_mix_designs
 from blueprint_routes import router as blueprint_router
 from bed_routes import router as bed_router
 from tension_routes import router as tension_router
@@ -37,8 +37,13 @@ from beam_qr import assemble_dossier
 from beam_qr_routes import router as beam_qr_router
 from company_routes import router as company_router
 from cylinder_routes import router as cylinder_router
-from owner_routes import router as owner_router, attach_board_forecasts
+from owner_routes import router as owner_router, attach_board_forecasts, forecast_for_pour, mix_settings
 from coach_routes import router as coach_router
+from fresh_routes import router as fresh_router
+from batch_routes import router as batch_router
+from ncr_routes import router as ncr_router, open_ncr_from_anomaly
+from ncr import attach_prompt, build_prompt, is_escalated
+from maturity import evaluate_release_gate
 import excel_export
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
@@ -99,9 +104,10 @@ async def create_job(payload: JobCreate, user=Depends(get_current_user)):
 
 # ---------------- Pours ----------------
 @api.get("/pours")
-async def list_pours(user=Depends(get_current_user)):
+async def list_pours(job_id: str = None, user=Depends(get_current_user)):
     try:
-        return await db.pours.find({}, {"_id": 0}).to_list(500)
+        q = {"job_id": job_id} if job_id else {}
+        return await db.pours.find(q, {"_id": 0}).to_list(500)
     except Exception:
         logger.exception("list_pours failed")
         raise HTTPException(status_code=500, detail="Failed to list pours")
@@ -213,7 +219,14 @@ async def dashboard(user=Depends(get_current_user)):
             "hold": len([b for b in beams if b["qc_state"] == "hold"]),
             "failed": len([b for b in beams if b["qc_state"] == "failed"]),
             "open_anomalies": await db.anomalies.count_documents({}),
+            "open_ncrs": await db.ncrs.count_documents({"status": {"$nin": ["closed", "rejected"]}}),
+            "overdue_ncrs": 0,
         }
+        open_rows = await db.ncrs.find(
+            {"status": {"$nin": ["closed", "rejected"]}},
+            {"_id": 0, "status": 1, "severity": 1, "created_at": 1},
+        ).to_list(400)
+        stats["overdue_ncrs"] = sum(1 for row in open_rows if is_escalated(row))
         forecast_stats = await attach_board_forecasts(bed_cards)
         stats.update({
             "release_expected_pass": forecast_stats.get("expected_pass", 0) + forecast_stats.get("confirmed_pass", 0),
@@ -294,9 +307,20 @@ async def list_inspections(beam_id: str = None, user=Depends(get_current_user)):
 async def create_inspection(payload: InspectionCreate, user=Depends(get_current_user)):
     try:
         insp = Inspection(**payload.model_dump(), inspector=user["name"])
-        await db.inspections.insert_one(insp.model_dump())
+        dumped = insp.model_dump()
+        await db.inspections.insert_one(dumped)
         logger.info("inspection created id=%s section=%s beam=%s by=%s", insp.id, insp.section, insp.beam_id, user.get("email"))
-        return insp.model_dump()
+        if insp.status in ("fail", "hold"):
+            dumped = attach_prompt(dumped, build_prompt(
+                source_type="inspection",
+                source_id=insp.id,
+                title="QIR fail — file an NCR",
+                category="process",
+                severity="major" if insp.status == "fail" else "minor",
+                description=f"{insp.section} {insp.status}",
+                beam_id=insp.beam_id,
+            ))
+        return dumped
     except Exception:
         logger.exception("create_inspection failed")
         raise HTTPException(status_code=500, detail="Failed to create inspection")
@@ -346,9 +370,21 @@ async def create_tension_report(payload: TensionReportCreate, user=Depends(get_c
             theoretical_elongation_in=round(theo, 3), measured_elongation_in=measured,
             variance_pct=var, within_tolerance=within,
         )
-        await db.tension_reports.insert_one(report.model_dump())
+        dumped = report.model_dump()
+        await db.tension_reports.insert_one(dumped)
         logger.info("tension report saved id=%s bed=%s by=%s", report.id, report.bed_id, user.get("email"))
-        return report.model_dump()
+        if not within:
+            dumped = attach_prompt(dumped, build_prompt(
+                source_type="tension",
+                source_id=report.id,
+                title="Elongation outside ±5% — file an NCR",
+                category="strand",
+                severity="major",
+                description=f"variance {var}%",
+                bed_id=report.bed_id,
+                pour_id=report.pour_id or "",
+            ))
+        return dumped
     except HTTPException:
         raise
     except Exception:
@@ -376,9 +412,22 @@ async def create_camber(payload: CamberReadingCreate, user=Depends(get_current_u
         if not data.get("measured_camber_in") and data.get("midspan_in"):
             data["measured_camber_in"] = data["midspan_in"]
         cr = CamberReading(**data, inspector=user["name"])
-        await db.camber_readings.insert_one(cr.model_dump())
+        dumped = cr.model_dump()
+        await db.camber_readings.insert_one(dumped)
         logger.info("camber reading saved id=%s beam=%s by=%s", cr.id, cr.beam_id, user.get("email"))
-        return cr.model_dump()
+        req = float(cr.required_strength_psi or 0)
+        rel = float(cr.release_strength_psi or 0)
+        if req and rel and rel < req:
+            dumped = attach_prompt(dumped, build_prompt(
+                source_type="camber",
+                source_id=cr.id,
+                title="Release strength below required — file an NCR",
+                category="material",
+                severity="major",
+                description=f"{rel} psi vs {req} required",
+                beam_id=cr.beam_id,
+            ))
+        return dumped
     except Exception:
         logger.exception("create_camber failed")
         raise HTTPException(status_code=500, detail="Failed to save camber reading")
@@ -399,13 +448,24 @@ async def list_finish_sheets(beam_id: str = None, user=Depends(get_current_user)
 async def create_finish_sheet(payload: FinishSheetCreate, user=Depends(get_current_user)):
     try:
         sheet = FinishSheet(**payload.model_dump(), inspector=user["name"])
-        await db.finish_sheets.insert_one(sheet.model_dump())
+        dumped = sheet.model_dump()
+        await db.finish_sheets.insert_one(dumped)
         if payload.status == "fail":
             await db.beams.update_one({"id": payload.beam_id}, {"$set": {"qc_state": "failed"}})
         elif payload.status == "hold":
             await db.beams.update_one({"id": payload.beam_id}, {"$set": {"qc_state": "hold"}})
         logger.info("finish sheet saved id=%s beam=%s by=%s", sheet.id, sheet.beam_id, user.get("email"))
-        return sheet.model_dump()
+        if payload.status in ("fail", "hold"):
+            dumped = attach_prompt(dumped, build_prompt(
+                source_type="finish",
+                source_id=sheet.id,
+                title="Finish sheet fail — file an NCR",
+                category="visual",
+                severity="major" if payload.status == "fail" else "minor",
+                description=payload.status,
+                beam_id=sheet.beam_id,
+            ))
+        return dumped
     except Exception:
         logger.exception("create_finish_sheet failed")
         raise HTTPException(status_code=500, detail="Failed to save finish sheet")
@@ -427,18 +487,71 @@ async def create_pre_delivery(payload: PreDeliveryCreate, user=Depends(get_curre
     try:
         data = payload.model_dump()
         released = bool(data.get("released"))
+        beam = await db.beams.find_one({"id": payload.beam_id}, {"_id": 0})
+        if not beam:
+            raise HTTPException(status_code=404, detail="Beam not found")
+        decision = None
+        if released:
+            mix = await mix_settings()
+            pour = None
+            if beam.get("pour_id"):
+                pour = await db.pours.find_one({"id": beam["pour_id"]}, {"_id": 0})
+            forecasts = await forecast_for_pour(pour or {"id": beam.get("pour_id") or ""}, [beam], mix)
+            fc = forecasts[0] if forecasts else {}
+            ov = await override_active("release_strength", beam["id"])
+            decision = evaluate_release_gate(
+                required_psi=fc.get("required_psi") or mix.get("required_psi") or 4000,
+                crush_psi=fc.get("crush_psi"),
+                predicted_psi=fc.get("predicted_psi"),
+                override_active=bool(ov),
+            )
+            logger.info(
+                "release gate beam=%s allow=%s via=%s crush=%s pred=%s req=%s by=%s",
+                beam.get("id"), decision.get("allow"), decision.get("via"),
+                decision.get("crush_psi"), decision.get("predicted_psi"), decision.get("required_psi"),
+                user.get("email"),
+            )
+            if not decision.get("allow"):
+                prompt = build_prompt(
+                    source_type="release",
+                    source_id=beam["id"],
+                    title="Release gate fail — file an NCR",
+                    category="material",
+                    severity="critical",
+                    description=decision.get("reason") or "below required strength",
+                    beam_id=beam["id"],
+                    bed_id=beam.get("bed_id") or "",
+                    pour_id=beam.get("pour_id") or "",
+                    job_id=beam.get("job_id") or "",
+                )
+                raise HTTPException(
+                    status_code=409,
+                    detail={"message": decision.get("reason"), "ncr_prompt": prompt, "release_decision": decision},
+                )
         record = PreDelivery(
             **data,
             inspector=user["name"],
             release_at=now_iso() if released else None,
         )
-        await db.pre_delivery.insert_one(record.model_dump())
+        dumped = record.model_dump()
+        if decision:
+            dumped["release_decision"] = decision
+        await db.pre_delivery.insert_one(dumped)
         if released:
-            await db.beams.update_one({"id": payload.beam_id}, {"$set": {"qc_state": "shipped", "status": "complete"}})
-            logger.info("beam released id=%s by=%s truck=%s dest=%s", payload.beam_id, user.get("email"), payload.truck_number, payload.destination)
+            await db.beams.update_one(
+                {"id": payload.beam_id},
+                {"$set": {
+                    "qc_state": "shipped",
+                    "status": "complete",
+                    "release_decision": {**decision, "at": now_iso(), "by": user.get("email")},
+                }},
+            )
+            logger.info("beam released id=%s by=%s truck=%s dest=%s via=%s", payload.beam_id, user.get("email"), payload.truck_number, payload.destination, (decision or {}).get("via"))
         else:
             logger.info("pre-delivery draft saved id=%s beam=%s by=%s", record.id, record.beam_id, user.get("email"))
-        return record.model_dump()
+        return dumped
+    except HTTPException:
+        raise
     except Exception:
         logger.exception("create_pre_delivery failed")
         raise HTTPException(status_code=500, detail="Failed to save pre-delivery record")
@@ -456,10 +569,23 @@ async def list_anomalies(beam_id: str = None, user=Depends(get_current_user)):
 
 
 @api.post("/anomalies")
-async def create_anomaly(payload: AnomalyCreate, user=Depends(get_current_user)):
+async def create_anomaly(payload: AnomalyCreate, request: Request, user=Depends(get_current_user)):
     try:
         an = Anomaly(**payload.model_dump(), inspector=user["name"])
-        await db.anomalies.insert_one(an.model_dump())
+        dumped = an.model_dump()
+        await db.anomalies.insert_one(dumped)
+        ncr = await open_ncr_from_anomaly(dumped, user, request)
+        dumped["ncr_id"] = ncr.get("id")
+        dumped = attach_prompt(dumped, build_prompt(
+            source_type="anomaly",
+            source_id=an.id,
+            title="Twin pin opened an NCR — add photos and containment",
+            category="visual",
+            severity=ncr.get("severity") or "minor",
+            description=an.note or an.type,
+            beam_id=an.beam_id,
+        ))
+        dumped["ncr_prompt"]["ncr_id"] = ncr.get("id")
         if an.severity in ("moderate", "major"):
             await emit_sync_event(
                 "hold" if an.severity == "major" else "anomaly",
@@ -467,9 +593,12 @@ async def create_anomaly(payload: AnomalyCreate, user=Depends(get_current_user))
                 user,
                 beam_id=an.beam_id,
                 anomaly_id=an.id,
+                ncr_id=ncr.get("id"),
             )
-        logger.info("anomaly created id=%s beam=%s type=%s by=%s", an.id, an.beam_id, an.type, user.get("email"))
-        return an.model_dump()
+        logger.info("anomaly created id=%s ncr=%s beam=%s by=%s", an.id, ncr.get("id"), an.beam_id, user.get("email"))
+        return dumped
+    except HTTPException:
+        raise
     except Exception:
         logger.exception("create_anomaly failed")
         raise HTTPException(status_code=500, detail="Failed to save anomaly")
@@ -556,6 +685,9 @@ app.include_router(cylinder_router)
 app.include_router(control_router)
 app.include_router(owner_router)
 app.include_router(coach_router)
+app.include_router(fresh_router)
+app.include_router(batch_router)
+app.include_router(ncr_router)
 
 security_headers_middleware(app)
 
@@ -614,12 +746,30 @@ async def startup():
     await db.maturity_samples.create_index("recorded_at")
     await db.owner_packages.create_index("pour_id")
     await db.owner_packages.create_index("created_at")
+    await db.fresh_concrete_tests.create_index("pour_id")
+    await db.fresh_concrete_tests.create_index("job_id")
+    await db.fresh_concrete_tests.create_index("beam_ids")
+    await db.fresh_concrete_tests.create_index("created_at")
+    await db.batch_records.create_index("pour_id")
+    await db.batch_records.create_index("job_id")
+    await db.batch_records.create_index("mix_code")
+    await db.batch_records.create_index("status")
+    await db.batch_records.create_index("batched_at")
+    await db.mix_designs.create_index("mix_code")
+    await db.ncrs.create_index("status")
+    await db.ncrs.create_index("severity")
+    await db.ncrs.create_index("beam_ids")
+    await db.ncrs.create_index("bed_id")
+    await db.ncrs.create_index("job_id")
+    await db.ncrs.create_index("anomaly_id")
+    await db.ncrs.create_index("created_at")
     await seed_admin()
     await seed_company()
     await seed_plant()
     await seed_l25390()
     await seed_bed_assignments()
     await seed_strand_rolls()
+    await seed_mix_designs()
     await seed_beam_qr_tokens()
     try:
         await db.beams.create_index("qr_token", unique=True, sparse=True)
@@ -631,3 +781,37 @@ async def startup():
 @app.on_event("shutdown")
 async def shutdown():
     client.close()
+
+
+def mount_frontend_spa():
+    """Serve the CRA production build when present (Emergent single-service deploy)."""
+    build = Path(__file__).resolve().parents[1] / "frontend" / "build"
+    index = build / "index.html"
+    if not index.is_file():
+        logger.info("frontend/build missing — API-only mode")
+        return
+
+    @app.get("/{full_path:path}")
+    async def spa_fallback(full_path: str):
+        try:
+            if full_path.startswith("api/") or full_path == "api":
+                raise HTTPException(status_code=404, detail="Not found")
+            root = build.resolve()
+            target = (root / full_path).resolve()
+            try:
+                target.relative_to(root)
+            except ValueError:
+                raise HTTPException(status_code=404, detail="Not found")
+            if target.is_file():
+                return FileResponse(target)
+            return FileResponse(index)
+        except HTTPException:
+            raise
+        except Exception:
+            logger.exception("spa_fallback failed path=%s", full_path)
+            raise HTTPException(status_code=500, detail="Failed to serve app")
+
+    logger.info("serving frontend SPA from %s", build)
+
+
+mount_frontend_spa()

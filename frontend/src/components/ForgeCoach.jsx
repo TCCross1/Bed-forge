@@ -155,6 +155,9 @@ export default function ForgeCoach() {
         tutorial: data?.tutorial || local.tutorial,
         source: data?.source || local.source,
       }]);
+      if (local.navigateTo && local.navigateTo.split("?")[0] !== route.split("?")[0]) {
+        navigate(local.navigateTo);
+      }
       if (/walk me|this screen|show me tension/i.test(question)) {
         runHighlights(local.highlights?.length ? local.highlights : walkForRoute(route));
       }

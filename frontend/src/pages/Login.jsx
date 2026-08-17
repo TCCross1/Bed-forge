@@ -7,14 +7,14 @@ import { useCompany } from "../context/CompanyContext";
 import { BookOpen, Loader2 } from "lucide-react";
 
 const DEMO = [
-  { email: "tccrossmusic@gmail.com", label: "Admin", password: "BedForge2026!" },
-  { email: "supervisor@bedforge.com", label: "Supervisor", password: "Super1234!" },
-  { email: "tech@bedforge.com", label: "QC Tech", password: "Tech1234!" },
-  { email: "production@bedforge.com", label: "Production", password: "Prod1234!" },
+  { role: "admin", label: "Admin" },
+  { role: "qc_supervisor", label: "Supervisor" },
+  { role: "qc_tech", label: "QC Tech" },
+  { role: "production", label: "Production" },
 ];
 
 export default function Login() {
-  const { login } = useAuth();
+  const { login, demoLogin } = useAuth();
   const company = useCompany();
   const navigate = useNavigate();
   const [params] = useSearchParams();
@@ -22,17 +22,12 @@ export default function Login() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
-  const [demo, setDemo] = useState(false);
+  const [demoRoles, setDemoRoles] = useState([]);
 
   useEffect(() => {
     api.get("/auth/public-config")
       .then((r) => {
-        const on = Boolean(r.data?.demo);
-        setDemo(on);
-        if (on) {
-          setEmail("tccrossmusic@gmail.com");
-          setPassword("BedForge2026!");
-        }
+        setDemoRoles(r.data?.demo ? (r.data.demo_roles || DEMO) : []);
       })
       .catch((err) => console.error("[login] config failed", err));
   }, []);
@@ -40,6 +35,20 @@ export default function Login() {
   const nextPath = () => {
     const next = params.get("next") || "/";
     return next.startsWith("/") && !next.startsWith("//") ? next : "/";
+  };
+
+  const runDemo = async (role) => {
+    setError("");
+    setLoading(true);
+    try {
+      await demoLogin(role);
+      navigate(nextPath());
+    } catch (err) {
+      console.error("[login] demo failed", err);
+      setError(formatApiErrorDetail(err.response?.data?.detail) || err.message);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const submit = async (e) => {
@@ -139,15 +148,16 @@ export default function Login() {
             <BookOpen className="w-4 h-4" /> How BedForge works
           </Link>
 
-          {demo && (
+          {demoRoles.length > 0 && (
           <div className="mt-8 pt-6 border-t border-[#1C2230]">
             <div className="text-xs font-mono uppercase tracking-widest text-muted-foreground mb-3">Quick Demo Login</div>
             <div className="grid grid-cols-2 gap-2">
-              {DEMO.map((d) => (
+              {demoRoles.map((d) => (
                 <button
-                  key={d.email}
-                  data-testid={`demo-${d.label.toLowerCase()}`}
-                  onClick={() => { setEmail(d.email); setPassword(d.password); }}
+                  key={d.role}
+                  type="button"
+                  data-testid={`demo-${(d.label || d.role).toLowerCase()}`}
+                  onClick={() => runDemo(d.role)}
                   className="min-h-12 border border-[#1C2230] rounded-none text-sm font-semibold hover:border-primary hover:text-primary transition-colors duration-100"
                 >
                   {d.label}

@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from db import db
 from models import (
     ProductType, Job, Pour, Bed, Beam, Anomaly, TensionReport, CamberReading,
-    BedAssignment, CompanySettings, now_iso,
+    BedAssignment, CompanySettings, MixDesign, now_iso,
 )
 from tension import calc_theoretical_elongation, evaluate_tension
 from bed_layout import map_production_status, pack_stations
@@ -408,6 +408,27 @@ async def seed_company():
         logger.info("seeded company settings name=%s", settings.company_name)
     except Exception:
         logger.exception("seed_company failed")
+
+
+async def seed_mix_designs():
+    """Idempotent SCC starter mix so the batch plant is not an empty library."""
+    try:
+        if await db.mix_designs.find_one({"mix_code": "SCC-8K"}):
+            return
+        rec = MixDesign(
+            mix_code="SCC-8K",
+            name="Plant SCC 8,000 psi",
+            target_strength_psi=8000,
+            target_air_pct=6.0,
+            target_spread_in=26.0,
+            target_temp_f=70.0,
+            notes="Starter mix for the mixer office. Confirm against the plant's approved mix card.",
+            created_by="system-seed",
+        )
+        await db.mix_designs.insert_one(rec.model_dump())
+        logger.info("seeded mix design SCC-8K")
+    except Exception:
+        logger.exception("seed_mix_designs failed")
 
 
 async def seed_beam_qr_tokens():

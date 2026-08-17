@@ -299,6 +299,22 @@ async def record_cylinder_crush(cylinder_id: str, payload: CylinderCrushInput, r
             "cylinder crush recorded id=%s psi=%s release=%s by=%s",
             cylinder_id, bool(saved.get("crush_psi")), saved.get("release_ok"), user.get("email"),
         )
+        if saved.get("release_ok") is False:
+            from ncr import attach_prompt, build_prompt
+            marks = saved.get("beam_marks") or []
+            saved = attach_prompt(saved, build_prompt(
+                source_type="cylinder",
+                source_id=cylinder_id,
+                title="Cylinder below required — file an NCR",
+                category="material",
+                severity="major",
+                description=f"{saved.get('crush_psi')} psi vs {saved.get('required_psi')} required",
+                beam_id="",
+                pour_id=saved.get("pour_id") or "",
+                job_id=saved.get("job_id") or "",
+            ))
+            if marks:
+                saved["ncr_prompt"]["description"] = saved["ncr_prompt"]["description"] + f" · {', '.join(marks[:4])}"
         return saved
     except HTTPException:
         raise

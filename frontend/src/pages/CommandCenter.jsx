@@ -371,6 +371,7 @@ export default function CommandCenter() {
               <Field label="Kind">
                 <select className={inputClass} value={override.kind} onChange={(e) => setOverride({ ...override, kind: e.target.value })}>
                   <option value="strand_tension">Strand tension gate</option>
+                  <option value="release_strength">Release strength gate (beam)</option>
                   <option value="spec_unlock">Unlock BeamSpec</option>
                   <option value="qc_force">Force QC passed</option>
                 </select>

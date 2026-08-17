@@ -302,6 +302,17 @@ async def add_measurement(spec_id: str, payload: SpecMeasurementCreate, user=Dep
             "measurement saved spec=%s element=%s within=%s by=%s",
             spec_id, payload.element_id, rec.within_tolerance, user.get("email"),
         )
+        if not rec.within_tolerance:
+            from ncr import attach_prompt, build_prompt
+            dumped = attach_prompt(dumped, build_prompt(
+                source_type="dimensional",
+                source_id=rec.id,
+                title="Out of tolerance — file an NCR",
+                category="dimensional",
+                severity="major",
+                description=f"{payload.element_id} measured {payload.measured_station_ft} ft",
+                beam_id=spec_doc.get("beam_id") or "",
+            ))
         return dumped
     except HTTPException:
         raise

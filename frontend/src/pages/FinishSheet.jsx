@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import api, { formatApiErrorDetail } from "../lib/api";
 import Layout, { PageHeader, Field, inputClass, cardClass } from "../components/Layout";
 import { toast } from "sonner";
+import { toastNcrFromResponse } from "../lib/ncr";
 import { Loader2, Sparkles } from "lucide-react";
 import { pickBeamId, useBeamQuery } from "../lib/useBeamQuery";
 
@@ -97,8 +98,9 @@ export default function FinishSheet() {
     }
     setSaving(true);
     try {
-      await api.post("/finish-sheets", { ...form, beam_id: beamId });
+      const { data } = await api.post("/finish-sheets", { ...form, beam_id: beamId });
       toast.success("Finish sheet saved");
+      toastNcrFromResponse(data);
       setForm({ ...EMPTY, marked_end_id: form.marked_end_id });
       const r = await api.get("/finish-sheets", { params: { beam_id: beamId } });
       setHistory(r.data || []);

@@ -177,13 +177,16 @@ export default function Dashboard() {
           </div>
         ) : (
           <>
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-4 mb-3 sm:mb-4">
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-7 gap-3 sm:gap-4 mb-3 sm:mb-4">
               <Stat label="Active Beds" value={s.active_beds} color="#2979FF" icon={Activity} testid="stat-active-beds" />
               <Stat label="Total Beams" value={s.total_beams} color="#FFFFFF" icon={Layers} testid="stat-total-beams" />
               <Stat label="Passed" value={s.passed} color="#00E676" icon={CheckCircle2} testid="stat-passed" />
               <Stat label="In Progress" value={s.in_progress} color="#2979FF" icon={Loader2} testid="stat-inprogress" />
               <Stat label="On Hold" value={s.hold} color="#FFD600" icon={AlertTriangle} testid="stat-hold" />
               <Stat label="Failed" value={s.failed} color="#FF3366" icon={XCircle} testid="stat-failed" />
+              <Link to="/ncr" className="block" data-testid="stat-open-ncrs">
+                <Stat label="Open NCRs" value={s.open_ncrs} color={(s.overdue_ncrs || 0) > 0 ? "#FF3366" : "#FF9100"} icon={AlertTriangle} testid="stat-open-ncrs-value" />
+              </Link>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4 mb-6 sm:mb-8" data-testid="release-forecast-stats">
               <Stat label="Release expected pass" value={s.release_expected_pass} color="#00E676" icon={CheckCircle2} testid="stat-release-pass" />
@@ -191,19 +194,72 @@ export default function Dashboard() {
               <Stat label="Release fail risk" value={s.release_fail_risk} color="#FF3366" icon={XCircle} testid="stat-release-fail" />
             </div>
 
+            <div className={`${cardClass} p-4 sm:p-5 mb-4 border-[#C9A227]/50`} data-testid="fresh-truck-shortcut">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <div className="text-[10px] font-mono uppercase tracking-[0.25em] text-[#C9A227]">Truck’s here</div>
+                  <div className="font-display font-bold uppercase tracking-wider mt-1">Fresh test — spread / slump / J-ring</div>
+                  <p className="text-xs text-muted-foreground mt-1">One tap. Defaults to spread (SCC). Log it before the bed is poured.</p>
+                </div>
+                <Link
+                  to="/fresh"
+                  data-testid="board-fresh-test"
+                  className="min-h-12 px-5 bg-primary text-white font-display font-bold uppercase tracking-widest flex items-center justify-center shrink-0"
+                >
+                  Open Fresh Test
+                </Link>
+              </div>
+            </div>
+            <div className={`${cardClass} p-4 sm:p-5 mb-4`} data-testid="batch-plant-shortcut">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <div className="text-[10px] font-mono uppercase tracking-[0.25em] text-[#C9A227]">Mixer office</div>
+                  <div className="font-display font-bold uppercase tracking-wider mt-1">Batch plant — mix, weather, confirm</div>
+                  <p className="text-xs text-muted-foreground mt-1">Draft on the mixer. Plant manager confirms. Analyst never changes the mix.</p>
+                </div>
+                <Link
+                  to="/batch"
+                  data-testid="board-batch-plant"
+                  className="min-h-12 px-5 border border-[#C9A227] text-[#C9A227] font-display font-bold uppercase tracking-widest flex items-center justify-center shrink-0"
+                >
+                  Open Batch Plant
+                </Link>
+              </div>
+            </div>
+
+            <div className={`${cardClass} p-4 sm:p-5 mb-4 border-[#FF9100]/40`} data-testid="ncr-shortcut">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <div className="text-[10px] font-mono uppercase tracking-[0.25em] text-[#FF9100]">
+                    Open NCRs {s.open_ncrs ?? 0}{(s.overdue_ncrs || 0) > 0 ? ` · ${s.overdue_ncrs} overdue / critical` : ""}
+                  </div>
+                  <div className="font-display font-bold uppercase tracking-wider mt-1">Non-conformance — twin pins, fails, mix deviations</div>
+                  <p className="text-xs text-muted-foreground mt-1">File from a fail toast or here. Does not bypass tension or release gates.</p>
+                </div>
+                <Link
+                  to="/ncr"
+                  data-testid="board-ncr"
+                  className="min-h-12 px-5 border border-[#FF9100] text-[#FF9100] font-display font-bold uppercase tracking-widest flex items-center justify-center shrink-0"
+                >
+                  Open NCR desk
+                </Link>
+              </div>
+            </div>
             <div className={`${cardClass} p-4 sm:p-5 mb-6`} data-testid="plant-demo-path">
               <div className="text-[10px] font-mono uppercase tracking-[0.25em] text-[#C9A227]">Today’s plant path</div>
               <div className="font-display font-bold uppercase tracking-wider mt-1 mb-3">One clean walk from mill tag to DOT package</div>
-              <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2">
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-10 gap-2">
                 {[
                   { n: "01", label: "Log rolls", to: "/rolls" },
                   { n: "02", label: "Assign beds", to: "/planner" },
                   { n: "03", label: "Tension twin", to: "/tension" },
-                  { n: "04", label: "Inspect", to: "/inspection" },
-                  { n: "05", label: "Camber", to: "/camber" },
-                  { n: "06", label: "Tags + QR", to: "/tags" },
-                  { n: "07", label: "Release", to: "/release" },
-                  { n: "08", label: "DOT package", to: "/packages" },
+                  { n: "04", label: "Fresh test", to: "/fresh" },
+                  { n: "05", label: "Inspect", to: "/inspection" },
+                  { n: "06", label: "NCR", to: "/ncr" },
+                  { n: "07", label: "Camber", to: "/camber" },
+                  { n: "08", label: "Tags + QR", to: "/tags" },
+                  { n: "09", label: "Release", to: "/release" },
+                  { n: "10", label: "DOT package", to: "/packages" },
                 ].map((step) => (
                   <Link
                     key={step.n}

@@ -1,7 +1,7 @@
 /** In-app Master Tutorial — bundled, searchable, no network required. */
 
 export const TUTORIAL_SECTION_IDS = [
-  "what", "morning", "beds", "tension", "qc", "tags", "supervisors", "security", "problems",
+  "what", "morning", "beds", "tension", "fresh", "batch", "qc", "tags", "supervisors", "security", "problems",
 ];
 
 export const TUTORIAL_SECTIONS = [
@@ -53,20 +53,45 @@ export const TUTORIAL_SECTIONS = [
     ],
   },
   {
+    id: "fresh",
+    title: "5. Fresh concrete at delivery — spread, slump, and J-ring",
+    why: "The truck is on the clock. If you do not record plastic concrete before it hits the bed, the mix that went around the strands is a rumor. Spread, slump, and J-ring are how we prove the load was placeable — not the cylinder crush you do later.",
+    body: [
+      "Open Fresh Test in one tap: gold Fresh on the iPhone tab bar, Fresh Test in the sidebar, first item in More, or the Truck’s here card on the Board. Job and pour are dropdowns. Last pour is remembered. L25390-B1 prefills on the demo plant.",
+      "This plant pours SCC, so the default test is Spread (slump-flow, ASTM C1611) — two orthogonal diameters, live average. T50/T20 and visual stability (stable / minor halo / segregation) are optional. Spec min/max stay blank unless the mix ticket has a window.",
+      "Slump (ASTM C143) is still there. Some states still call the cone. Do not default to it here; tap Slump if that ticket needs it.",
+      "J-ring (ASTM C1621 / AASHTO T 345) is passing ability — will this mix get through strand and rebar without blocking. Record unconstrained spread (reused if you already typed it), two J-ring diameters, and the difference Δ. 0–1 in is PASS (no visible blocking), 1–2 in is BORDERLINE, over 2 in is BLOCKING. Default apparatus note is standard J-ring.",
+      "Same ticket also takes mix/ticket number, concrete temperature, air if you take it, truck/load, time sampled (stamp now), Pass/Fail/Hold, and your name. Save and stay — the next truck on this pour is one more tap. Dead-zone beds still capture; the write queues offline.",
+      "This is not cylinder tags and not a crush. Cylinders are hardened strength later. Fresh Test is plastic concrete at the chute, before the bed is poured. The mixer-side twin of this ticket is Batch Plant.",
+    ],
+  },
+  {
+    id: "batch",
+    title: "6. Batch plant — the mixer record",
+    why: "If we cannot say which mix, which weather, and which admixture dosages went into a girder, a failed cylinder or a low-air day becomes an NCR we cannot close.",
+    body: [
+      "Open Batch Plant from the desk sidebar or More on the phone. Production (mixer) drafts. Plant manager (admin/executive) confirms. After confirm the ticket is frozen — corrections are a new revision with a written reason. Nobody deletes yesterday.",
+      "Capture outdoor conditions (phone location + weather). If weather is down, flag it estimated/manual and type the numbers. Never wait on the API while the mixer is charged.",
+      "Link the Fresh Test for this load instead of retyping spread, air, and temperature. Link cylinders when the breaks come in — even after confirm, linking QC is allowed because strength arrives days later.",
+      "The analyst looks at heat, dryness, air, w/cm, and history. It may say “bump AEA.” It cannot write dosages, confirm a batch, or override a gate.",
+    ],
+  },
+  {
     id: "qc",
-    title: "5. Inspection, camber, finish, and release",
+    title: "7. Inspection, camber, finish, and release",
     why: "These four sheets are how we prove the girder was built, stripped, measured, and allowed to leave. Skip one and the dossier has a hole.",
     body: [
       "Inspection (QIR): open Inspect. Pick the beam (dossier links pass ?beam= so you land on the right girder). Walk the sections — layout, reinforcement, hardware, concrete, strip, finish. Each section needs a PASS / FAIL / HOLD gate. Fail or hold updates the beam’s QC state. Work it on the iPhone; buttons are full-width.",
       "Digital tape (optional, same beam): one tech, iPhone, flashlight, self-leveling laser line. Plot origin at Marked End / header. Walk the beam and snap stations when the line is green. BedForge compares those shots to the locked twin. If it flags a rescan, walk back. Do not type a friendlier number.",
       "Camber / strength: after release strength. Three points — Marked End, midspan, Unmarked End — plus required vs release psi. On L25390 the drawing calls 4,500 psi release and 1.25\" design camber; those prefill when you open that beam. If release strength is short, you do not ship.",
       "Finish sheet: post-pour checklist. Strands cut/recessed/grouted, hardware, surface, lifting devices. Marked End ID is required — it should match the spec (L25390 / L25390-B1 / ME on the demo). Verify it on the beam, not from memory.",
-      "Pre-delivery: last gate before the truck. Dimensional, camber, finish, hardware, marked-end, cracks documented. Truck number, destination, three sign-offs (QC, production, carrier). Incomplete checks will not release.",
+      "Pre-delivery: last gate before the truck. Dimensional, camber, finish, hardware, marked-end, cracks documented. Truck number, destination, three sign-offs (QC, production, carrier). Incomplete checks will not release. Crush or predicted strength must meet required psi — an NCR does not bypass that gate.",
+      "NCR: every fail, hold, twin pin, low break, or mix deviation becomes one closable record. File from the fail toast or /ncr. Any signed-in tech can create. Major/Critical need root cause, corrective action, and supervisor verification to close. Photos except documentation-only. Closed records are immutable until a supervisor reopens with a written reason.",
     ],
   },
   {
     id: "tags",
-    title: "6. Cylinder tags and beam QR codes",
+    title: "8. Cylinder tags and beam QR codes",
     why: "Cylinders without a beam mark are orphan lab data. A girder without a QR is anonymous in the yard six months from now.",
     body: [
       "Cylinder Tags: morning setup — jobs, beam marks, break ages. Print at Actual Size / 100%. The company logo (uploaded once under branding) prints on every tag. Crush results later feed the camber / strength story and the release forecast on the Board.",
@@ -77,7 +102,7 @@ export const TUTORIAL_SECTIONS = [
   },
   {
     id: "supervisors",
-    title: "7. What supervisors and managers can do",
+    title: "9. What supervisors and managers can do",
     why: "Least privilege is the rule. Extra keys exist for the people who already sign the plant’s name on DOT paper — and every extra key is audited.",
     body: [
       "QC Tech: log rolls, inspect, digital tape, fill sheets, scan QR. Cannot change accounts, unlock a locked spec, or turn off security.",
@@ -91,7 +116,7 @@ export const TUTORIAL_SECTIONS = [
   },
   {
     id: "security",
-    title: "8. Why the system is locked down (plain language)",
+    title: "10. Why the system is locked down (plain language)",
     why: "After the intrusion we assume laptops get stolen and passwords get phished. Locks are how the plant keeps producing instead of explaining a forged heat number to a DOT.",
     body: [
       "Sign-in creates a session we can kill. Idle timeout. Optional device binding. Optional office/VPN IP allow-list for plant-manager tools so a stolen admin session on a coffee-shop network cannot change users.",
@@ -103,7 +128,7 @@ export const TUTORIAL_SECTIONS = [
   },
   {
     id: "problems",
-    title: "9. What to do when something goes wrong",
+    title: "11. What to do when something goes wrong",
     why: "The wrong fix (fake heat, force-pass, delete the log) is worse than the original miss. Stop, say it, log it.",
     body: [
       "Forgot password or locked out: a plant manager resets or re-enables you. They cannot see your old password.",

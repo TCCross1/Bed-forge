@@ -4,7 +4,7 @@ from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, Request, HTTPException, Depends, Response
 from fastapi.responses import JSONResponse
 
-from models import RegisterInput, LoginInput, UserPublic, PasswordChange, new_id, now_iso
+from models import RegisterInput, LoginInput, DemoLoginInput, UserPublic, PasswordChange, new_id, now_iso
 from db import db
 from audit import write_audit
 from sessions import create_session, get_session, touch_session, revoke_session
@@ -145,10 +145,17 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 @router.get("/public-config")
 async def public_config():
+    demo = allow_demo_users()
     return {
-        "demo": allow_demo_users(),
+        "demo": demo,
         "production": is_production(),
         "open_register": allow_open_register(),
+        "demo_roles": [
+            {"role": "admin", "label": "Admin"},
+            {"role": "qc_supervisor", "label": "Supervisor"},
+            {"role": "qc_tech", "label": "QC Tech"},
+            {"role": "production", "label": "Production"},
+        ] if demo else [],
     }
 
 
@@ -217,6 +224,49 @@ async def login(payload: LoginInput, request: Request):
     except Exception:
         logger.exception("login failed")
         raise HTTPException(status_code=500, detail="Sign-in failed")
+
+
+@router.post("/demo-login")
+async def demo_login(payload: DemoLoginInput, request: Request):
+    """Development-only role picker. Never available in production. Passwords stay on the server."""
+    try:
+        if not allow_demo_users() or is_production():
+            raise HTTPException(status_code=403, detail="Demo logins are off on this plant")
+        role = (payload.role or "qc_tech").strip()
+        email = {
+            "qc_tech": "tech@bedforge.com",
+            "qc_supervisor": "supervisor@bedforge.com",
+            "production": "production@bedforge.com",
+        }.get(role)
+        if role == "admin":
+            email = (os.environ.get("ADMIN_EMAIL") or "admin@bedforge.com").lower()
+        if not email:
+            raise HTTPException(status_code=400, detail="Unknown demo role")
+        user = await db.users.find_one({"email": email})
+        if not user:
+            raise HTTPException(status_code=404, detail="Demo account is not seeded")
+        if user.get("disabled"):
+            raise HTTPException(status_code=401, detail="Account disabled")
+        ip = client_ip(request)
+        settings = await _settings()
+        session = await create_session(
+            user,
+            ip=ip,
+            user_agent=request.headers.get("user-agent") or "",
+            device_id=request.headers.get("x-device-id") or "",
+        )
+        token = create_access_token(user["id"], email, session["id"], user["role"], session_minutes(settings))
+        await write_audit(action="auth.demo_login", user=user, request=request, entity_type="session", entity_id=session["id"])
+        logger.info("demo login role=%s", user.get("role"))
+        body = {"user": _public(user), "access_token": token, "session_id": session["id"]}
+        response = JSONResponse(body)
+        response.set_cookie(value=token, **_cookie_args(session_minutes(settings)))
+        return response
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("demo_login failed")
+        raise HTTPException(status_code=500, detail="Demo sign-in failed")
 
 
 @router.post("/logout")

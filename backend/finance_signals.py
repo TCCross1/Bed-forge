@@ -1,5 +1,5 @@
 """Owner cost signals from QC holds — not accounting."""
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 DEFAULT_NCR_USD = 2500.0
 DEFAULT_SCRAP_USD = 8000.0
@@ -29,12 +29,17 @@ def build_finance_signals(
     assignments: List[dict],
     forecasts: List[dict],
     settings: dict,
+    ncrs: Optional[List[dict]] = None,
 ) -> Dict[str, Any]:
     costs = money_settings(settings)
     holds = [b for b in beams if b.get("qc_state") == "hold"]
     failed = [b for b in beams if b.get("qc_state") == "failed"]
     majors = [a for a in anomalies if (a.get("severity") or "") == "major"]
-    ncr_count = len(holds) + len(failed) + len(majors)
+    if ncrs is not None:
+        open_ncrs = [n for n in ncrs if (n.get("status") or "open") not in ("closed", "rejected")]
+        ncr_count = len(open_ncrs)
+    else:
+        ncr_count = len(holds) + len(failed) + len(majors)
     ncr_cost = ncr_count * costs["ncr_cost_usd"]
     scrap_cost = len(failed) * costs["scrap_cost_usd"]
 

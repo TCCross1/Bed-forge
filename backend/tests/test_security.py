@@ -14,6 +14,21 @@ from security_core import (
 from storage import vault_dir
 
 
+def test_redact_does_not_leak_password_keys():
+    blob = redact_value({"password": "secret", "token": "abc", "heat": "H1"})
+    assert "secret" not in str(blob).lower() or blob["password"] != "secret"
+
+
+def test_ai_cannot_write_mix_flag():
+    from batch_plant import AI_CAN_WRITE_MIX, apply_recommendations_to_batch
+    assert AI_CAN_WRITE_MIX is False
+    try:
+        apply_recommendations_to_batch({}, [])
+        assert False, "expected PermissionError"
+    except PermissionError:
+        pass
+
+
 def test_exec_roles_include_plant_manager_and_owner():
     assert "admin" in EXEC_ROLES
     assert "executive" in EXEC_ROLES

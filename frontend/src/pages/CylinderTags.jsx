@@ -6,6 +6,7 @@ import Layout, { PageHeader, Field, inputClass, cardClass } from "../components/
 import CylinderPrint from "../components/CylinderPrint";
 import { useAuth } from "../context/AuthContext";
 import { useCompany } from "../context/CompanyContext";
+import { toastNcrFromResponse } from "../lib/ncr";
 import {
   MAX_BEAMS, MAX_SLOTS, cleanBeams, emptyRun, padBeams,
   statusColor, summarizeRun, todayISO,
@@ -289,6 +290,7 @@ export default function CylinderTags() {
         cylinders: (cur.cylinders || []).map((c) => (c.id === data.id ? data : c)),
       }));
       toast.success(data.release_ok ? "Crush recorded — release OK" : "Crush recorded");
+      toastNcrFromResponse(data);
     } catch (err) {
       console.error("[tags] crush failed", err);
       toast.error(formatApiErrorDetail(err.response?.data?.detail) || "Failed to record crush");

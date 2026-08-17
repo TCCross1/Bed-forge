@@ -40,6 +40,10 @@ class LoginInput(BaseModel):
     password: str
 
 
+class DemoLoginInput(BaseModel):
+    role: str = "qc_tech"
+
+
 class PasswordChange(BaseModel):
     current_password: str
     new_password: str = Field(min_length=10)
@@ -140,6 +144,226 @@ class PourCreate(BaseModel):
     pour_date: str
     concrete_mix: str = ""
     status: str = "scheduled"
+
+
+# ---------- Fresh / plastic concrete at delivery (not cylinder crush) ----------
+class FreshConcreteTest(BaseModel):
+    id: str = Field(default_factory=new_id)
+    job_id: str
+    pour_id: str
+    beam_ids: List[str] = Field(default_factory=list)
+    bed_id: Optional[str] = None
+    test_types: List[str] = Field(default_factory=lambda: ["spread"])
+    mix_ticket: str = ""
+    load_number: str = ""
+    concrete_temp_f: Optional[float] = None
+    air_content_pct: Optional[float] = None
+    time_sampled: str = Field(default_factory=now_iso)
+    spread_d1_in: Optional[float] = None
+    spread_d2_in: Optional[float] = None
+    spread_avg_in: Optional[float] = None
+    t50_sec: Optional[float] = None
+    visual_stability: Optional[str] = None
+    spread_spec_min_in: Optional[float] = None
+    spread_spec_max_in: Optional[float] = None
+    slump_in: Optional[float] = None
+    slump_spec_min_in: Optional[float] = None
+    slump_spec_max_in: Optional[float] = None
+    unconstrained_avg_in: Optional[float] = None
+    jring_d1_in: Optional[float] = None
+    jring_d2_in: Optional[float] = None
+    jring_avg_in: Optional[float] = None
+    blocking_delta_in: Optional[float] = None
+    blocking_assessment: Optional[str] = None
+    blocking_label: Optional[str] = None
+    blocking_detail: Optional[str] = None
+    jring_note: str = "standard J-ring"
+    gate: str = "hold"
+    notes: str = ""
+    inspector: str = ""
+    created_at: str = Field(default_factory=now_iso)
+
+
+class FreshConcreteTestCreate(BaseModel):
+    job_id: str
+    pour_id: str
+    beam_ids: List[str] = Field(default_factory=list)
+    bed_id: Optional[str] = None
+    test_types: List[str] = Field(default_factory=lambda: ["spread"])
+    mix_ticket: str = ""
+    load_number: str = ""
+    concrete_temp_f: Optional[float] = None
+    air_content_pct: Optional[float] = None
+    time_sampled: Optional[str] = None
+    spread_d1_in: Optional[float] = None
+    spread_d2_in: Optional[float] = None
+    t50_sec: Optional[float] = None
+    visual_stability: Optional[str] = None
+    spread_spec_min_in: Optional[float] = None
+    spread_spec_max_in: Optional[float] = None
+    slump_in: Optional[float] = None
+    slump_spec_min_in: Optional[float] = None
+    slump_spec_max_in: Optional[float] = None
+    unconstrained_avg_in: Optional[float] = None
+    jring_d1_in: Optional[float] = None
+    jring_d2_in: Optional[float] = None
+    jring_note: str = "standard J-ring"
+    gate: str = "hold"
+    notes: str = ""
+
+
+# ---------- Batch plant (mixer-side; links to Fresh Test + cylinders) ----------
+class MixDesign(BaseModel):
+    id: str = Field(default_factory=new_id)
+    mix_code: str
+    name: str = ""
+    target_strength_psi: Optional[float] = None
+    target_air_pct: Optional[float] = None
+    target_slump_in: Optional[float] = None
+    target_spread_in: Optional[float] = None
+    target_temp_f: Optional[float] = None
+    notes: str = ""
+    created_by: str = ""
+    created_at: str = Field(default_factory=now_iso)
+
+
+class MixDesignCreate(BaseModel):
+    mix_code: str
+    name: str = ""
+    target_strength_psi: Optional[float] = None
+    target_air_pct: Optional[float] = None
+    target_slump_in: Optional[float] = None
+    target_spread_in: Optional[float] = None
+    target_temp_f: Optional[float] = None
+    notes: str = ""
+
+
+class BatchIngredient(BaseModel):
+    kind: str = "cement"  # cement | scm | coarse | sand | water | ice | admixture | other
+    name: str = ""
+    source: str = ""
+    size: str = ""
+    weight_lb: Optional[float] = None
+    moisture_pct: Optional[float] = None
+    dosage: Optional[float] = None
+    dosage_unit: str = "oz/cwt"
+    notes: str = ""
+
+
+class BatchEnvironment(BaseModel):
+    ambient_f: Optional[float] = None
+    mix_temp_f: Optional[float] = None
+    rh_pct: Optional[float] = None
+    pressure_inhg: Optional[float] = None
+    wind_mph: Optional[float] = None
+    weather: str = ""
+    solar_proxy: str = ""
+    lat: Optional[float] = None
+    lon: Optional[float] = None
+    source: str = "manual"
+    env_flag: str = ""
+    captured_at: str = ""
+    manual_override: bool = False
+
+
+class BatchRecord(BaseModel):
+    id: str = Field(default_factory=new_id)
+    status: str = "draft"  # draft | confirmed
+    immutable: bool = False
+    revision: int = 1
+    parent_id: Optional[str] = None
+    job_id: str
+    pour_id: str
+    bed_ids: List[str] = Field(default_factory=list)
+    beam_ids: List[str] = Field(default_factory=list)
+    batched_at: str = Field(default_factory=now_iso)
+    mixer_operator: str = ""
+    mix_code: str = ""
+    mix_design_id: Optional[str] = None
+    target_strength_psi: Optional[float] = None
+    target_air_pct: Optional[float] = None
+    target_slump_in: Optional[float] = None
+    target_spread_in: Optional[float] = None
+    target_temp_f: Optional[float] = None
+    batch_size: Optional[float] = None
+    batch_unit: str = "yd3"
+    mixing_time_sec: Optional[float] = None
+    sequence_notes: str = ""
+    truck_id: str = ""
+    deviations: str = ""
+    ingredients: List[Dict[str, Any]] = Field(default_factory=list)
+    environment: Dict[str, Any] = Field(default_factory=dict)
+    cementitious_lb: Optional[float] = None
+    water_lb: Optional[float] = None
+    w_cm: Optional[float] = None
+    fresh_test_ids: List[str] = Field(default_factory=list)
+    cylinder_ids: List[str] = Field(default_factory=list)
+    confirmed_by: str = ""
+    confirmed_at: Optional[str] = None
+    created_by: str = ""
+    created_at: str = Field(default_factory=now_iso)
+    updated_at: str = Field(default_factory=now_iso)
+
+
+class BatchRecordCreate(BaseModel):
+    job_id: str
+    pour_id: str
+    bed_ids: List[str] = Field(default_factory=list)
+    beam_ids: List[str] = Field(default_factory=list)
+    batched_at: Optional[str] = None
+    mixer_operator: str = ""
+    mix_code: str = ""
+    mix_design_id: Optional[str] = None
+    target_strength_psi: Optional[float] = None
+    target_air_pct: Optional[float] = None
+    target_slump_in: Optional[float] = None
+    target_spread_in: Optional[float] = None
+    target_temp_f: Optional[float] = None
+    batch_size: Optional[float] = None
+    batch_unit: str = "yd3"
+    mixing_time_sec: Optional[float] = None
+    sequence_notes: str = ""
+    truck_id: str = ""
+    deviations: str = ""
+    ingredients: List[Dict[str, Any]] = Field(default_factory=list)
+    environment: Dict[str, Any] = Field(default_factory=dict)
+    fresh_test_ids: List[str] = Field(default_factory=list)
+    cylinder_ids: List[str] = Field(default_factory=list)
+    copy_from_id: Optional[str] = None
+
+
+class BatchRecordUpdate(BaseModel):
+    bed_ids: Optional[List[str]] = None
+    beam_ids: Optional[List[str]] = None
+    batched_at: Optional[str] = None
+    mixer_operator: Optional[str] = None
+    mix_code: Optional[str] = None
+    mix_design_id: Optional[str] = None
+    target_strength_psi: Optional[float] = None
+    target_air_pct: Optional[float] = None
+    target_slump_in: Optional[float] = None
+    target_spread_in: Optional[float] = None
+    target_temp_f: Optional[float] = None
+    batch_size: Optional[float] = None
+    batch_unit: Optional[str] = None
+    mixing_time_sec: Optional[float] = None
+    sequence_notes: Optional[str] = None
+    truck_id: Optional[str] = None
+    deviations: Optional[str] = None
+    ingredients: Optional[List[Dict[str, Any]]] = None
+    environment: Optional[Dict[str, Any]] = None
+    fresh_test_ids: Optional[List[str]] = None
+    cylinder_ids: Optional[List[str]] = None
+
+
+class BatchAmendInput(BaseModel):
+    reason: str = Field(min_length=8)
+    patch: BatchRecordUpdate
+
+
+class BatchLinkQcInput(BaseModel):
+    fresh_test_ids: Optional[List[str]] = None
+    cylinder_ids: Optional[List[str]] = None
 
 
 # ---------- Beds ----------
@@ -459,6 +683,96 @@ class AnomalyCreate(BaseModel):
     length_in: float = 0.0
     note: str = ""
     photo_url: str = ""
+
+
+class NCR(BaseModel):
+    id: str = Field(default_factory=new_id)
+    status: str = "open"
+    severity: str = "minor"
+    category: str = "visual"
+    sub_type: str = ""
+    description: str = ""
+    containment: str = ""
+    root_cause: str = ""
+    corrective_action: str = ""
+    preventive_action: str = ""
+    verification_how: str = ""
+    verification_by: str = ""
+    signoff: str = ""
+    assigned_to: str = ""
+    assigned_role: str = ""
+    beam_ids: List[str] = Field(default_factory=list)
+    job_id: str = ""
+    pour_id: str = ""
+    bed_id: str = ""
+    batch_id: str = ""
+    mix_code: str = ""
+    anomaly_id: str = ""
+    source_type: str = "manual"
+    source_id: str = ""
+    twin_position: Dict[str, Any] = Field(default_factory=dict)
+    photos: List[str] = Field(default_factory=list)
+    discovered_by: str = ""
+    created_by: str = ""
+    created_at: str = Field(default_factory=now_iso)
+    updated_at: str = Field(default_factory=now_iso)
+    closed_at: Optional[str] = None
+    closed_by: str = ""
+    history: List[Dict[str, Any]] = Field(default_factory=list)
+
+
+class NCRCreate(BaseModel):
+    beam_ids: List[str] = Field(default_factory=list)
+    beam_id: Optional[str] = None
+    job_id: str = ""
+    pour_id: str = ""
+    bed_id: str = ""
+    batch_id: str = ""
+    mix_code: str = ""
+    anomaly_id: str = ""
+    source_type: str = "manual"
+    source_id: str = ""
+    category: str = "visual"
+    sub_type: str = ""
+    severity: str = "minor"
+    description: str = ""
+    containment: str = ""
+    twin_position: Dict[str, Any] = Field(default_factory=dict)
+    photos: List[str] = Field(default_factory=list)
+    assigned_to: str = ""
+    assigned_role: str = ""
+
+
+class NCRUpdate(BaseModel):
+    description: Optional[str] = None
+    containment: Optional[str] = None
+    root_cause: Optional[str] = None
+    corrective_action: Optional[str] = None
+    preventive_action: Optional[str] = None
+    verification_how: Optional[str] = None
+    verification_by: Optional[str] = None
+    signoff: Optional[str] = None
+    assigned_to: Optional[str] = None
+    assigned_role: Optional[str] = None
+    category: Optional[str] = None
+    sub_type: Optional[str] = None
+    severity: Optional[str] = None
+    batch_id: Optional[str] = None
+    mix_code: Optional[str] = None
+    beam_ids: Optional[List[str]] = None
+    job_id: Optional[str] = None
+    pour_id: Optional[str] = None
+    bed_id: Optional[str] = None
+
+
+class NCRTransition(BaseModel):
+    status: str
+    note: str = ""
+    root_cause: Optional[str] = None
+    corrective_action: Optional[str] = None
+    verification_by: Optional[str] = None
+    verification_how: Optional[str] = None
+    signoff: Optional[str] = None
 
 
 LEVEL_TOLERANCE_IN = 0.125  # 1/8"

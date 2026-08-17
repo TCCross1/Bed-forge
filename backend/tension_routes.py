@@ -199,7 +199,21 @@ async def capture_strand_tension(
         )
         saved = await db.beam_specs.find_one({"id": spec_id}, {"_id": 0})
         updated = _find_strand(saved, strand.get("id"))
-        return {**(updated or {}), **result, "status": result["status"]}
+        payload_out = {**(updated or {}), **result, "status": result["status"]}
+        if result.get("status") == "fail" or result.get("within_tolerance") is False:
+            from ncr import attach_prompt, build_prompt
+            payload_out = attach_prompt(payload_out, build_prompt(
+                source_type="tension",
+                source_id=strand.get("id") or "",
+                title="Strand out of ±5% — file an NCR",
+                category="strand",
+                severity="major",
+                description=f"variance {result.get('variance_pct')}",
+                beam_id=(beam or {}).get("id") or "",
+                bed_id=(beam or {}).get("bed_id") or "",
+                pour_id=(beam or {}).get("pour_id") or "",
+            ))
+        return payload_out
     except HTTPException:
         raise
     except Exception:
@@ -241,7 +255,21 @@ async def capture_hold_down(
         await db.beam_specs.update_one({"id": spec_id, "hold_downs.id": hd_id}, {"$set": updates})
         logger.info("hold-down captured spec=%s hd=%s status=%s by=%s", spec_id, hd_id, status, user.get("email"))
         saved = await db.beam_specs.find_one({"id": spec_id}, {"_id": 0})
-        return _find_hold_down(saved, hd_id)
+        item_out = _find_hold_down(saved, hd_id) or {}
+        if status == "issue":
+            from ncr import attach_prompt, build_prompt
+            item_out = attach_prompt(item_out, build_prompt(
+                source_type="hardware",
+                source_id=hd_id,
+                title="Hold-down issue — file an NCR",
+                category="hardware",
+                severity="major",
+                description=payload.notes or "hold-down issue",
+                beam_id=(beam or {}).get("id") or "",
+                bed_id=(beam or {}).get("bed_id") or "",
+                pour_id=(beam or {}).get("pour_id") or "",
+            ))
+        return item_out
     except HTTPException:
         raise
     except Exception:

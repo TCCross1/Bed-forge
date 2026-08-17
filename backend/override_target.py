@@ -36,4 +36,11 @@ def classify_override_target(kind: str, raw: str) -> dict:
             "alt_query": {"mark": value},
             "label": "beam",
         }
+    if kind == "release_strength":
+        return {
+            "collection": "beams",
+            "query": {"id": value},
+            "alt_query": {"mark": value},
+            "label": "beam",
+        }
     raise OverrideTargetError("Unknown override kind")

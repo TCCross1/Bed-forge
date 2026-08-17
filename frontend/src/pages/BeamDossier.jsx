@@ -214,12 +214,15 @@ export default function BeamDossier() {
             {full && (
               <section className="bg-[#0F1218] border border-[#1C2230] p-5 sm:p-6 space-y-4" data-testid="dossier-qc">
                 <div className="font-display font-bold uppercase tracking-wider">QC history</div>
-                <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-8 gap-2">
                   {[
                     ["QIR", (dossier.inspections || []).length, `/inspection?beam=${dossier.id}`],
+                    ["Fresh", (dossier.fresh_tests || []).length, `/fresh?beam=${dossier.id}&job=${dossier.job?.id || ""}&pour=${dossier.pour?.id || ""}`],
+                    ["Batch", (dossier.batch_records || []).length, `/batch?beam=${dossier.id}&job=${dossier.job?.id || ""}&pour=${dossier.pour?.id || ""}`],
                     ["Tension", (dossier.tension_reports || []).length, `/tension?beam=${dossier.id}`],
                     ["Camber", (dossier.camber_readings || []).length, `/camber?beam=${dossier.id}`],
                     ["Finish", (dossier.finish_sheets || []).length, `/finish?beam=${dossier.id}`],
+                    ["NCR", (dossier.ncrs || []).length, `/ncr?beam=${dossier.id}`],
                     ["Release", (dossier.pre_delivery || []).length, `/release?beam=${dossier.id}`],
                   ].map(([label, count, href]) => (
                     <Link key={label} to={href} className="border border-[#1C2230] p-3 hover:border-primary">
@@ -240,6 +243,20 @@ export default function BeamDossier() {
                     <p className="text-sm text-muted-foreground">No strand roll assigned yet.</p>
                   )}
                 </div>
+                {(dossier.ncrs || []).length > 0 && (
+                  <div data-testid="dossier-ncrs">
+                    <div className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground mb-2">NCR history</div>
+                    <ul className="space-y-1">
+                      {dossier.ncrs.slice(0, 12).map((item) => (
+                        <li key={item.id}>
+                          <Link to={`/ncr?id=${item.id}`} className="text-sm font-mono hover:text-primary">
+                            {(item.severity || "—").toUpperCase()} · {item.status} · {item.description || item.sub_type || item.category}
+                          </Link>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
                 {(dossier.anomalies || []).length > 0 && (
                   <div>
                     <div className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground mb-2">Anomalies</div>

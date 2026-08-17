@@ -12,6 +12,7 @@ import {
 } from "../lib/beamSpec";
 import { Calculator, CheckCircle2, XCircle, Save, Loader2, Upload, ScanBarcode } from "lucide-react";
 import { toast } from "sonner";
+import { toastNcrFromResponse } from "../lib/ncr";
 import { useDevice } from "../context/DeviceContext";
 
 const STRAND_PRESETS = [
@@ -138,6 +139,7 @@ export default function TensionCalculator() {
         }
       );
       toast.success(na ? "Strand marked N/A" : (data.within_tolerance ? "WITHIN ±5%" : data.measured_elongation == null ? "Theoretical stored" : "OUT OF TOLERANCE"));
+      toastNcrFromResponse(data);
       await loadTwin(selectedId);
       setSelected({ kind: "strand", item: { ...selected.item, ...data } });
     } catch (err) {
@@ -161,6 +163,7 @@ export default function TensionCalculator() {
         { status: hdStatus, notes }
       );
       toast.success(`Hold-down ${hdStatus}`);
+      toastNcrFromResponse(data);
       await loadTwin(selectedId);
       setSelected({ kind: "hold_down", item: data });
     } catch (err) {
@@ -226,6 +229,7 @@ export default function TensionCalculator() {
         tolerance_pct: 5.0,
       });
       toast.success("Tension report saved");
+      toastNcrFromResponse(data);
     } catch (err) {
       console.error("[tension] save report failed", err);
       toast.error(formatApiErrorDetail(err.response?.data?.detail) || "Failed to save report");

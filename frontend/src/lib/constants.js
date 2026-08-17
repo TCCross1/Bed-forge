@@ -55,3 +55,7 @@ export const releaseForecast = (s) => RELEASE_FORECAST_STYLES[s] || RELEASE_FORE
 
 export const PLAN_ROLES = ["admin", "executive", "qc_supervisor", "production"];
 export const canPlan = (role) => PLAN_ROLES.includes(role);
+export const BATCH_DRAFT_ROLES = ["production", "admin", "executive"];
+export const BATCH_CONFIRM_ROLES = ["admin", "executive"];
+export const canDraftBatch = (role) => BATCH_DRAFT_ROLES.includes(role);
+export const canConfirmBatch = (role) => BATCH_CONFIRM_ROLES.includes(role);

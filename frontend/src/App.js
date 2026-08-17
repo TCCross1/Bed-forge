@@ -24,6 +24,9 @@ import BeamDossier from "./pages/BeamDossier";
 import QrLabels from "./pages/QrLabels";
 import ScanBeam from "./pages/ScanBeam";
 import Tutorial from "./pages/Tutorial";
+import FreshTest from "./pages/FreshTest";
+import BatchPlant from "./pages/BatchPlant";
+import NCRDesk from "./pages/NCR";
 import CommandCenter from "./pages/CommandCenter";
 import OwnerPackages from "./pages/OwnerPackages";
 import Finance from "./pages/Finance";
@@ -107,6 +110,9 @@ function AppRoutes() {
       <Route path="/twin" element={<Protected><DigitalTwin /></Protected>} />
       <Route path="/drawings" element={<Protected><Drawings /></Protected>} />
       <Route path="/inspection" element={<Protected><NewInspection /></Protected>} />
+      <Route path="/fresh" element={<Protected><FreshTest /></Protected>} />
+      <Route path="/batch" element={<Protected><BatchPlant /></Protected>} />
+      <Route path="/ncr" element={<Protected><NCRDesk /></Protected>} />
       <Route path="/tension" element={<Protected><TensionCalculator /></Protected>} />
       <Route path="/camber" element={<Protected><CamberSheet /></Protected>} />
       <Route path="/finish" element={<Protected><FinishSheet /></Protected>} />

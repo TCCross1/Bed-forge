@@ -4,6 +4,7 @@ import Layout, { PageHeader, Field, inputClass, cardClass, ARMeasureLink } from 
 import { toast } from "sonner";
 import { CheckCircle2, XCircle, PauseCircle, ChevronRight, ChevronLeft, Loader2 } from "lucide-react";
 import { pickBeamId, useBeamQuery } from "../lib/useBeamQuery";
+import { toastNcrFromResponse } from "../lib/ncr";
 
 const SECTIONS = [
   {
@@ -161,7 +162,7 @@ export default function NewInspection() {
     }
     setSaving(true);
     try {
-      await api.post("/inspections", {
+      const { data } = await api.post("/inspections", {
         beam_id: beamId,
         section: section.key,
         status,
@@ -176,6 +177,7 @@ export default function NewInspection() {
       else await api.patch(`/beams/${beamId}`, { qc_state: step === SECTIONS.length - 1 ? "passed" : "in_progress" });
 
       toast.success(`${section.label} recorded — ${status.toUpperCase()}`);
+      toastNcrFromResponse(data);
       if (step < SECTIONS.length - 1) setStep(step + 1);
       else toast.success("Inspection complete for this beam");
     } catch (err) {

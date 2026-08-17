@@ -17,7 +17,7 @@ from override_target import OverrideTargetError, classify_override_target
 from models import (
     OverrideRequest, SecuritySettingsUpdate, UserAdminCreate, UserAdminUpdate, new_id, now_iso,
 )
-from security_core import EXEC_ROLES, ROLES, client_ip, ip_allowed, parse_cidrs, redact_value
+from security_core import EXEC_ROLES, ROLES, SUPERVISOR_ROLES, client_ip, ip_allowed, parse_cidrs, redact_value
 from sessions import revoke_user_sessions
 
 logger = logging.getLogger(__name__)
@@ -35,6 +35,7 @@ EXPORT_COLLECTIONS = {
     "pre_delivery": "pre_delivery",
     "strand_rolls": "strand_rolls",
     "anomalies": "anomalies",
+    "ncrs": "ncrs",
     "audit_log": "audit_log",
     "overrides": "overrides",
 }
@@ -275,11 +276,24 @@ async def resolve_override_target(kind: str, raw: str) -> str:
 
 
 @router.post("/override")
-async def create_override(payload: OverrideRequest, request: Request, user=Depends(office_guard)):
+async def create_override(payload: OverrideRequest, request: Request, user=Depends(require_roles("qc_supervisor", "admin", "executive"))):
     try:
         kind = payload.kind.strip()
-        if kind not in ("strand_tension", "spec_unlock", "qc_force"):
+        role = user.get("role") or ""
+        if kind not in ("strand_tension", "spec_unlock", "qc_force", "release_strength"):
             raise HTTPException(status_code=400, detail="Unknown override kind")
+        if kind == "strand_tension" and role not in EXEC_ROLES:
+            raise HTTPException(status_code=403, detail="QC supervisors cannot issue strand-tension overrides")
+        if kind in ("spec_unlock", "qc_force") and role not in EXEC_ROLES:
+            raise HTTPException(status_code=403, detail="Only a plant manager can issue this override")
+        if kind == "release_strength" and role not in SUPERVISOR_ROLES:
+            raise HTTPException(status_code=403, detail="QC supervisor or plant manager required for release-strength override")
+        if kind in ("strand_tension", "spec_unlock", "qc_force"):
+            settings = await db.company_settings.find_one({"id": "plant"}, {"_id": 0}) or {}
+            if settings.get("office_ip_enforced"):
+                ip = client_ip(request)
+                if not ip_allowed(ip, settings.get("ip_allowlist") or []):
+                    raise HTTPException(status_code=403, detail="Office IP required for this override")
         if not payload.reason.strip():
             raise HTTPException(status_code=400, detail="A written reason is required")
         target_id = await resolve_override_target(kind, payload.target_id)

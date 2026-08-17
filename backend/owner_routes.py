@@ -376,12 +376,14 @@ async def finance_signals(user=Depends(EXEC)):
             if not pbeams:
                 continue
             forecasts.extend(await forecast_for_pour(pour, pbeams, mix))
+        ncrs = await db.ncrs.find({}, {"_id": 0}).to_list(2000)
         payload = build_finance_signals(
             beams=beams,
             anomalies=anomalies,
             assignments=assignments,
             forecasts=forecasts,
             settings=mix["raw"],
+            ncrs=ncrs,
         )
         logger.info("finance signals ncr=%s at_risk=%s by=%s", payload.get("open_ncrs"), payload.get("total_quality_dollars_at_risk"), user.get("email"))
         return payload

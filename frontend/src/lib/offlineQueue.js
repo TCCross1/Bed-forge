@@ -2,7 +2,7 @@
 
 export const OFFLINE_DB = "bedforge-offline";
 export const OFFLINE_STORE = "queue";
-export const FIELD_WRITE_RE = /\/(inspections|tension-reports|camber-readings|finish-sheets|pre-delivery|ar-measurements|ar-tape-runs|maturity\/samples|strand-rolls)$/;
+export const FIELD_WRITE_RE = /\/(inspections|tension-reports|camber-readings|finish-sheets|pre-delivery|ar-measurements|ar-tape-runs|maturity\/samples|strand-rolls|fresh-tests|batches|mix-designs)$/;
 
 function openDb() {
   return new Promise((resolve, reject) => {
@@ -103,6 +103,11 @@ export function isFieldWrite(url = "", method = "get") {
   if (/\/beams\/[^/]+$/.test(path) && verb === "patch") return true;
   if (path.includes("/ar-tape-runs")) return true;
   if (path.includes("/cylinders/") && path.includes("/crush")) return true;
+  if (/\/batches\/[^/]+$/.test(path) && verb === "patch") return true;
+  if (/\/batches\/[^/]+\/link-qc$/.test(path)) return true;
+  if (/\/ncrs$/.test(path) && verb === "post") return true;
+  if (/\/ncrs\/[^/]+$/.test(path) && verb === "patch") return true;
+  if (/\/ncrs\/[^/]+\/transition$/.test(path) && verb === "post") return true;
   return false;
 }
 
@@ -199,6 +204,7 @@ export async function flushQueue(api) {
         if (shouldQueueError(err)) break;
         const status = err.response?.status;
         if (status === 409) {
+          await removeAction(item.id);
           continue;
         }
         item.tries = (item.tries || 0) + 1;

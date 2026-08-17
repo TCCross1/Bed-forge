@@ -217,6 +217,8 @@ async def assemble_dossier(beam: dict, *, full: bool) -> dict:
     if beam.get("bed_id"):
         tension = await db.tension_reports.find({"bed_id": beam["bed_id"]}, {"_id": 0}).to_list(50)
     cylinders = await db.cylinders.find({"beam_marks": beam.get("mark")}, {"_id": 0}).to_list(50)
+    from ncr import public_ncr
+    ncr_rows = await db.ncrs.find({"beam_ids": beam_id}, {"_id": 0}).sort("created_at", -1).to_list(100)
     out.update({
         "anomalies": await db.anomalies.find({"beam_id": beam_id}, {"_id": 0}).to_list(500),
         "inspections": await db.inspections.find({"beam_id": beam_id}, {"_id": 0}).to_list(500),
@@ -234,6 +236,15 @@ async def assemble_dossier(beam: dict, *, full: bool) -> dict:
         },
         "tension_reports": tension,
         "cylinders": cylinders,
+        "fresh_tests": await db.fresh_concrete_tests.find(
+            {"$or": ([{"beam_ids": beam_id}] + ([{"pour_id": beam["pour_id"]}] if beam.get("pour_id") else []))},
+            {"_id": 0},
+        ).sort("created_at", -1).to_list(100),
+        "batch_records": await db.batch_records.find(
+            {"$or": ([{"beam_ids": beam_id}] + ([{"pour_id": beam["pour_id"]}] if beam.get("pour_id") else []))},
+            {"_id": 0},
+        ).sort("batched_at", -1).to_list(50),
+        "ncrs": [public_ncr(r) for r in ncr_rows],
     })
     return out
 

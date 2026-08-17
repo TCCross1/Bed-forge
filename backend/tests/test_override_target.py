@@ -25,6 +25,12 @@ def test_qc_force_falls_back_to_beam_mark():
     assert lookup["alt_query"] == {"mark": "L25390-B1"}
 
 
+def test_release_strength_targets_beam_mark():
+    lookup = classify_override_target("release_strength", "L25390-B1")
+    assert lookup["collection"] == "beams"
+    assert lookup["alt_query"]["mark"] == "L25390-B1"
+
+
 def test_empty_target_rejected():
     try:
         classify_override_target("strand_tension", "  ")
