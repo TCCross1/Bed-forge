@@ -147,8 +147,13 @@ class TestBeamOps:
     @pytest.fixture(scope="class")
     def some_beam_id(self):
         # Fetch a beam via list
-        r = requests.post(f"{API}/auth/login", json={"email": ADMIN[0], "password": ADMIN[1]}, timeout=30)
-        tok = r.json()["access_token"]
+        tok = None
+        for email, password in [ADMIN, ADMIN_FALLBACK]:
+            r = requests.post(f"{API}/auth/login", json={"email": email, "password": password}, timeout=30)
+            if r.status_code == 200:
+                tok = r.json()["access_token"]
+                break
+        assert tok, "unable to get admin token for beam ops"
         h = {"Authorization": f"Bearer {tok}"}
         beams = requests.get(f"{API}/beams", headers=h, timeout=30).json()
         assert beams, "no beams seeded"

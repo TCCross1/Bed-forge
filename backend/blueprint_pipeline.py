@@ -175,6 +175,7 @@ def _product_family(page_text: List[str], hint: str = "") -> BlueprintField:
 
 def _find_all_stations(page_text: List[str], label: str, type_name: str, extra: Optional[Dict[str, Any]] = None) -> BlueprintField:
     items: List[Dict[str, Any]] = []
+    seen = set()
     patterns = [
         rf"{label}[^A-Z0-9]{{0,8}}(?:AT|@)\s*(\d+\s*'\s*\d+(?:\.\d+)?(?:\"|IN)?)",
         rf"{label}[^A-Z0-9]{{0,8}}(?:AT|@)\s*(\d+(?:\.\d+)?)\s*(FT|FEET|')",
@@ -185,12 +186,15 @@ def _find_all_stations(page_text: List[str], label: str, type_name: str, extra: 
             for match in rx.finditer(text or ""):
                 station = _parse_feet_inches("".join(group or "" for group in match.groups()))
                 if station is not None:
+                    dedupe_key = (round(station, 3), type_name, page_index)
+                    if dedupe_key in seen:
+                        continue
+                    seen.add(dedupe_key)
                     item = {"x_ft": round(station, 3), "type": type_name}
                     if extra:
                         item.update(extra)
-                    if item not in items:
-                        item["_source_page"] = page_index
-                        items.append(item)
+                    item["_source_page"] = page_index
+                    items.append(item)
     if not items:
         return _blank_field(f"No deterministic {type_name.lower()} station callouts were found in extractable text.")
     source_page = items[0].pop("_source_page", None)
