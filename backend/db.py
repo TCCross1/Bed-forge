@@ -2,7 +2,6 @@ import copy
 import logging
 import os
 from collections import defaultdict
-from motor.motor_asyncio import AsyncIOMotorClient
 
 logger = logging.getLogger(__name__)
 
@@ -96,6 +95,8 @@ mongo_url = os.environ.get("MONGO_URL")
 db_name = os.environ.get("DB_NAME", "bedforge_dev")
 
 if mongo_url:
+    from motor.motor_asyncio import AsyncIOMotorClient
+
     client = AsyncIOMotorClient(mongo_url)
     db = client[db_name]
 else:

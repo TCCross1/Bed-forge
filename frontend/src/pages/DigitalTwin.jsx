@@ -18,7 +18,7 @@ export default function DigitalTwin() {
   useEffect(() => {
     api.get("/beams").then((r) => {
       setBeams(r.data);
-      if (!selectedId && r.data.length) setSelectedId(r.data[0].id);
+      setSelectedId((current) => current || r.data[0]?.id || "");
     });
   }, []);
 
