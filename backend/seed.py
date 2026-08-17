@@ -339,3 +339,20 @@ async def seed_company():
     except Exception:
         logger.exception("seed_company failed")
 
+
+async def seed_beam_qr_tokens():
+    """Issue a permanent QR token for any beam that was created before identity labels existed."""
+    from beam_qr import ensure_beam_token
+
+    try:
+        missing = await db.beams.find(
+            {"$or": [{"qr_token": {"$exists": False}}, {"qr_token": ""}, {"qr_token": None}]},
+            {"_id": 0},
+        ).to_list(5000)
+        for beam in missing:
+            await ensure_beam_token(beam)
+        if missing:
+            logger.info("backfilled beam QR tokens count=%s", len(missing))
+    except Exception:
+        logger.exception("seed_beam_qr_tokens failed")
+

@@ -158,11 +158,6 @@ async def capture_strand_tension(
             or (spec.get("geometry") or {}).get("length_ft")
             or 0
         )
-            payload.bed_length_ft
-            or (bed or {}).get("length_ft")
-            or (spec.get("geometry") or {}).get("length_ft")
-            or 0
-        )
         force = float(payload.jacking_force_kip or strand.get("jacking_force") or strand.get("jacking_kip") or 31.0)
         result = strand_capture_result(
             jacking_force_kip=force,

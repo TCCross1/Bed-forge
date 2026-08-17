@@ -62,6 +62,23 @@ async def get_current_user(request: Request) -> dict:
         raise HTTPException(status_code=401, detail="Invalid token")
 
 
+async def get_optional_user(request: Request):
+    """Return the user when a valid JWT is present; otherwise None. Never 401."""
+    token = request.cookies.get("access_token")
+    if not token:
+        auth_header = request.headers.get("Authorization", "")
+        if auth_header.startswith("Bearer "):
+            token = auth_header[7:]
+    if not token:
+        return None
+    try:
+        payload = jwt.decode(token, get_jwt_secret(), algorithms=[JWT_ALGORITHM])
+        user = await db.users.find_one({"id": payload["sub"]}, {"_id": 0})
+        return user
+    except (jwt.ExpiredSignatureError, jwt.InvalidTokenError, Exception):
+        return None
+
+
 def require_roles(*roles):
     async def checker(user: dict = Depends(get_current_user)):
         if user["role"] not in roles:

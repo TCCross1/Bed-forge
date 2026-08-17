@@ -148,6 +148,14 @@ export default function Dashboard() {
               </button>
             </div>
             <button
+              type="button"
+              data-testid="board-scan-qr"
+              onClick={() => navigate("/scan")}
+              className="min-h-12 px-4 border border-[#1C2230] rounded-none flex items-center gap-2 text-sm font-semibold uppercase tracking-wider hover:border-primary hover:text-primary transition-colors duration-100"
+            >
+              <ScanLine className="w-4 h-4" /> Scan
+            </button>
+            <button
               data-testid="refresh-dashboard"
               onClick={load}
               className="min-h-12 px-4 border border-[#1C2230] rounded-none flex items-center gap-2 text-sm font-semibold uppercase tracking-wider hover:border-primary hover:text-primary transition-colors duration-100"

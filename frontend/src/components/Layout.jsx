@@ -17,6 +17,7 @@ import {
   ScanLine,
   ScanBarcode,
   Tags,
+  QrCode,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { useDevice } from "../context/DeviceContext";
@@ -80,6 +81,8 @@ const SECONDARY_NAV = [
   { to: "/finish", label: "Finish", icon: Sparkles, testid: "nav-finish" },
   { to: "/release", label: "Release", icon: Truck, testid: "nav-release" },
   { to: "/measure", label: "AR Measure", icon: ScanLine, testid: "nav-measure" },
+  { to: "/scan", label: "Scan QR", icon: ScanLine, testid: "nav-scan" },
+  { to: "/qr", label: "QR Labels", icon: QrCode, testid: "nav-qr" },
 ];
 
 const COMMAND_SECONDARY = [
@@ -89,6 +92,8 @@ const COMMAND_SECONDARY = [
   { to: "/finish", label: "Finish", icon: Sparkles, testid: "nav-finish" },
   { to: "/release", label: "Release", icon: Truck, testid: "nav-release" },
   { to: "/measure", label: "AR Review", icon: ScanLine, testid: "nav-measure" },
+  { to: "/scan", label: "Scan QR", icon: ScanLine, testid: "nav-scan" },
+  { to: "/qr", label: "QR Labels", icon: QrCode, testid: "nav-qr" },
 ];
 
 function linkClass(isActive) {
@@ -143,11 +148,13 @@ export default function Layout({ children }) {
   const field = device.field;
   const secondary = command ? COMMAND_SECONDARY : SECONDARY_NAV;
   const fieldMore = [
+    { to: "/scan", label: "Scan QR", icon: ScanLine, testid: "nav-scan" },
+    { to: "/qr", label: "QR Labels", icon: QrCode, testid: "nav-qr" },
     { to: "/inspection", label: "Inspect", icon: ClipboardCheck, testid: "nav-inspection" },
     { to: "/tags", label: "Tags", icon: Tags, testid: "nav-tags" },
     { to: "/forms", label: "Forms", icon: FileSpreadsheet, testid: "nav-forms" },
     { to: "/measure", label: "AR Measure", icon: ScanLine, testid: "nav-measure" },
-    ...SECONDARY_NAV.filter((i) => i.to !== "/measure"),
+    ...SECONDARY_NAV.filter((i) => !["/measure", "/scan", "/qr"].includes(i.to)),
   ];
 
   const signOut = () => {

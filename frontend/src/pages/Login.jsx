@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { formatApiErrorDetail } from "../lib/api";
 import { BrandLockup, BrandMark } from "../components/Layout";
@@ -17,10 +17,16 @@ export default function Login() {
   const { login } = useAuth();
   const company = useCompany();
   const navigate = useNavigate();
+  const [params] = useSearchParams();
   const [email, setEmail] = useState("tccrossmusic@gmail.com");
   const [password, setPassword] = useState("BedForge2026!");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+
+  const nextPath = () => {
+    const next = params.get("next") || "/";
+    return next.startsWith("/") && !next.startsWith("//") ? next : "/";
+  };
 
   const submit = async (e) => {
     e.preventDefault();
@@ -28,7 +34,7 @@ export default function Login() {
     setLoading(true);
     try {
       await login(email, password);
-      navigate("/");
+      navigate(nextPath());
     } catch (err) {
       console.error("[login] failed", err);
       setError(formatApiErrorDetail(err.response?.data?.detail) || err.message);

@@ -1,5 +1,5 @@
 import "./App.css";
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
 import { AuthProvider, useAuth } from "./context/AuthContext";
 import { DeviceProvider } from "./context/DeviceContext";
 import { SyncProvider } from "./context/SyncContext";
@@ -19,10 +19,19 @@ import BedPlanner from "./pages/BedPlanner";
 import StrandRolls from "./pages/StrandRolls";
 import CylinderTags from "./pages/CylinderTags";
 import ARMeasure from "./pages/ARMeasure";
+import BeamDossier from "./pages/BeamDossier";
+import QrLabels from "./pages/QrLabels";
+import ScanBeam from "./pages/ScanBeam";
 import { CompanyProvider } from "./context/CompanyContext";
+
+function safeNextPath(search = "") {
+  const next = new URLSearchParams(search).get("next") || "/";
+  return next.startsWith("/") && !next.startsWith("//") ? next : "/";
+}
 
 function Protected({ children }) {
   const { user, ready } = useAuth();
+  const location = useLocation();
   if (!ready) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-[#0A0C10]">
@@ -30,19 +39,25 @@ function Protected({ children }) {
       </div>
     );
   }
-  if (!user) return <Navigate to="/login" replace />;
+  if (!user) {
+    const next = `${location.pathname}${location.search || ""}`;
+    return <Navigate to={`/login?next=${encodeURIComponent(next)}`} replace />;
+  }
   return children;
 }
 
-function AppRoutes() {
+function LoginOrHome() {
   const { user, ready } = useAuth();
+  const location = useLocation();
+  if (ready && user) return <Navigate to={safeNextPath(location.search)} replace />;
+  return <Login />;
+}
 
+function AppRoutes() {
   return (
     <Routes>
-      <Route
-        path="/login"
-        element={ready && user ? <Navigate to="/" replace /> : <Login />}
-      />
+      <Route path="/b/:token" element={<BeamDossier />} />
+      <Route path="/login" element={<LoginOrHome />} />
       <Route path="/" element={<Protected><Dashboard /></Protected>} />
       <Route path="/planner" element={<Protected><BedPlanner /></Protected>} />
       <Route path="/twin" element={<Protected><DigitalTwin /></Protected>} />
@@ -55,6 +70,8 @@ function AppRoutes() {
       <Route path="/forms" element={<Protected><FormsExport /></Protected>} />
       <Route path="/rolls" element={<Protected><StrandRolls /></Protected>} />
       <Route path="/tags" element={<Protected><CylinderTags /></Protected>} />
+      <Route path="/qr" element={<Protected><QrLabels /></Protected>} />
+      <Route path="/scan" element={<Protected><ScanBeam /></Protected>} />
       <Route path="/measure" element={<Protected><ARMeasure /></Protected>} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

@@ -23,13 +23,15 @@ from models import (
 )
 from auth import router as auth_router, get_current_user, seed_admin
 from tension import run_tension_calc, calc_theoretical_elongation, evaluate_tension
-from seed import seed_plant, seed_l25390, seed_bed_assignments, seed_strand_rolls, seed_company
+from seed import seed_plant, seed_l25390, seed_bed_assignments, seed_strand_rolls, seed_company, seed_beam_qr_tokens
 from blueprint_routes import router as blueprint_router
 from bed_routes import router as bed_router
 from tension_routes import router as tension_router
 from ar_routes import router as ar_router, emit_sync_event
 from bed_layout import covers, map_production_status
 from strand_roll_routes import router as strand_roll_router, assert_tension_allowed
+from beam_qr import assemble_dossier
+from beam_qr_routes import router as beam_qr_router
 from company_routes import router as company_router
 from cylinder_routes import router as cylinder_router
 import excel_export
@@ -241,35 +243,7 @@ async def get_beam(beam_id: str, user=Depends(get_current_user)):
         beam = await db.beams.find_one({"id": beam_id}, {"_id": 0})
         if not beam:
             raise HTTPException(status_code=404, detail="Beam not found")
-        beam["anomalies"] = await db.anomalies.find({"beam_id": beam_id}, {"_id": 0}).to_list(500)
-        beam["inspections"] = await db.inspections.find({"beam_id": beam_id}, {"_id": 0}).to_list(500)
-        beam["camber_readings"] = await db.camber_readings.find({"beam_id": beam_id}, {"_id": 0}).to_list(500)
-        beam["finish_sheets"] = await db.finish_sheets.find({"beam_id": beam_id}, {"_id": 0}).to_list(500)
-        beam["pre_delivery"] = await db.pre_delivery.find({"beam_id": beam_id}, {"_id": 0}).to_list(500)
-        spec = None
-        if beam.get("spec_id"):
-            spec = await db.beam_specs.find_one({"id": beam["spec_id"]}, {"_id": 0})
-        if not spec:
-            latest = await db.beam_specs.find({"beam_id": beam_id}, {"_id": 0}).sort("created_at", -1).to_list(1)
-            spec = latest[0] if latest else None
-        beam["spec"] = spec
-        if spec:
-            beam["measurements"] = await db.spec_measurements.find({"spec_id": spec["id"]}, {"_id": 0}).to_list(500)
-        beam["ar_measurements"] = await db.ar_measurements.find({"beam_id": beam_id}, {"_id": 0, "photo_data": 0}).sort("created_at", -1).to_list(100)
-        recs = await db.strand_roll_assignments.find({"beam_ids": beam_id}, {"_id": 0}).to_list(50)
-        if not recs and beam.get("bed_id"):
-            recs = await db.strand_roll_assignments.find({"bed_id": beam["bed_id"]}, {"_id": 0}).to_list(50)
-        roll_ids = [r.get("roll_id") for r in recs if r.get("roll_id")]
-        rolls = await db.strand_rolls.find({"id": {"$in": roll_ids}}, {"_id": 0, "raw_text": 0}).to_list(50) if roll_ids else []
-        beam["strand_rolls"] = rolls
-        beam["traceability"] = {
-            "heat_numbers": [r.get("heat_number") for r in rolls if r.get("heat_number")],
-            "reel_numbers": [r.get("reel_number") for r in rolls if r.get("reel_number")],
-            "chain": "Beam → strands → Strand Roll → Heat Number → Mill Test Certificate",
-        }
-        if beam.get("product_type_id"):
-            beam["product_type"] = await db.product_types.find_one({"id": beam["product_type_id"]}, {"_id": 0})
-        return beam
+        return await assemble_dossier(beam, full=True)
     except HTTPException:
         raise
     except Exception:
@@ -557,6 +531,7 @@ app.include_router(bed_router)
 app.include_router(tension_router)
 app.include_router(ar_router)
 app.include_router(strand_roll_router)
+app.include_router(beam_qr_router)
 app.include_router(company_router)
 app.include_router(cylinder_router)
 
@@ -603,6 +578,11 @@ async def startup():
     await seed_l25390()
     await seed_bed_assignments()
     await seed_strand_rolls()
+    await seed_beam_qr_tokens()
+    try:
+        await db.beams.create_index("qr_token", unique=True, sparse=True)
+    except Exception:
+        logger.exception("qr_token unique index failed")
     logger.info("BedForge QC startup complete.")
 
 

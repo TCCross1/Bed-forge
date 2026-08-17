@@ -9,7 +9,7 @@ import { canPlan, qcState } from "../lib/constants";
 import { isoToday } from "../lib/bedLayout";
 import { ELEMENT_COLORS, KIND_LABELS, hardwareColor, latestMeasurements } from "../lib/beamSpec";
 import { toast } from "sonner";
-import { Loader2, MapPin, Ruler, Upload, CalendarDays, ScanLine } from "lucide-react";
+import { Loader2, MapPin, Ruler, Upload, CalendarDays, ScanLine, QrCode } from "lucide-react";
 
 export default function DigitalTwin() {
   const { user } = useAuth();
@@ -180,6 +180,24 @@ export default function DigitalTwin() {
         right={
           <div className="flex flex-wrap gap-2 justify-end">
             <ARMeasureLink beamId={selectedId} purpose="level" />
+            {beam?.qr_token && (
+              <Link
+                to={`/b/${beam.qr_token}`}
+                className="min-h-12 px-4 border border-[#1C2230] rounded-none flex items-center gap-2 text-sm font-semibold uppercase tracking-wider hover:border-primary hover:text-primary"
+                data-testid="twin-dossier-link"
+              >
+                <QrCode className="w-4 h-4" /> Dossier
+              </Link>
+            )}
+            {selectedId && (
+              <Link
+                to={`/qr?beam=${selectedId}`}
+                className="min-h-12 px-4 border border-[#1C2230] rounded-none flex items-center gap-2 text-sm font-semibold uppercase tracking-wider hover:border-primary hover:text-primary"
+                data-testid="twin-qr-reprint"
+              >
+                <QrCode className="w-4 h-4" /> QR
+              </Link>
+            )}
             <Link
               to={selectedId ? `/planner?beam=${selectedId}` : "/planner"}
               className="min-h-12 px-4 border border-[#1C2230] rounded-none flex items-center gap-2 text-sm font-semibold uppercase tracking-wider hover:border-primary hover:text-primary"

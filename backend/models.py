@@ -1,4 +1,5 @@
 import uuid
+import secrets
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any, List
 from pydantic import BaseModel, Field, EmailStr
@@ -10,6 +11,10 @@ def now_iso() -> str:
 
 def new_id() -> str:
     return str(uuid.uuid4())
+
+
+def new_qr_token() -> str:
+    return secrets.token_hex(8)
 
 
 # ---------- Auth ----------
@@ -185,6 +190,8 @@ class Beam(BaseModel):
     status: str = "casting"
     qc_state: str = "pending"
     production_status: str = "planned"
+    qr_token: str = Field(default_factory=new_qr_token)
+    qr_created_at: str = Field(default_factory=now_iso)
     created_at: str = Field(default_factory=now_iso)
 
 
@@ -208,6 +215,12 @@ class BeamUpdate(BaseModel):
     production_status: Optional[str] = None
     pour_id: Optional[str] = None
     job_id: Optional[str] = None
+
+
+class QrLabelRequest(BaseModel):
+    pour_id: Optional[str] = None
+    job_id: Optional[str] = None
+    beam_ids: Optional[List[str]] = None
 
 
 # ---------- Inspections (QIR sections) ----------
