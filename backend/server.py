@@ -6,6 +6,7 @@ load_dotenv(ROOT_DIR / ".env")
 
 import os
 import logging
+from datetime import datetime, timezone
 from fastapi import FastAPI, APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from starlette.middleware.cors import CORSMiddleware
@@ -22,8 +23,10 @@ from models import (
 )
 from auth import router as auth_router, get_current_user, seed_admin
 from tension import run_tension_calc, calc_theoretical_elongation, evaluate_tension
-from seed import seed_plant, seed_l25390
+from seed import seed_plant, seed_l25390, seed_bed_assignments
 from blueprint_routes import router as blueprint_router
+from bed_routes import router as bed_router
+from bed_layout import covers, map_production_status
 import excel_export
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
@@ -140,19 +143,47 @@ async def dashboard(user=Depends(get_current_user)):
         pours = await db.pours.find({}, {"_id": 0}).to_list(500)
         pour_map = {p["id"]: p for p in pours}
 
+        today = datetime.now(timezone.utc).date().isoformat()
+        assignments = await db.bed_assignments.find({}, {"_id": 0}).to_list(2000)
+        assign_by_bed = {}
+        for rec in assignments:
+            if covers(rec, today):
+                assign_by_bed.setdefault(rec["bed_id"], []).append(rec)
+        for recs in assign_by_bed.values():
+            recs.sort(key=lambda a: a.get("position_on_bed") or 0)
+        beam_map = {b["id"]: b for b in beams}
+
         beams_by_bed = {}
         for b in beams:
+            if not b.get("bed_id"):
+                continue
             beams_by_bed.setdefault(b["bed_id"], []).append(b)
 
         bed_cards = []
         for bed in beds:
-            bbeams = beams_by_bed.get(bed["id"], [])
+            recs = assign_by_bed.get(bed["id"], [])
+            if recs:
+                bbeams = []
+                for rec in recs:
+                    beam = beam_map.get(rec["beam_id"])
+                    if not beam:
+                        continue
+                    bbeams.append({
+                        **beam,
+                        "production_status": rec.get("production_status") or beam.get("production_status") or map_production_status(beam.get("status"), beam.get("qc_state")),
+                        "station_ft": rec.get("station_ft"),
+                        "assignment_id": rec.get("id"),
+                        "position_on_bed": rec.get("position_on_bed") or beam.get("position_on_bed"),
+                    })
+            else:
+                bbeams = sorted(beams_by_bed.get(bed["id"], []), key=lambda b: b.get("position_on_bed") or 0)
             pour = pour_map.get(bed.get("current_pour_id"))
             bed_cards.append({
                 **bed,
                 "beam_count": len(bbeams),
                 "beams": bbeams,
                 "pour_number": pour["pour_number"] if pour else None,
+                "layout_date": today,
             })
 
         total_beams = len(beams)
@@ -490,6 +521,7 @@ async def export_form(form_type: str, beam_id: str = None, user=Depends(get_curr
 app.include_router(auth_router)
 app.include_router(api)
 app.include_router(blueprint_router)
+app.include_router(bed_router)
 
 app.add_middleware(
     CORSMiddleware,
@@ -512,9 +544,12 @@ async def startup():
     await db.beam_specs.create_index("job_number")
     await db.blueprints.create_index("beam_id")
     await db.spec_measurements.create_index("spec_id")
+    await db.bed_assignments.create_index([("bed_id", 1), ("scheduled_date", 1)])
+    await db.bed_assignments.create_index("beam_id")
     await seed_admin()
     await seed_plant()
     await seed_l25390()
+    await seed_bed_assignments()
     logger.info("BedForge QC startup complete.")
 
 

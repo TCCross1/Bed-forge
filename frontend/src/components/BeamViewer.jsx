@@ -3,6 +3,7 @@ import { Canvas } from "@react-three/fiber";
 import { OrbitControls, Environment, Html, ContactShadows } from "@react-three/drei";
 import * as THREE from "three";
 import { hardwareColor, inchesToFt } from "../lib/beamSpec";
+import { COMPACT_HARDWARE_KINDS } from "../lib/bedLayout";
 
 function iBeamShape(geo) {
   const s = new THREE.Shape();
@@ -48,7 +49,7 @@ function boxBeamShape(geo) {
   return s;
 }
 
-function BeamBody({ geo, onPick }) {
+function BeamBody({ geo, onPick, bodyColor = "#9aa0aa", highlighted = false }) {
   const length = geo.length_ft;
   const shape = useMemo(
     () => (geo.twin_type === "box_beam" ? boxBeamShape(geo) : iBeamShape(geo)),
@@ -70,7 +71,13 @@ function BeamBody({ geo, onPick }) {
       onPointerOver={() => { document.body.style.cursor = "crosshair"; }}
       onPointerOut={() => { document.body.style.cursor = "auto"; }}
     >
-      <meshStandardMaterial color="#9aa0aa" roughness={0.86} metalness={0.04} />
+      <meshStandardMaterial
+        color={bodyColor}
+        roughness={highlighted ? 0.45 : 0.86}
+        metalness={highlighted ? 0.18 : 0.04}
+        emissive={highlighted ? bodyColor : "#000000"}
+        emissiveIntensity={highlighted ? 0.28 : 0}
+      />
     </mesh>
   );
 }
@@ -262,19 +269,51 @@ function EndStamp({ label, z, depth }) {
   );
 }
 
-function SpecScene({ spec, anomalies, pickPos, onPick, selectedId, onSelectHardware, measurementMap }) {
+function MarkedEndArrow({ depth }) {
+  return (
+    <group position={[0, depth + 0.35, 0.35]}>
+      <mesh rotation={[-Math.PI / 2, 0, 0]}>
+        <coneGeometry args={[0.22, 0.7, 8]} />
+        <meshStandardMaterial color="#2979FF" emissive="#2979FF" emissiveIntensity={0.45} />
+      </mesh>
+    </group>
+  );
+}
+
+export function SpecBeam({
+  spec,
+  compact = false,
+  bodyColor = "#9aa0aa",
+  highlighted = false,
+  onClick,
+  mark,
+  selectedId,
+  onSelectHardware,
+  measurementMap = {},
+  anomalies = [],
+  pickPos,
+  onPick,
+}) {
   const geo = spec.geometry;
   const length = geo.length_ft;
   const depth = inchesToFt(geo.depth_in);
+  const hardware = compact
+    ? (spec.hardware || []).filter((item) => COMPACT_HARDWARE_KINDS.includes(item.kind))
+    : (spec.hardware || []);
 
   return (
-    <group>
-      <BeamBody geo={geo} onPick={onPick} />
-      {(spec.strands || []).map((s) => (
+    <group
+      onClick={(e) => {
+        e.stopPropagation();
+        if (onClick) onClick(e);
+      }}
+    >
+      <BeamBody geo={geo} onPick={onPick || onClick} bodyColor={bodyColor} highlighted={highlighted} />
+      {!compact && (spec.strands || []).map((s) => (
         <StrandRun key={s.id} strand={s} length={length} />
       ))}
-      <Stirrups zones={spec.stirrup_zones} geo={geo} />
-      {(spec.hardware || []).map((item) => (
+      {!compact && <Stirrups zones={spec.stirrup_zones} geo={geo} />}
+      {hardware.map((item) => (
         <HardwareMesh
           key={item.id}
           item={item}
@@ -299,9 +338,41 @@ function SpecScene({ spec, anomalies, pickPos, onPick, selectedId, onSelectHardw
           </mesh>
         );
       })}
-      <EndStamp label={spec.marked_end_id || "MARKED END"} z={0.2} depth={depth} />
-      <EndStamp label={spec.unmarked_end_id || "UNMARKED END"} z={length - 0.2} depth={depth} />
+      <MarkedEndArrow depth={depth} />
+      {!compact && <EndStamp label={spec.marked_end_id || "MARKED END"} z={0.2} depth={depth} />}
+      {!compact && <EndStamp label={spec.unmarked_end_id || "UNMARKED END"} z={length - 0.2} depth={depth} />}
+      {compact && mark && (
+        <Html position={[0, depth + 1.1, length / 2]} center>
+          <div style={{
+            background: "#0F1218",
+            border: highlighted ? "1px solid #FFD600" : "1px solid #1C2230",
+            color: highlighted ? "#FFD600" : "#FFFFFF",
+            fontFamily: "JetBrains Mono, monospace",
+            fontSize: 10,
+            padding: "3px 7px",
+            whiteSpace: "nowrap",
+          }}>
+            {mark} · ME
+          </div>
+        </Html>
+      )}
     </group>
+  );
+}
+
+function SpecScene({ spec, anomalies, pickPos, onPick, selectedId, onSelectHardware, measurementMap, bodyColor, compact }) {
+  return (
+    <SpecBeam
+      spec={spec}
+      compact={compact}
+      bodyColor={bodyColor}
+      anomalies={anomalies}
+      pickPos={pickPos}
+      onPick={onPick}
+      selectedId={selectedId}
+      onSelectHardware={onSelectHardware}
+      measurementMap={measurementMap}
+    />
   );
 }
 
@@ -341,6 +412,8 @@ export default function BeamViewer({
   selectedId,
   onSelectHardware,
   measurements = [],
+  compact = false,
+  bodyColor = "#9aa0aa",
 }) {
   const [localPick, setLocalPick] = useState(null);
   const marker = pickPos || localPick;
@@ -372,6 +445,8 @@ export default function BeamViewer({
           {spec ? (
             <SpecScene
               spec={spec}
+              compact={compact}
+              bodyColor={bodyColor}
               anomalies={anomalies}
               pickPos={marker}
               onPick={handlePick}

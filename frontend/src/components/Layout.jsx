@@ -13,6 +13,7 @@ import {
   Menu,
   X,
   Upload,
+  CalendarDays,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { ROLE_LABELS } from "../lib/constants";
@@ -53,6 +54,7 @@ const PRIMARY_NAV = [
 ];
 
 const SECONDARY_NAV = [
+  { to: "/planner", label: "Planner", icon: CalendarDays, testid: "nav-planner" },
   { to: "/drawings", label: "Drawings", icon: Upload, testid: "nav-drawings" },
   { to: "/camber", label: "Camber", icon: Ruler, testid: "nav-camber" },
   { to: "/finish", label: "Finish", icon: Sparkles, testid: "nav-finish" },

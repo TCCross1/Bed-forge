@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime, timezone
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from pydantic import BaseModel, Field, EmailStr
 
 
@@ -98,9 +98,12 @@ class Bed(BaseModel):
     id: str = Field(default_factory=new_id)
     bed_number: int
     name: str
-    length_ft: float = 400.0
+    length_ft: float = 300.0
     status: str = "idle"
     current_pour_id: Optional[str] = None
+    active_beam_id: Optional[str] = None
+    header_label: str = "HEADER / LIVE END"
+    bulkhead_label: str = "BULKHEAD / DEAD END"
     updated_at: str = Field(default_factory=now_iso)
     created_at: str = Field(default_factory=now_iso)
 
@@ -108,6 +111,61 @@ class Bed(BaseModel):
 class BedUpdate(BaseModel):
     status: Optional[str] = None
     current_pour_id: Optional[str] = None
+    active_beam_id: Optional[str] = None
+
+
+PRODUCTION_STATES = ["planned", "forming", "stressed", "poured", "cured", "released"]
+
+
+class BedAssignment(BaseModel):
+    """Authoritative order of a beam on a bed for a scheduled cycle."""
+    id: str = Field(default_factory=new_id)
+    bed_id: str
+    beam_id: str
+    job_id: Optional[str] = None
+    pour_id: Optional[str] = None
+    position_on_bed: int = 1
+    station_ft: float = 0.0
+    marked_end_toward: str = "header"  # header | bulkhead
+    scheduled_date: str
+    scheduled_end_date: Optional[str] = None
+    actual_start: Optional[str] = None
+    actual_end: Optional[str] = None
+    production_status: str = "planned"
+    notes: str = ""
+    created_by: str = ""
+    created_at: str = Field(default_factory=now_iso)
+    updated_at: str = Field(default_factory=now_iso)
+
+
+class BedAssignmentCreate(BaseModel):
+    bed_id: str
+    beam_id: str
+    job_id: Optional[str] = None
+    pour_id: Optional[str] = None
+    position_on_bed: Optional[int] = None
+    marked_end_toward: str = "header"
+    scheduled_date: str
+    scheduled_end_date: Optional[str] = None
+    production_status: Optional[str] = None
+    notes: str = ""
+
+
+class BedAssignmentUpdate(BaseModel):
+    bed_id: Optional[str] = None
+    position_on_bed: Optional[int] = None
+    marked_end_toward: Optional[str] = None
+    scheduled_date: Optional[str] = None
+    scheduled_end_date: Optional[str] = None
+    actual_start: Optional[str] = None
+    actual_end: Optional[str] = None
+    production_status: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class BedReorder(BaseModel):
+    date: str
+    assignment_ids: List[str]
 
 
 # ---------- Beams ----------
@@ -126,6 +184,7 @@ class Beam(BaseModel):
     position_on_bed: int = 1
     status: str = "casting"
     qc_state: str = "pending"
+    production_status: str = "planned"
     created_at: str = Field(default_factory=now_iso)
 
 
@@ -138,11 +197,17 @@ class BeamCreate(BaseModel):
     twin_type: str = "i_beam"
     length_ft: float = 100.0
     position_on_bed: int = 1
+    production_status: str = "planned"
 
 
 class BeamUpdate(BaseModel):
     status: Optional[str] = None
     qc_state: Optional[str] = None
+    bed_id: Optional[str] = None
+    position_on_bed: Optional[int] = None
+    production_status: Optional[str] = None
+    pour_id: Optional[str] = None
+    job_id: Optional[str] = None
 
 
 # ---------- Inspections (QIR sections) ----------

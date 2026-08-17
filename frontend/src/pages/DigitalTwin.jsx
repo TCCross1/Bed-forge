@@ -3,14 +3,19 @@ import { Link, useSearchParams } from "react-router-dom";
 import api, { formatApiErrorDetail } from "../lib/api";
 import Layout, { PageHeader, Field, inputClass, cardClass } from "../components/Layout";
 import BeamViewer from "../components/BeamViewer";
-import { qcState } from "../lib/constants";
+import { useAuth } from "../context/AuthContext";
+import { canPlan, qcState } from "../lib/constants";
+import { isoToday } from "../lib/bedLayout";
 import { ELEMENT_COLORS, KIND_LABELS, hardwareColor, latestMeasurements } from "../lib/beamSpec";
 import { toast } from "sonner";
-import { Loader2, MapPin, Ruler, Upload } from "lucide-react";
+import { Loader2, MapPin, Ruler, Upload, CalendarDays } from "lucide-react";
 
 export default function DigitalTwin() {
+  const { user } = useAuth();
+  const plan = canPlan(user?.role);
   const [params] = useSearchParams();
   const [beams, setBeams] = useState([]);
+  const [beds, setBeds] = useState([]);
   const [selectedId, setSelectedId] = useState(params.get("beam") || "");
   const [beam, setBeam] = useState(null);
   const [pickPos, setPickPos] = useState(null);
@@ -19,6 +24,8 @@ export default function DigitalTwin() {
   const [tab, setTab] = useState("hardware");
   const [selectedHw, setSelectedHw] = useState(null);
   const [measuredFt, setMeasuredFt] = useState("");
+  const [assignBed, setAssignBed] = useState("");
+  const [assignDate, setAssignDate] = useState(isoToday());
 
   useEffect(() => {
     let cancelled = false;
@@ -32,6 +39,16 @@ export default function DigitalTwin() {
         if (cancelled) return;
         console.error("[twin] beams load failed", err);
         toast.error(formatApiErrorDetail(err.response?.data?.detail) || "Failed to load beams");
+      });
+    api.get("/beds")
+      .then((r) => {
+        if (cancelled) return;
+        setBeds(r.data || []);
+        setAssignBed((cur) => cur || r.data?.[0]?.id || "");
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        console.error("[twin] beds load failed", err);
       });
     return () => { cancelled = true; };
   }, []);
@@ -121,6 +138,34 @@ export default function DigitalTwin() {
     }
   };
 
+  const assignToBed = async () => {
+    if (!plan) {
+      toast.error("Supervisors and production can assign beds");
+      return;
+    }
+    if (!selectedId || !assignBed) {
+      toast.error("Select a beam and a bed");
+      return;
+    }
+    setSaving(true);
+    try {
+      await api.post("/bed-assignments", {
+        bed_id: assignBed,
+        beam_id: selectedId,
+        job_id: beam?.job_id,
+        pour_id: beam?.pour_id,
+        scheduled_date: assignDate,
+        marked_end_toward: "header",
+      });
+      toast.success("Beam assigned to bed");
+    } catch (err) {
+      console.error("[twin] assign failed", err);
+      toast.error(formatApiErrorDetail(err.response?.data?.detail) || "Assignment conflict");
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const q = beam ? qcState(beam.qc_state) : null;
 
   return (
@@ -129,12 +174,20 @@ export default function DigitalTwin() {
         title="Digital Twin"
         subtitle={spec ? `${spec.product_name} · ${spec.geometry?.length_ft}' · ${spec.status}` : "Upload a shop drawing to generate a blueprint-accurate twin"}
         right={
-          <Link
-            to="/drawings"
-            className="min-h-12 px-4 border border-[#1C2230] rounded-none flex items-center gap-2 text-sm font-semibold uppercase tracking-wider hover:border-primary hover:text-primary"
-          >
-            <Upload className="w-4 h-4" /> Drawings
-          </Link>
+          <div className="flex gap-2">
+            <Link
+              to={selectedId ? `/planner?beam=${selectedId}` : "/planner"}
+              className="min-h-12 px-4 border border-[#1C2230] rounded-none flex items-center gap-2 text-sm font-semibold uppercase tracking-wider hover:border-primary hover:text-primary"
+            >
+              <CalendarDays className="w-4 h-4" /> Planner
+            </Link>
+            <Link
+              to="/drawings"
+              className="min-h-12 px-4 border border-[#1C2230] rounded-none flex items-center gap-2 text-sm font-semibold uppercase tracking-wider hover:border-primary hover:text-primary"
+            >
+              <Upload className="w-4 h-4" /> Drawings
+            </Link>
+          </div>
         }
       />
       <div className="p-4 sm:p-6 lg:p-8 grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6">
@@ -203,6 +256,32 @@ export default function DigitalTwin() {
         </div>
 
         <div className="space-y-4 sm:space-y-6">
+          <div className={`${cardClass} p-5 sm:p-6 space-y-3`} data-testid="assign-to-bed">
+            <h3 className="font-display font-bold uppercase tracking-wider text-lg">Assign to Bed</h3>
+            <Field label="Casting bed">
+              <select data-testid="twin-assign-bed" value={assignBed} onChange={(e) => setAssignBed(e.target.value)} className={inputClass}>
+                {beds.map((b) => (
+                  <option key={b.id} value={b.id}>Bed {b.bed_number} · {b.length_ft} ft</option>
+                ))}
+              </select>
+            </Field>
+            <Field label="Scheduled date">
+              <input data-testid="twin-assign-date" type="date" value={assignDate} onChange={(e) => setAssignDate(e.target.value)} className={inputClass} />
+            </Field>
+            <button
+              data-testid="twin-assign-btn"
+              type="button"
+              onClick={assignToBed}
+              disabled={saving || !plan}
+              className="w-full min-h-12 bg-primary text-white font-display font-bold uppercase tracking-widest rounded-none hover:bg-white hover:text-black disabled:opacity-60"
+            >
+              {saving ? "Assigning…" : "Assign to Bed"}
+            </button>
+            <Link to={`/planner?beam=${selectedId}&bed=${assignBed}&date=${assignDate}`} className="block text-center text-[10px] font-mono uppercase tracking-widest text-muted-foreground hover:text-primary">
+              Open in bed twin planner
+            </Link>
+          </div>
+
           <div className={`${cardClass} p-2 grid grid-cols-3`}>
             {["hardware", "measure", "anomaly"].map((t) => (
               <button

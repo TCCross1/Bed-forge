@@ -26,3 +26,17 @@ export const QC_STATE_STYLES = {
 
 export const bedState = (s) => BED_STATE_STYLES[s] || BED_STATE_STYLES.idle;
 export const qcState = (s) => QC_STATE_STYLES[s] || QC_STATE_STYLES.pending;
+
+export const PRODUCTION_STATUS_STYLES = {
+  planned: { label: "PLANNED", color: "#8B949E" },
+  forming: { label: "FORMING", color: "#2979FF" },
+  stressed: { label: "STRESSED", color: "#FFD600" },
+  poured: { label: "POURED", color: "#FF9100" },
+  cured: { label: "CURED", color: "#00BCD4" },
+  released: { label: "RELEASED", color: "#00E676" },
+};
+
+export const productionStatus = (s) => PRODUCTION_STATUS_STYLES[s] || PRODUCTION_STATUS_STYLES.planned;
+
+export const PLAN_ROLES = ["admin", "qc_supervisor", "production"];
+export const canPlan = (role) => PLAN_ROLES.includes(role);

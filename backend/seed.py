@@ -1,10 +1,15 @@
 """Idempotent demo data seed: product types, a job/pour, 8 beds, sample beams, anomalies."""
+import logging
+from datetime import datetime, timezone
 from db import db
 from models import (
     ProductType, Job, Pour, Bed, Beam, Anomaly, TensionReport, CamberReading,
-    now_iso,
+    BedAssignment, now_iso,
 )
 from tension import calc_theoretical_elongation, evaluate_tension
+from bed_layout import map_production_status, pack_stations
+
+logger = logging.getLogger(__name__)
 
 
 PRODUCT_TYPES = [
@@ -70,6 +75,7 @@ async def seed_plant():
                 position_on_bed=pos,
                 status=bed.status,
                 qc_state=qc_states[beam_index % len(qc_states)],
+                production_status=map_production_status(bed.status, qc_states[beam_index % len(qc_states)]),
             )
             await db.beams.insert_one(beam.model_dump())
             beam_index += 1
@@ -163,6 +169,78 @@ async def seed_l25390():
         if beam_id:
             await db.beams.update_one({"id": beam_id}, {"$set": {"spec_id": spec.id}})
     except Exception:
-        import logging
-        logging.getLogger(__name__).exception("seed_l25390 failed")
+        logger.exception("seed_l25390 failed")
+
+
+async def seed_bed_assignments():
+    """Idempotent BedAssignment rows for today's plant plus a drag-pool of planned beams."""
+    try:
+        today = datetime.now(timezone.utc).date().isoformat()
+        existing = await db.bed_assignments.count_documents({})
+        beds = await db.beds.find({}, {"_id": 0}).sort("bed_number", 1).to_list(20)
+        beams = await db.beams.find({}, {"_id": 0}).to_list(2000)
+        if existing == 0:
+            by_bed = {}
+            for beam in beams:
+                if not beam.get("bed_id"):
+                    continue
+                by_bed.setdefault(beam["bed_id"], []).append(beam)
+            for bed in beds:
+                occupants = sorted(by_bed.get(bed["id"], []), key=lambda b: b.get("position_on_bed") or 0)
+                lengths = [float(b.get("length_ft") or 0) for b in occupants]
+                try:
+                    stations = pack_stations(bed.get("length_ft") or 300, lengths)
+                except ValueError:
+                    logger.warning("seed layout overflow bed=%s; packing sequentially from header", bed.get("bed_number"))
+                    stations = [8.0]
+                    cursor = 8.0
+                    for length in lengths[1:]:
+                        cursor += length + 2.5
+                        stations.append(round(cursor, 3))
+                active = None
+                for index, beam in enumerate(occupants):
+                    status = map_production_status(beam.get("status"), beam.get("qc_state"))
+                    rec = BedAssignment(
+                        bed_id=bed["id"],
+                        beam_id=beam["id"],
+                        job_id=beam.get("job_id"),
+                        pour_id=beam.get("pour_id"),
+                        position_on_bed=index + 1,
+                        station_ft=stations[index] if index < len(stations) else 8.0,
+                        marked_end_toward="header",
+                        scheduled_date=today,
+                        scheduled_end_date=today,
+                        production_status=status,
+                        created_by="system-seed",
+                    )
+                    await db.bed_assignments.insert_one(rec.model_dump())
+                    await db.beams.update_one({"id": beam["id"]}, {"$set": {"production_status": status, "position_on_bed": index + 1}})
+                    if beam.get("qc_state") == "in_progress" or (not active and status in ("forming", "stressed", "poured")):
+                        active = beam["id"]
+                if active:
+                    await db.beds.update_one({"id": bed["id"]}, {"$set": {"active_beam_id": active, "updated_at": now_iso()}})
+            logger.info("seeded bed assignments for %s beds on %s", len(beds), today)
+
+        job = await db.jobs.find_one({}, {"_id": 0})
+        pt = await db.product_types.find_one({}, {"_id": 0})
+        if job and not await db.beams.find_one({"mark": "PLAN-01"}):
+            pour = await db.pours.find_one({"job_id": job["id"]}, {"_id": 0})
+            for i in range(1, 5):
+                beam = Beam(
+                    mark=f"PLAN-{i:02d}",
+                    bed_id="",
+                    pour_id=(pour or {}).get("id"),
+                    job_id=job["id"],
+                    product_type_id=(pt or {}).get("id"),
+                    twin_type=(pt or {}).get("category") or "i_beam",
+                    length_ft=float((pt or {}).get("default_length_ft") or 90),
+                    position_on_bed=0,
+                    status="idle",
+                    qc_state="pending",
+                    production_status="planned",
+                )
+                await db.beams.insert_one(beam.model_dump())
+            logger.info("seeded planner pool beams PLAN-01..04 for job=%s", job.get("job_number"))
+    except Exception:
+        logger.exception("seed_bed_assignments failed")
 

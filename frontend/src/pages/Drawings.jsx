@@ -5,7 +5,7 @@ import Layout, { PageHeader, Field, inputClass, cardClass } from "../components/
 import { useAuth } from "../context/AuthContext";
 import { KIND_LABELS } from "../lib/beamSpec";
 import { toast } from "sonner";
-import { Loader2, Upload, Lock, FileSearch, CheckCircle2 } from "lucide-react";
+import { Loader2, Upload, Lock, FileSearch, CheckCircle2, CalendarDays } from "lucide-react";
 
 export default function Drawings() {
   const { user } = useAuth();
@@ -178,7 +178,18 @@ export default function Drawings() {
 
   return (
     <Layout>
-      <PageHeader title="Shop Drawings" subtitle="Upload → AI extract BeamSpec → Supervisor review → Lock twin" />
+      <PageHeader
+        title="Shop Drawings"
+        subtitle="Upload → AI extract BeamSpec → Supervisor review → Lock twin → Plan the bed"
+        right={
+          <Link
+            to="/planner"
+            className="min-h-12 px-4 border border-[#1C2230] rounded-none flex items-center gap-2 text-sm font-semibold uppercase tracking-wider hover:border-primary hover:text-primary"
+          >
+            <CalendarDays className="w-4 h-4" /> Planner
+          </Link>
+        }
+      />
       <div className="p-4 sm:p-6 lg:p-8 grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6 max-w-6xl">
         <div className={`${cardClass} p-5 sm:p-8 space-y-4`}>
           <h3 className="font-display font-bold uppercase tracking-wider text-lg flex items-center gap-2">

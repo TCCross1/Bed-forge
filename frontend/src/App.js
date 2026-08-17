@@ -13,6 +13,7 @@ import FinishSheet from "./pages/FinishSheet";
 import PreDelivery from "./pages/PreDelivery";
 import FormsExport from "./pages/FormsExport";
 import Drawings from "./pages/Drawings";
+import BedPlanner from "./pages/BedPlanner";
 
 function Protected({ children }) {
   const { user, ready } = useAuth();
@@ -37,6 +38,7 @@ function AppRoutes() {
         element={ready && user ? <Navigate to="/" replace /> : <Login />}
       />
       <Route path="/" element={<Protected><Dashboard /></Protected>} />
+      <Route path="/planner" element={<Protected><BedPlanner /></Protected>} />
       <Route path="/twin" element={<Protected><DigitalTwin /></Protected>} />
       <Route path="/drawings" element={<Protected><Drawings /></Protected>} />
       <Route path="/inspection" element={<Protected><NewInspection /></Protected>} />

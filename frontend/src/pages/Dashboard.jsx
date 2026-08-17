@@ -2,8 +2,10 @@ import React, { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import api, { formatApiErrorDetail } from "../lib/api";
 import Layout, { PageHeader, cardClass } from "../components/Layout";
-import { bedState, qcState } from "../lib/constants";
-import { Activity, Layers, CheckCircle2, AlertTriangle, XCircle, Loader2, RefreshCw } from "lucide-react";
+import PlantFloor from "../components/PlantFloor";
+import { bedState, productionStatus, qcState } from "../lib/constants";
+import { isoToday } from "../lib/bedLayout";
+import { Activity, Layers, CheckCircle2, AlertTriangle, XCircle, Loader2, RefreshCw, Box, LayoutGrid } from "lucide-react";
 import { toast } from "sonner";
 
 function Stat({ label, value, color, icon: Icon, testid }) {
@@ -18,7 +20,7 @@ function Stat({ label, value, color, icon: Icon, testid }) {
   );
 }
 
-function BedCard({ bed, onOpen }) {
+function BedCard({ bed, onOpen, onOpenBeam }) {
   const st = bedState(bed.status);
   return (
     <button
@@ -49,12 +51,17 @@ function BedCard({ bed, onOpen }) {
       <div className="mt-auto flex flex-wrap gap-1">
         {(bed.beams || []).slice(0, 8).map((b) => {
           const q = qcState(b.qc_state);
+          const p = productionStatus(b.production_status);
           return (
             <span
               key={b.id}
-              title={`${b.mark} · ${q.label}`}
+              title={`${b.mark} · ${p.label} · ${q.label}`}
               className="text-[10px] font-mono px-1.5 py-0.5 rounded-none border"
-              style={{ color: q.color, borderColor: `${q.color}55` }}
+              style={{ color: p.color, borderColor: `${p.color}55` }}
+              onClick={(e) => {
+                e.stopPropagation();
+                onOpenBeam(b);
+              }}
             >
               {b.mark}
             </span>
@@ -67,14 +74,20 @@ function BedCard({ bed, onOpen }) {
 
 export default function Dashboard() {
   const [data, setData] = useState(null);
+  const [plant, setPlant] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [view, setView] = useState(() => sessionStorage.getItem("bf_board_view") || "twins");
   const navigate = useNavigate();
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await api.get("/dashboard");
-      setData(res.data);
+      const [dash, floor] = await Promise.all([
+        api.get("/dashboard"),
+        api.get("/beds/plant-layout", { params: { date: isoToday() } }),
+      ]);
+      setData(dash.data);
+      setPlant(floor.data);
     } catch (err) {
       console.error("[dashboard] load failed", err);
       toast.error(formatApiErrorDetail(err.response?.data?.detail) || "Failed to load plant board");
@@ -89,10 +102,18 @@ export default function Dashboard() {
     return () => clearInterval(t);
   }, [load]);
 
+  const setBoardView = (next) => {
+    setView(next);
+    sessionStorage.setItem("bf_board_view", next);
+  };
+
   const openBed = (bed) => {
-    const first = bed.beams?.[0];
-    if (first) navigate(`/twin?beam=${first.id}`);
-    else toast.info(`Bed ${bed.bed_number} has no beams assigned`);
+    navigate(`/planner?bed=${bed.id}&date=${isoToday()}`);
+  };
+
+  const openBeam = (beam) => {
+    if (beam?.beam_id) navigate(`/twin?beam=${beam.beam_id}`);
+    else if (beam?.id) navigate(`/twin?beam=${beam.id}`);
   };
 
   const s = data?.stats || {};
@@ -101,15 +122,35 @@ export default function Dashboard() {
     <Layout>
       <PageHeader
         title="Multi-Bed Live Board"
-        subtitle="Real-time production & QC status across all 8 beds"
+        subtitle="Real-time production sequence across all 8 casting beds"
         right={
-          <button
-            data-testid="refresh-dashboard"
-            onClick={load}
-            className="min-h-12 px-4 border border-[#1C2230] rounded-none flex items-center gap-2 text-sm font-semibold uppercase tracking-wider hover:border-primary hover:text-primary transition-colors duration-100"
-          >
-            <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} /> Refresh
-          </button>
+          <div className="flex items-center gap-2">
+            <div className={`${cardClass} p-1 grid grid-cols-2`}>
+              <button
+                type="button"
+                data-testid="board-view-twins"
+                onClick={() => setBoardView("twins")}
+                className={`min-h-10 px-3 font-condensed uppercase tracking-wider text-xs ${view === "twins" ? "bg-primary text-white" : "text-muted-foreground"}`}
+              >
+                <Box className="w-4 h-4 inline mr-1" /> 3D
+              </button>
+              <button
+                type="button"
+                data-testid="board-view-cards"
+                onClick={() => setBoardView("cards")}
+                className={`min-h-10 px-3 font-condensed uppercase tracking-wider text-xs ${view === "cards" ? "bg-primary text-white" : "text-muted-foreground"}`}
+              >
+                <LayoutGrid className="w-4 h-4 inline mr-1" /> Cards
+              </button>
+            </div>
+            <button
+              data-testid="refresh-dashboard"
+              onClick={load}
+              className="min-h-12 px-4 border border-[#1C2230] rounded-none flex items-center gap-2 text-sm font-semibold uppercase tracking-wider hover:border-primary hover:text-primary transition-colors duration-100"
+            >
+              <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} /> Refresh
+            </button>
+          </div>
         }
       />
 
@@ -129,11 +170,26 @@ export default function Dashboard() {
               <Stat label="Failed" value={s.failed} color="#FF3366" icon={XCircle} testid="stat-failed" />
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4" data-testid="bed-grid">
-              {(data?.beds || []).map((bed) => (
-                <BedCard key={bed.id} bed={bed} onOpen={openBed} />
-              ))}
-            </div>
+            {view === "twins" ? (
+              <div className={`${cardClass} overflow-hidden mb-4`}>
+                <div className="px-4 py-3 border-b border-[#1C2230] flex items-center justify-between">
+                  <div className="font-display font-bold uppercase tracking-wider">Plant floor · 8 bed twins</div>
+                  <span className="text-[10px] font-mono text-muted-foreground">CLICK BED TO PLAN · CLICK BEAM FOR QC TWIN</span>
+                </div>
+                <PlantFloor
+                  plant={plant}
+                  height={520}
+                  onSelectBed={openBed}
+                  onSelectBeam={openBeam}
+                />
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4" data-testid="bed-grid">
+                {(data?.beds || []).map((bed) => (
+                  <BedCard key={bed.id} bed={bed} onOpen={openBed} onOpenBeam={openBeam} />
+                ))}
+              </div>
+            )}
           </>
         )}
       </div>
