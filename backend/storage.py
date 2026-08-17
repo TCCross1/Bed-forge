@@ -2,6 +2,7 @@
 import os
 import re
 from pathlib import Path
+from typing import Optional
 
 ROOT = Path(__file__).parent / "uploads" / "blueprints"
 MAX_BYTES = 25 * 1024 * 1024
@@ -77,3 +78,41 @@ def roll_photo_path(roll_id: str, filename: str) -> Path:
     if folder.resolve() not in dest.parents and dest != folder.resolve():
         raise ValueError("Invalid strand-roll photo path")
     return dest
+
+
+COMPANY_ROOT = Path(__file__).parent / "uploads" / "company"
+LOGO_MAX_BYTES = 4 * 1024 * 1024
+LOGO_ALLOWED_EXT = {".png", ".jpg", ".jpeg", ".webp"}
+
+
+def company_dir() -> Path:
+    COMPANY_ROOT.mkdir(parents=True, exist_ok=True)
+    return COMPANY_ROOT.resolve()
+
+
+def save_company_logo(filename: str, data: bytes) -> Path:
+    if len(data) > LOGO_MAX_BYTES:
+        raise ValueError("Logo exceeds 4 MB limit")
+    ext = Path(filename).suffix.lower() or ".png"
+    if ext not in LOGO_ALLOWED_EXT:
+        raise ValueError("Unsupported logo type. Use PNG, JPEG, or WebP.")
+    folder = company_dir()
+    for old in folder.glob("logo.*"):
+        try:
+            old.unlink()
+        except OSError:
+            pass
+    dest = folder / f"logo{ext}"
+    dest.write_bytes(data)
+    return dest
+
+
+def company_logo_path(filename: str = "") -> Optional[Path]:
+    folder = company_dir()
+    if filename:
+        dest = (folder / safe_name(filename)).resolve()
+        if folder not in dest.parents and dest != folder:
+            raise ValueError("Invalid logo path")
+        return dest if dest.exists() and dest.is_file() else None
+    matches = sorted(p for p in folder.glob("logo.*") if p.is_file())
+    return matches[0] if matches else None

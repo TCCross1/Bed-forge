@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import api, { formatApiErrorDetail } from "../lib/api";
 import Layout, { PageHeader, Field, inputClass, cardClass, ARMeasureLink } from "../components/Layout";
-import { Download, Loader2, ClipboardCheck, Calculator, Ruler, Sparkles, Truck } from "lucide-react";
+import { Download, Loader2, ClipboardCheck, Calculator, Ruler, Sparkles, Truck, Tags } from "lucide-react";
 import { toast } from "sonner";
 
 const FORMS = [
@@ -59,6 +59,18 @@ export default function FormsExport() {
         right={<ARMeasureLink beamId={beamId} purpose="level" />}
       />
       <div className="p-4 sm:p-6 lg:p-8 max-w-5xl">
+        <div className={`${cardClass} p-5 sm:p-6 mb-4 sm:mb-6 flex flex-col sm:flex-row sm:items-center justify-between gap-3`} data-testid="form-card-cylinders">
+          <div className="flex items-start gap-3">
+            <div className="w-11 h-11 bg-primary/15 border border-primary/40 rounded-none flex items-center justify-center">
+              <Tags className="w-6 h-6 text-primary" />
+            </div>
+            <div>
+              <h3 className="font-display font-bold text-lg uppercase tracking-wide leading-tight">Cylinder Tag Generator</h3>
+              <p className="text-sm text-muted-foreground mt-1">Morning setup, beam entry, auto labels, white-label print — replaces the Excel file.</p>
+            </div>
+          </div>
+          <Link to="/tags" className="min-h-12 px-4 bg-primary text-white font-display font-bold uppercase tracking-widest flex items-center justify-center">Open</Link>
+        </div>
         <div className={`${cardClass} p-5 sm:p-6 mb-4 sm:mb-6`}>
           <Field label="Beam (for QIR, Finish, Pre-Delivery)">
             <select data-testid="forms-beam-select" value={beamId} onChange={(e) => setBeamId(e.target.value)} className={`${inputClass} md:max-w-sm`}>

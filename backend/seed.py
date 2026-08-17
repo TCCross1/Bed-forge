@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from db import db
 from models import (
     ProductType, Job, Pour, Bed, Beam, Anomaly, TensionReport, CamberReading,
-    BedAssignment, now_iso,
+    BedAssignment, CompanySettings, now_iso,
 )
 from tension import calc_theoretical_elongation, evaluate_tension
 from bed_layout import map_production_status, pack_stations
@@ -326,4 +326,16 @@ async def seed_strand_rolls():
         logger.info("seeded strand rolls for %s beds", len(beds))
     except Exception:
         logger.exception("seed_strand_rolls failed")
+
+
+async def seed_company():
+    """Idempotent plant branding so tags and exports are white-label ready."""
+    try:
+        if await db.company_settings.find_one({"id": "plant"}):
+            return
+        settings = CompanySettings()
+        await db.company_settings.insert_one(settings.model_dump())
+        logger.info("seeded company settings name=%s", settings.company_name)
+    except Exception:
+        logger.exception("seed_company failed")
 

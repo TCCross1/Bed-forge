@@ -23,13 +23,15 @@ from models import (
 )
 from auth import router as auth_router, get_current_user, seed_admin
 from tension import run_tension_calc, calc_theoretical_elongation, evaluate_tension
-from seed import seed_plant, seed_l25390, seed_bed_assignments, seed_strand_rolls
+from seed import seed_plant, seed_l25390, seed_bed_assignments, seed_strand_rolls, seed_company
 from blueprint_routes import router as blueprint_router
 from bed_routes import router as bed_router
 from tension_routes import router as tension_router
 from ar_routes import router as ar_router, emit_sync_event
 from bed_layout import covers, map_production_status
 from strand_roll_routes import router as strand_roll_router, assert_tension_allowed
+from company_routes import router as company_router
+from cylinder_routes import router as cylinder_router
 import excel_export
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
@@ -498,7 +500,8 @@ async def export_form(form_type: str, beam_id: str = None, user=Depends(get_curr
         jobs = {j["id"]: j for j in await db.jobs.find({}, {"_id": 0}).to_list(500)}
         ptypes = {p["id"]: p for p in await db.product_types.find({}, {"_id": 0}).to_list(500)}
 
-        context = {}
+        company = await db.company_settings.find_one({"id": "plant"}, {"_id": 0}) or {}
+        context = {"company_name": company.get("company_name") or "PRESTRESS SERVICES INDUSTRIES LLC"}
         if form_type == "qir":
             beam = beams.get(beam_id) or (list(beams.values())[0] if beams else {})
             context["beam"] = beam
@@ -554,6 +557,8 @@ app.include_router(bed_router)
 app.include_router(tension_router)
 app.include_router(ar_router)
 app.include_router(strand_roll_router)
+app.include_router(company_router)
+app.include_router(cylinder_router)
 
 app.add_middleware(
     CORSMiddleware,
@@ -587,7 +592,13 @@ async def startup():
     await db.strand_roll_assignments.create_index("bed_id")
     await db.strand_roll_assignments.create_index("roll_id")
     await db.strand_roll_assignments.create_index("pour_id")
+    await db.cylinder_runs.create_index("run_date")
+    await db.cylinder_runs.create_index("created_at")
+    await db.cylinders.create_index("run_id")
+    await db.cylinders.create_index("job_number")
+    await db.company_settings.create_index("id")
     await seed_admin()
+    await seed_company()
     await seed_plant()
     await seed_l25390()
     await seed_bed_assignments()

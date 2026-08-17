@@ -546,3 +546,54 @@ class StrandRollAssignInput(BaseModel):
     pour_id: Optional[str] = None
     beam_ids: Optional[List[str]] = None
     allocated_length: Optional[float] = None
+
+
+# ---------- Multi-company / white-label ----------
+class CompanySettings(BaseModel):
+    id: str = "plant"
+    tenant_id: str = "default"
+    company_name: str = "PRESTRESS SERVICES INDUSTRIES LLC"
+    app_name: str = "BedForge QC"
+    tag_header: str = ""
+    logo_filename: str = ""
+    logo_content_type: str = ""
+    updated_by: str = ""
+    updated_at: str = Field(default_factory=now_iso)
+    created_at: str = Field(default_factory=now_iso)
+
+
+class CompanySettingsUpdate(BaseModel):
+    company_name: Optional[str] = None
+    app_name: Optional[str] = None
+    tag_header: Optional[str] = None
+
+
+# ---------- Cylinder tag generator ----------
+class CylinderJobSlot(BaseModel):
+    slot: int = 1
+    use_today: bool = False
+    qc_tech: str = ""
+    job_number: str = ""
+    job_id: Optional[str] = None
+    expected_beam_count: int = 0
+    pour_number: str = ""
+    pour_id: Optional[str] = None
+    pour_date: str = ""
+    cylinder_tags_needed: int = 0
+    beam_marks: List[str] = Field(default_factory=list)
+
+
+class CylinderTagRunInput(BaseModel):
+    run_date: Optional[str] = None
+    job_count: int = 1
+    slots: List[CylinderJobSlot] = Field(default_factory=list)
+    notes: str = ""
+
+
+class CylinderCrushInput(BaseModel):
+    crush_psi: Optional[float] = None
+    crush_date: Optional[str] = None
+    crush_age_days: Optional[int] = None
+    required_psi: Optional[float] = None
+    release_ok: Optional[bool] = None
+    notes: Optional[str] = None

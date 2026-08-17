@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { formatApiErrorDetail } from "../lib/api";
 import { BrandLockup, BrandMark } from "../components/Layout";
+import { useCompany } from "../context/CompanyContext";
 import { Loader2 } from "lucide-react";
 
 const DEMO = [
@@ -14,6 +15,7 @@ const DEMO = [
 
 export default function Login() {
   const { login } = useAuth();
+  const company = useCompany();
   const navigate = useNavigate();
   const [email, setEmail] = useState("tccrossmusic@gmail.com");
   const [password, setPassword] = useState("BedForge2026!");
@@ -47,7 +49,7 @@ export default function Login() {
         <div className="relative z-10 flex flex-col justify-between p-12 w-full">
           <BrandLockup className="h-28 w-auto max-w-full" testid="login-hero-lockup" />
           <div>
-            <div className="text-primary font-mono text-xs tracking-[0.4em] mb-4">PRESTRESS SERVICES INDUSTRIES LLC</div>
+            <div className="text-primary font-mono text-xs tracking-[0.4em] mb-4">{company.company_name || "PRESTRESS SERVICES INDUSTRIES LLC"}</div>
             <h2 className="font-display font-extrabold text-5xl uppercase tracking-tight leading-none">
               Paperless<br />QC & Digital<br />Twin Platform
             </h2>

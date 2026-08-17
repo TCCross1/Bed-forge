@@ -17,7 +17,9 @@ import FormsExport from "./pages/FormsExport";
 import Drawings from "./pages/Drawings";
 import BedPlanner from "./pages/BedPlanner";
 import StrandRolls from "./pages/StrandRolls";
+import CylinderTags from "./pages/CylinderTags";
 import ARMeasure from "./pages/ARMeasure";
+import { CompanyProvider } from "./context/CompanyContext";
 
 function Protected({ children }) {
   const { user, ready } = useAuth();
@@ -52,6 +54,7 @@ function AppRoutes() {
       <Route path="/release" element={<Protected><PreDelivery /></Protected>} />
       <Route path="/forms" element={<Protected><FormsExport /></Protected>} />
       <Route path="/rolls" element={<Protected><StrandRolls /></Protected>} />
+      <Route path="/tags" element={<Protected><CylinderTags /></Protected>} />
       <Route path="/measure" element={<Protected><ARMeasure /></Protected>} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
@@ -62,6 +65,7 @@ function App() {
   return (
     <div className="App">
       <DeviceProvider>
+        <CompanyProvider>
         <AuthProvider>
           <BrowserRouter>
             <SyncProvider>
@@ -70,6 +74,7 @@ function App() {
           </BrowserRouter>
           <Toaster theme="dark" position="top-right" richColors />
         </AuthProvider>
+        </CompanyProvider>
       </DeviceProvider>
     </div>
   );

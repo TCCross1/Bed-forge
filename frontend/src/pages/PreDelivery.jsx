@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import api, { formatApiErrorDetail } from "../lib/api";
 import Layout, { PageHeader, Field, inputClass, cardClass } from "../components/Layout";
 import { toast } from "sonner";
@@ -106,7 +107,7 @@ export default function PreDelivery() {
 
   return (
     <Layout>
-      <PageHeader title="Pre-Delivery / Release" subtitle="Final checks · truck & destination · multi-party sign-off" />
+      <PageHeader title="Pre-Delivery / Release" subtitle="Final checks · truck & destination · multi-party sign-off · cylinder crush" right={<Link to="/tags" className="min-h-12 px-4 border border-[#1C2230] font-semibold uppercase tracking-wider text-sm hover:border-primary hover:text-primary">Cylinder tags</Link>} />
       <div className="p-4 sm:p-6 lg:p-8 grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6 max-w-6xl">
         <div className={`${cardClass} p-5 sm:p-8 space-y-4`}>
           <h3 className="font-display font-bold uppercase tracking-wider text-lg flex items-center gap-2">

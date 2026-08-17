@@ -12,8 +12,9 @@ THIN = Side(style="thin", color="999999")
 BORDER = Border(left=THIN, right=THIN, top=THIN, bottom=THIN)
 
 
-def _title(ws, text, subtitle=""):
-    ws["A1"] = "PRESTRESS SERVICES INDUSTRIES LLC"
+def _title(ws, text, subtitle="", context=None):
+    company = (context or {}).get("company_name") or "PRESTRESS SERVICES INDUSTRIES LLC"
+    ws["A1"] = company
     ws["A1"].font = TITLE_FONT
     ws["A2"] = text
     ws["A2"].font = Font(bold=True, size=13, name="Arial")
@@ -49,7 +50,7 @@ def build_qir(context: dict) -> bytes:
     wb = Workbook()
     ws = wb.active
     ws.title = "QIR"
-    _title(ws, "QUALITY INSPECTION REPORT (QIR 2026.6.1)")
+    _title(ws, "QUALITY INSPECTION REPORT (QIR 2026.6.1)", context=context)
     beam = context.get("beam", {})
     job = context.get("job", {})
     r = _kv_table(ws, 5, [
@@ -79,7 +80,7 @@ def build_tension(context: dict) -> bytes:
     wb = Workbook()
     ws = wb.active
     ws.title = "Tension Report"
-    _title(ws, "STRAND TENSION REPORT")
+    _title(ws, "STRAND TENSION REPORT", context=context)
     _header_row(ws, 5, ["Bed", "Strand Size", "Area (in²)", "Jack Force (kip)",
                         "Bed Len (ft)", "Theo. Elong (in)", "Meas. Elong (in)",
                         "Variance %", "Result"])
@@ -103,7 +104,7 @@ def build_camber(context: dict) -> bytes:
     wb = Workbook()
     ws = wb.active
     ws.title = "Camber & Strength"
-    _title(ws, "CAMBER / RELEASE STRENGTH SHEET")
+    _title(ws, "CAMBER / RELEASE STRENGTH SHEET", context=context)
     _header_row(ws, 5, ["Beam Mark", "Design (in)", "Marked End (in)", "Midspan (in)",
                         "Unmarked End (in)", "Required Str (psi)", "Release Str (psi)", "Date"])
     r = 6
@@ -129,7 +130,7 @@ def build_crackmap(context: dict) -> bytes:
     wb = Workbook()
     ws = wb.active
     ws.title = "Crack Map"
-    _title(ws, "CRACK MAP / ANOMALY LOG")
+    _title(ws, "CRACK MAP / ANOMALY LOG", context=context)
     _header_row(ws, 5, ["Beam Mark", "Type", "Severity", "Pos X", "Pos Y", "Pos Z",
                         "Length (in)", "Note", "Date"])
     r = 6
@@ -149,7 +150,7 @@ def build_finish(context: dict) -> bytes:
     wb = Workbook()
     ws = wb.active
     ws.title = "Finish Sheet"
-    _title(ws, "FINISH SHEET — POST-POUR")
+    _title(ws, "FINISH SHEET — POST-POUR", context=context)
     _header_row(ws, 5, ["Beam Mark", "Marked End ID", "Strand Flush", "Recessed", "Grouted",
                         "Hardware", "Surface", "Surface Pass", "Status", "Inspector", "Date"])
     r = 6
@@ -178,7 +179,7 @@ def build_pre_delivery(context: dict) -> bytes:
     wb = Workbook()
     ws = wb.active
     ws.title = "Pre-Delivery"
-    _title(ws, "PRE-DELIVERY / RELEASE")
+    _title(ws, "PRE-DELIVERY / RELEASE", context=context)
     _header_row(ws, 5, ["Beam Mark", "Truck", "Destination", "Load Pos",
                         "QC", "Production", "Carrier", "Released", "Date"])
     r = 6

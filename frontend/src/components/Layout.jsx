@@ -16,19 +16,24 @@ import {
   CalendarDays,
   ScanLine,
   ScanBarcode,
+  Tags,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { useDevice } from "../context/DeviceContext";
+import { useCompany } from "../context/CompanyContext";
 import { ROLE_LABELS } from "../lib/constants";
 
 export const MARK_SRC = "/brand/bedforge-mark.png";
 export const LOCKUP_SRC = "/brand/bedforge-lockup.png";
 
 export function BrandMark({ className = "h-10 w-auto", testid = "brand-mark" }) {
+  const company = useCompany();
+  const src = company?.logoSrc || MARK_SRC;
+  const alt = company?.company_name || "BedForge";
   return (
     <img
-      src={MARK_SRC}
-      alt="BedForge"
+      src={src}
+      alt={alt}
       data-testid={testid}
       className={`object-contain select-none pointer-events-none ${className}`}
       draggable={false}
@@ -37,10 +42,13 @@ export function BrandMark({ className = "h-10 w-auto", testid = "brand-mark" }) 
 }
 
 export function BrandLockup({ className = "h-12 w-auto", testid = "brand-lockup" }) {
+  const company = useCompany();
+  const src = company?.logoSrc || LOCKUP_SRC;
+  const alt = company?.app_name || "BedForge Quality Control — Precision. Strength. Quality.";
   return (
     <img
-      src={LOCKUP_SRC}
-      alt="BedForge Quality Control — Precision. Strength. Quality."
+      src={src}
+      alt={alt}
       data-testid={testid}
       className={`object-contain select-none pointer-events-none ${className}`}
       draggable={false}
@@ -53,6 +61,7 @@ const PRIMARY_NAV = [
   { to: "/twin", label: "Twin", icon: Box, testid: "nav-twin" },
   { to: "/rolls", label: "Rolls", icon: ScanBarcode, testid: "nav-rolls" },
   { to: "/inspection", label: "Inspect", icon: ClipboardCheck, testid: "nav-inspection" },
+  { to: "/tags", label: "Tags", icon: Tags, testid: "nav-tags" },
   { to: "/tension", label: "Tension", icon: Calculator, testid: "nav-tension" },
   { to: "/forms", label: "Forms", icon: FileSpreadsheet, testid: "nav-forms" },
 ];
@@ -135,6 +144,7 @@ export default function Layout({ children }) {
   const secondary = command ? COMMAND_SECONDARY : SECONDARY_NAV;
   const fieldMore = [
     { to: "/inspection", label: "Inspect", icon: ClipboardCheck, testid: "nav-inspection" },
+    { to: "/tags", label: "Tags", icon: Tags, testid: "nav-tags" },
     { to: "/forms", label: "Forms", icon: FileSpreadsheet, testid: "nav-forms" },
     { to: "/measure", label: "AR Measure", icon: ScanLine, testid: "nav-measure" },
     ...SECONDARY_NAV.filter((i) => i.to !== "/measure"),

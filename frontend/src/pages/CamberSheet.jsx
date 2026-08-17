@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import api, { formatApiErrorDetail } from "../lib/api";
 import Layout, { PageHeader, Field, inputClass, cardClass, ARMeasureLink } from "../components/Layout";
 import { toast } from "sonner";
@@ -19,6 +20,7 @@ export default function CamberSheet() {
   const [beamId, setBeamId] = useState("");
   const [form, setForm] = useState(EMPTY);
   const [history, setHistory] = useState([]);
+  const [cylinders, setCylinders] = useState([]);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -51,10 +53,22 @@ export default function CamberSheet() {
         console.error("[camber] load failed", err);
         toast.error(formatApiErrorDetail(err.response?.data?.detail) || "Failed to load camber data");
       });
+    const mark = (beams.find((b) => b.id === beamId) || {}).mark;
+    if (mark) {
+      api.get("/cylinders", { params: { beam_mark: mark } })
+        .then((r) => {
+          if (!cancelled) setCylinders(r.data || []);
+        })
+        .catch((err) => {
+          console.error("[camber] cylinders failed", err);
+        });
+    } else {
+      setCylinders([]);
+    }
     return () => {
       cancelled = true;
     };
-  }, [beamId]);
+  }, [beamId, beams]);
 
   const set = (key, value) => setForm({ ...form, [key]: value });
 
@@ -175,6 +189,21 @@ export default function CamberSheet() {
               </div>
             ))}
           </div>
+          {cylinders.length > 0 && (
+            <div className="mt-6" data-testid="camber-cylinders">
+              <h4 className="font-display font-bold uppercase tracking-wider text-sm mb-2">Linked cylinders</h4>
+              {cylinders.map((cyl) => (
+                <div key={cyl.id} className="border border-[#1C2230] p-3 mb-2 font-mono text-xs">
+                  <div className="flex justify-between">
+                    <span>{cyl.set_id}</span>
+                    <span style={{ color: cyl.release_ok ? "#00E676" : cyl.crush_psi ? "#FFD600" : "#8B93A7" }}>{cyl.status}</span>
+                  </div>
+                  <div className="text-muted-foreground mt-1">{cyl.crush_psi ? `${cyl.crush_psi} psi` : "No crush yet"}{cyl.required_psi ? ` / req ${cyl.required_psi}` : ""}</div>
+                </div>
+              ))}
+              <Link to="/tags" className="inline-block mt-2 text-[10px] font-mono uppercase tracking-widest text-primary">Open cylinder tags</Link>
+            </div>
+          )}
         </div>
       </div>
     </Layout>
