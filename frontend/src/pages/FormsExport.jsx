@@ -12,7 +12,7 @@ const LEGACY_FORMS = [
 ];
 
 const PACKAGE_TYPES = [
-  { type: "pour_complete", title: "Pour Complete Package", desc: "Cover, batch/environment, QIR, tension, camber, finish, release, strand traceability, NCRs" },
+  { type: "pour_complete", title: "Pour Complete Package", desc: "Cover, beams, batch/environment, QIR, tension, strength/camber, finish, sign-off, strand traceability, NCRs" },
   { type: "single_beam", title: "Single Beam Package", desc: "Full beam package with signatures, anomalies, and linked NCRs" },
   { type: "full_job", title: "Full Job Package", desc: "All pours, beds, and beams compiled into one job PDF" },
 ];
