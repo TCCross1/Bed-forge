@@ -5,6 +5,7 @@ import Layout, { PageHeader, Field, inputClass, cardClass, ARMeasureLink } from 
 import { releaseForecast } from "../lib/constants";
 import { toast } from "sonner";
 import { Loader2, Ruler, CheckCircle2, XCircle } from "lucide-react";
+import { pickBeamId, useBeamQuery } from "../lib/useBeamQuery";
 
 const EMPTY = {
   required_strength_psi: 4000,
@@ -17,8 +18,9 @@ const EMPTY = {
 };
 
 export default function CamberSheet() {
+  const queryBeam = useBeamQuery();
   const [beams, setBeams] = useState([]);
-  const [beamId, setBeamId] = useState("");
+  const [beamId, setBeamId] = useState(queryBeam);
   const [form, setForm] = useState(EMPTY);
   const [history, setHistory] = useState([]);
   const [cylinders, setCylinders] = useState([]);
@@ -32,7 +34,7 @@ export default function CamberSheet() {
       .then((r) => {
         if (cancelled) return;
         setBeams(r.data);
-        setBeamId((current) => current || r.data[0]?.id || "");
+        setBeamId((current) => pickBeamId(current, queryBeam, r.data));
       })
       .catch((err) => {
         if (cancelled) return;
@@ -42,7 +44,7 @@ export default function CamberSheet() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [queryBeam]);
 
   useEffect(() => {
     if (!beamId) return undefined;
@@ -73,6 +75,22 @@ export default function CamberSheet() {
         if (!cancelled) setForecast(r.data?.forecasts?.[0] || null);
       })
       .catch((err) => console.error("[camber] forecast failed", err));
+    api.get(`/beams/${beamId}`)
+      .then((r) => {
+        if (cancelled) return;
+        const spec = r.data?.spec || {};
+        const notes = [].concat(spec.notes || []).join(" ");
+        const camber = notes.match(/design camber\s+([\d.]+)/i);
+        const strength = notes.match(/release strength\s+([\d,]+)/i);
+        setForm((cur) => ({
+          ...cur,
+          design_camber_in: cur.design_camber_in || (camber ? camber[1] : ""),
+          required_strength_psi: strength
+            ? Number(String(strength[1]).replace(/,/g, ""))
+            : cur.required_strength_psi,
+        }));
+      })
+      .catch((err) => console.error("[camber] spec prefill failed", err));
     return () => {
       cancelled = true;
     };

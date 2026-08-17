@@ -348,6 +348,8 @@ async def create_tension_report(payload: TensionReportCreate, user=Depends(get_c
         await db.tension_reports.insert_one(report.model_dump())
         logger.info("tension report saved id=%s bed=%s by=%s", report.id, report.bed_id, user.get("email"))
         return report.model_dump()
+    except HTTPException:
+        raise
     except Exception:
         logger.exception("create_tension_report failed")
         raise HTTPException(status_code=500, detail="Failed to save tension report")

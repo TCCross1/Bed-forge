@@ -3,6 +3,7 @@ import api, { formatApiErrorDetail } from "../lib/api";
 import Layout, { PageHeader, Field, inputClass, cardClass } from "../components/Layout";
 import { toast } from "sonner";
 import { Loader2, Sparkles } from "lucide-react";
+import { pickBeamId, useBeamQuery } from "../lib/useBeamQuery";
 
 const CHECKS = [
   { key: "strand_cut_flush", label: "Strands cut flush" },
@@ -34,8 +35,9 @@ const EMPTY = {
 };
 
 export default function FinishSheet() {
+  const queryBeam = useBeamQuery();
   const [beams, setBeams] = useState([]);
-  const [beamId, setBeamId] = useState("");
+  const [beamId, setBeamId] = useState(queryBeam);
   const [form, setForm] = useState(EMPTY);
   const [history, setHistory] = useState([]);
   const [saving, setSaving] = useState(false);
@@ -46,7 +48,7 @@ export default function FinishSheet() {
       .then((r) => {
         if (cancelled) return;
         setBeams(r.data);
-        setBeamId((current) => current || r.data[0]?.id || "");
+        setBeamId((current) => pickBeamId(current, queryBeam, r.data));
       })
       .catch((err) => {
         if (cancelled) return;
@@ -56,7 +58,7 @@ export default function FinishSheet() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [queryBeam]);
 
   useEffect(() => {
     if (!beamId) return undefined;
@@ -70,6 +72,13 @@ export default function FinishSheet() {
         console.error("[finish] history load failed", err);
         toast.error(formatApiErrorDetail(err.response?.data?.detail) || "Failed to load finish sheets");
       });
+    api.get(`/beams/${beamId}`)
+      .then((r) => {
+        if (cancelled) return;
+        const me = r.data?.spec?.marked_end_id || "";
+        if (me) setForm((cur) => ({ ...cur, marked_end_id: cur.marked_end_id || me }));
+      })
+      .catch((err) => console.error("[finish] spec prefill failed", err));
     return () => {
       cancelled = true;
     };

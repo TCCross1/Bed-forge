@@ -3,6 +3,7 @@ import api, { formatApiErrorDetail } from "../lib/api";
 import Layout, { PageHeader, Field, inputClass, cardClass, ARMeasureLink } from "../components/Layout";
 import { toast } from "sonner";
 import { CheckCircle2, XCircle, PauseCircle, ChevronRight, ChevronLeft, Loader2 } from "lucide-react";
+import { pickBeamId, useBeamQuery } from "../lib/useBeamQuery";
 
 const SECTIONS = [
   {
@@ -106,8 +107,9 @@ const STATUS = [
 ];
 
 export default function NewInspection() {
+  const queryBeam = useBeamQuery();
   const [beams, setBeams] = useState([]);
-  const [beamId, setBeamId] = useState("");
+  const [beamId, setBeamId] = useState(queryBeam);
   const [step, setStep] = useState(0);
   const [results, setResults] = useState({});
   const [notes, setNotes] = useState({});
@@ -119,13 +121,13 @@ export default function NewInspection() {
     api.get("/beams")
       .then((r) => {
         setBeams(r.data);
-        if (r.data.length) setBeamId(r.data[0].id);
+        setBeamId((current) => pickBeamId(current, queryBeam, r.data));
       })
       .catch((err) => {
         console.error("[inspection] beams load failed", err);
         toast.error(formatApiErrorDetail(err.response?.data?.detail) || "Failed to load beams");
       });
-  }, []);
+  }, [queryBeam]);
 
   const section = SECTIONS[step];
   const sectionChecks = checks[section.key] || {};

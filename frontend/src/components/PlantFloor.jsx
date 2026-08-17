@@ -1,8 +1,9 @@
 import React, { Suspense } from "react";
 import { Canvas } from "@react-three/fiber";
-import { OrbitControls, Html } from "@react-three/drei";
+import { OrbitControls } from "@react-three/drei";
 import { statusColor } from "../lib/bedLayout";
 import { bedState } from "../lib/constants";
+import { MarkedEndMarker, TwinBadge } from "./MarkedEndMarker";
 
 const BED_SPACING = 18;
 
@@ -11,6 +12,9 @@ function SimpleBeam({ row, x, active, onSelect }) {
   const station = Number(row.station_ft) || 8;
   const color = statusColor(row.production_status);
   const towardBulkhead = row.marked_end_toward === "bulkhead";
+  const meLocalZ = towardBulkhead ? length / 2 : -length / 2;
+  const facing = towardBulkhead ? 1 : -1;
+  const mark = (row.beam && row.beam.mark) || "BEAM";
   return (
     <group
       position={[x, 1.1, station + length / 2]}
@@ -28,21 +32,17 @@ function SimpleBeam({ row, x, active, onSelect }) {
           roughness={0.55}
         />
       </mesh>
-      <mesh position={[0, 0.2, towardBulkhead ? length / 2 - 0.4 : -length / 2 + 0.4]}>
-        <coneGeometry args={[0.35, 1.1, 8]} />
-        <meshStandardMaterial color="#2979FF" />
-      </mesh>
-      <Html position={[0, 1.7, 0]} center>
-        <div style={{
-          color: active ? "#FFD600" : "#FFFFFF",
-          fontFamily: "JetBrains Mono, monospace",
-          fontSize: 9,
-          whiteSpace: "nowrap",
-          pointerEvents: "none",
-        }}>
-          {(row.beam && row.beam.mark) || "BEAM"}
-        </div>
-      </Html>
+      <group position={[0, -1.0, 0]}>
+        <MarkedEndMarker
+          depthFt={2.0}
+          widthFt={2.4}
+          z={meLocalZ}
+          facing={facing}
+          compact
+          label="ME"
+          sublabel={mark}
+        />
+      </group>
     </group>
   );
 }
@@ -71,18 +71,7 @@ function PlantBed({ layout, index, onSelectBed, onSelectBeam }) {
         <boxGeometry args={[8.4, 3.2, 1]} />
         <meshStandardMaterial color="#C9A227" />
       </mesh>
-      <Html position={[x, 4.2, 2]} center>
-        <div style={{
-          color: st.color,
-          fontFamily: "Barlow Condensed, sans-serif",
-          fontWeight: 800,
-          letterSpacing: "0.12em",
-          fontSize: 12,
-          whiteSpace: "nowrap",
-        }}>
-          BED {bed.bed_number}
-        </div>
-      </Html>
+      <TwinBadge text={`BED ${bed.bed_number}`} color={st.color} compact position={[x, 4.2, 2]} />
       {(layout.assignments || []).map((row) => (
         <SimpleBeam
           key={row.id}

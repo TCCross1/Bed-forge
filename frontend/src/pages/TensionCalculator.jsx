@@ -346,7 +346,7 @@ export default function TensionCalculator() {
                 : "Select a beam with a locked BeamSpec"}
             </div>
             {loading ? (
-              <div className={`${device.field ? "h-[320px]" : "h-[520px]"} flex items-center justify-center text-muted-foreground`}>
+              <div className={`${device.field ? "h-[420px]" : "h-[560px]"} flex items-center justify-center text-muted-foreground`}>
                 <Loader2 className="w-6 h-6 animate-spin mr-2" /> Loading tension twin…
               </div>
             ) : spec ? (
@@ -357,7 +357,7 @@ export default function TensionCalculator() {
                 view={view}
                 selected={selected}
                 onSelect={pick}
-                height={device.field ? 320 : 520}
+                height={device.field ? 420 : 560}
               />
             ) : (
               <div className="h-[320px] flex items-center justify-center text-sm font-mono text-muted-foreground px-6 text-center">

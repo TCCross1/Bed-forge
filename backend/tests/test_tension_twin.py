@@ -79,6 +79,7 @@ def test_hold_downs_h56s_stations():
     assert spec.hold_downs[1].station_from_marked_end == HOLD_DOWN_UE_FT
     assert all(HOLD_DOWN_TYPE in (hd.type_spec or "") for hd in spec.hold_downs)
     assert all(hd.quantity_at_station == 2 for hd in spec.hold_downs)
+    assert all(abs((hd.offset_in or 0) - 2.0) < 0.01 for hd in spec.hold_downs)
 
 
 def test_strand_capture_within_and_outside():

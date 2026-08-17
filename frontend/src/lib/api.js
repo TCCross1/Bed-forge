@@ -1,6 +1,6 @@
 import axios from "axios";
 import { deviceId } from "./device";
-import { enqueueAction, isFieldWrite, shouldQueueError } from "./offlineQueue";
+import { enqueueAction, isFieldWrite, serializeRequestBody, shouldQueueError } from "./offlineQueue";
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 export const API = `${BACKEND_URL}/api`;
@@ -31,8 +31,7 @@ api.interceptors.response.use(
     }
     if (!err.config?.skipOfflineQueue && isFieldWrite(url, method) && shouldQueueError(err)) {
       try {
-        const raw = err.config?.data;
-        const data = raw && typeof raw === "string" ? JSON.parse(raw) : raw;
+        const data = await serializeRequestBody(err.config?.data);
         await enqueueAction({ method, url, data, label: url });
         err.queuedOffline = true;
         err.response = {

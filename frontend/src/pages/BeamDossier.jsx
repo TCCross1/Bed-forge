@@ -217,8 +217,8 @@ export default function BeamDossier() {
                 <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
                   {[
                     ["QIR", (dossier.inspections || []).length, `/inspection?beam=${dossier.id}`],
-                    ["Tension", (dossier.tension_reports || []).length, "/tension"],
-                    ["Camber", (dossier.camber_readings || []).length, "/camber"],
+                    ["Tension", (dossier.tension_reports || []).length, `/tension?beam=${dossier.id}`],
+                    ["Camber", (dossier.camber_readings || []).length, `/camber?beam=${dossier.id}`],
                     ["Finish", (dossier.finish_sheets || []).length, `/finish?beam=${dossier.id}`],
                     ["Release", (dossier.pre_delivery || []).length, `/release?beam=${dossier.id}`],
                   ].map(([label, count, href]) => (

@@ -42,7 +42,7 @@ export default function ScanBeam() {
     const ctx = canvas.getContext("2d", { willReadFrequently: true });
     ctx.drawImage(video, 0, 0, w, h);
     const image = ctx.getImageData(0, 0, w, h);
-    const code = jsQR(image.data, w, h, { inversionAttempts: "dontInvert" });
+    const code = jsQR(image.data, w, h, { inversionAttempts: "attemptBoth" });
     if (code?.data) {
       if (openToken(code.data)) return;
     }

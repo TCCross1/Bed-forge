@@ -1,7 +1,8 @@
 import React, { Suspense } from "react";
 import { Canvas } from "@react-three/fiber";
-import { OrbitControls, Html } from "@react-three/drei";
+import { OrbitControls } from "@react-three/drei";
 import { SpecBeam } from "./BeamViewer";
+import { TwinBadge } from "./MarkedEndMarker";
 import { fallbackSpec, statusColor } from "../lib/bedLayout";
 
 function BedStructure({ lengthFt, headerLabel, bulkheadLabel }) {
@@ -20,16 +21,8 @@ function BedStructure({ lengthFt, headerLabel, bulkheadLabel }) {
         <boxGeometry args={[width + 1.2, 4.4, 1.2]} />
         <meshStandardMaterial color="#C9A227" metalness={0.45} roughness={0.35} emissive="#C9A227" emissiveIntensity={0.1} />
       </mesh>
-      <Html position={[0, 5.1, 0.6]} center>
-        <div style={{ color: "#2979FF", fontFamily: "JetBrains Mono, monospace", fontSize: 10, whiteSpace: "nowrap" }}>
-          {headerLabel || "HEADER / LIVE END"}
-        </div>
-      </Html>
-      <Html position={[0, 5.1, lengthFt - 0.6]} center>
-        <div style={{ color: "#C9A227", fontFamily: "JetBrains Mono, monospace", fontSize: 10, whiteSpace: "nowrap" }}>
-          {bulkheadLabel || "BULKHEAD / DEAD END"}
-        </div>
-      </Html>
+      <TwinBadge text={headerLabel || "HEADER / LIVE END"} color="#2979FF" compact position={[0, 5.1, 0.6]} />
+      <TwinBadge text={bulkheadLabel || "BULKHEAD / DEAD END"} color="#C9A227" compact position={[0, 5.1, lengthFt - 0.6]} />
     </group>
   );
 }

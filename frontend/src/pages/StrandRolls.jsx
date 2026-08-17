@@ -142,7 +142,7 @@ export default function StrandRolls() {
     const body = new FormData();
     files.forEach((file) => body.append("photos", file));
     body.append("kinds", photoList.map((s) => s.kind || "tag").join(","));
-    const { data } = await api.post("/strand-rolls/extract", body);
+    const { data } = await api.post("/strand-rolls/extract", body, { skipOfflineQueue: true });
     if (queuedId) setQueue(dequeueRollJob(queuedId));
     return data;
   };

@@ -131,10 +131,11 @@ async def seed_l25390():
 
     Always refreshes strand pattern + H-56-S hold-downs from the shop-drawing
     gold standard so the tension twin cannot drift to a generic layout.
+    Locks the spec to a dedicated demo beam (L25390-B1) on a tensioning bed.
     """
     try:
         from models import Job
-        from l25390 import build_l25390_spec, LENGTH_FT, merge_l25390_pattern
+        from l25390 import DEMO_MARK, LENGTH_FT, build_l25390_spec, merge_l25390_pattern
 
         job = await db.jobs.find_one({"job_number": "L25390"}, {"_id": 0})
         if not job:
@@ -147,49 +148,118 @@ async def seed_l25390():
             job = job_obj.model_dump()
             await db.jobs.insert_one(job)
 
-        beam = await db.beams.find_one({"twin_type": "i_beam"}, {"_id": 0})
-        beam_id = beam["id"] if beam else None
-        mark = beam["mark"] if beam else "B1"
-        if beam:
-            await db.beams.update_one({"id": beam_id}, {"$set": {
+        bed = await db.beds.find_one({"status": "tensioning"}, {"_id": 0})
+        if not bed:
+            bed = await db.beds.find_one({}, {"_id": 0})
+        if not bed:
+            logger.warning("seed_l25390 skipped — no beds")
+            return
+
+        beam = await db.beams.find_one({"mark": DEMO_MARK}, {"_id": 0})
+        if not beam:
+            occupants = await db.beams.find({"bed_id": bed["id"]}, {"_id": 0}).to_list(50)
+            position = max([int(b.get("position_on_bed") or 0) for b in occupants] or [0]) + 1
+            pt = await db.product_types.find_one({"category": "i_beam"}, {"_id": 0})
+            beam_obj = Beam(
+                mark=DEMO_MARK,
+                bed_id=bed["id"],
+                pour_id=bed.get("current_pour_id") or (occupants[0].get("pour_id") if occupants else None),
+                job_id=job["id"],
+                product_type_id=(pt or {}).get("id"),
+                twin_type="i_beam",
+                length_ft=LENGTH_FT,
+                position_on_bed=position,
+                status="tensioning",
+                qc_state="in_progress",
+                production_status="forming",
+            )
+            beam = beam_obj.model_dump()
+            await db.beams.insert_one(beam)
+            logger.info("seeded demo beam mark=%s bed=%s", DEMO_MARK, bed.get("bed_number"))
+        else:
+            await db.beams.update_one({"id": beam["id"]}, {"$set": {
                 "length_ft": LENGTH_FT,
                 "job_id": job["id"],
+                "twin_type": "i_beam",
+                "bed_id": beam.get("bed_id") or bed["id"],
             }})
+            beam = await db.beams.find_one({"id": beam["id"]}, {"_id": 0})
+
+        beam_id = beam["id"]
+        mark = DEMO_MARK
+        bed_id = beam.get("bed_id") or bed["id"]
+
+        today = datetime.now(timezone.utc).date().isoformat()
+        if not await db.bed_assignments.find_one({"beam_id": beam_id}):
+            rec = BedAssignment(
+                bed_id=bed_id,
+                beam_id=beam_id,
+                job_id=job["id"],
+                pour_id=beam.get("pour_id"),
+                position_on_bed=int(beam.get("position_on_bed") or 1),
+                station_ft=8.0,
+                marked_end_toward="header",
+                scheduled_date=today,
+                scheduled_end_date=today,
+                production_status=beam.get("production_status") or "forming",
+                created_by="system-seed",
+            )
+            await db.bed_assignments.insert_one(rec.model_dump())
+        await db.beds.update_one(
+            {"id": bed_id},
+            {"$set": {"active_beam_id": beam_id, "updated_at": now_iso()}},
+        )
+        await db.strand_roll_assignments.update_many(
+            {"bed_id": bed_id},
+            {"$addToSet": {"beam_ids": beam_id}},
+        )
 
         fresh = build_l25390_spec(
             beam_id=beam_id,
             job_id=job["id"],
-            pour_id=beam.get("pour_id") if beam else None,
+            pour_id=beam.get("pour_id"),
             beam_mark=mark,
         )
         existing = await db.beam_specs.find_one({"job_number": "L25390"}, {"_id": 0})
+        spec_id = None
         if existing:
             dumped = merge_l25390_pattern(existing, fresh)
             dumped["review_notes"] = (
                 existing.get("review_notes")
                 or "Seeded from Larue County contract 255390 / L25390 Type 2 shop-drawing reference."
             )
-            await db.beam_specs.update_one({"id": existing["id"]}, {"$set": {
+            spec_id = existing["id"]
+            await db.beam_specs.update_one({"id": spec_id}, {"$set": {
                 "strands": dumped["strands"],
                 "hold_downs": dumped["hold_downs"],
                 "hardware": dumped["hardware"],
                 "notes": dumped["notes"],
                 "geometry": dumped["geometry"],
                 "review_notes": dumped["review_notes"],
+                "beam_id": beam_id,
+                "beam_mark": mark,
+                "job_id": job["id"],
+                "pour_id": beam.get("pour_id"),
+                "marked_end_id": dumped.get("marked_end_id") or fresh.marked_end_id,
+                "unmarked_end_id": dumped.get("unmarked_end_id") or fresh.unmarked_end_id,
             }})
-            logger.info("l25390 strand pattern refreshed spec=%s strands=%s", existing["id"], len(dumped.get("strands") or []))
-            if beam_id:
-                await db.beams.update_one({"id": beam_id}, {"$set": {"spec_id": existing["id"]}})
-            return
+            logger.info("l25390 strand pattern refreshed spec=%s strands=%s beam=%s", spec_id, len(dumped.get("strands") or []), mark)
+        else:
+            fresh.status = "locked"
+            fresh.locked_by = "system-seed"
+            fresh.locked_at = now_iso()
+            fresh.review_notes = "Seeded from Larue County contract 255390 / L25390 Type 2 shop-drawing reference."
+            dumped = fresh.model_dump()
+            await db.beam_specs.insert_one(dumped)
+            spec_id = fresh.id
+            logger.info("l25390 spec locked spec=%s beam=%s", spec_id, mark)
 
-        fresh.status = "locked"
-        fresh.locked_by = "system-seed"
-        fresh.locked_at = now_iso()
-        fresh.review_notes = "Seeded from Larue County contract 255390 / L25390 Type 2 shop-drawing reference."
-        dumped = fresh.model_dump()
-        await db.beam_specs.insert_one(dumped)
-        if beam_id:
-            await db.beams.update_one({"id": beam_id}, {"$set": {"spec_id": fresh.id}})
+        if spec_id:
+            await db.beams.update_many(
+                {"spec_id": spec_id, "mark": {"$ne": mark}},
+                {"$unset": {"spec_id": ""}},
+            )
+            await db.beams.update_one({"id": beam_id}, {"$set": {"spec_id": spec_id}})
     except Exception:
         logger.exception("seed_l25390 failed")
 

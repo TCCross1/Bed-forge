@@ -1,6 +1,7 @@
 import React, { Suspense, useMemo } from "react";
 import { Canvas } from "@react-three/fiber";
-import { Html, OrbitControls, OrthographicCamera, PerspectiveCamera } from "@react-three/drei";
+import { OrbitControls, OrthographicCamera, PerspectiveCamera } from "@react-three/drei";
+import { MarkedEndMarker, UnmarkedEndMarker, TwinBadge } from "./MarkedEndMarker";
 import * as THREE from "three";
 import {
   holdDownColor, inchesToFt, isDraped, strandEndYIn, strandPathPoints, strandTensionColor,
@@ -127,38 +128,50 @@ function StrandPath({ strand, length, holdDowns, selected, onSelect, showLabel, 
         </mesh>
       )}
       {showLabel && (
-        <Html position={[x, yEnd + 0.18, endView ? 0.12 : 0.2]} center>
-          <div style={{
-            color,
-            fontFamily: "JetBrains Mono, monospace",
-            fontSize: 11,
-            fontWeight: 700,
-            pointerEvents: "none",
-            whiteSpace: "nowrap",
-          }}>
-            {strand.number}{draped ? "D" : ""}
-          </div>
-        </Html>
+        <TwinBadge
+          text={`${strand.number}${draped ? "D" : ""}`}
+          color={color}
+          compact
+          position={[x, yEnd + 0.18, endView ? 0.12 : 0.2]}
+        />
       )}
     </group>
   );
+}
+
+function holdDownClampXs(item) {
+  const qty = Math.max(1, Number(item.quantity_at_station) || 1);
+  const pitchIn = Number(item.offset_in);
+  const pitch = inchesToFt(Number.isFinite(pitchIn) && Math.abs(pitchIn) > 0 ? Math.abs(pitchIn) : 2);
+  if (qty <= 1) return [inchesToFt(Number.isFinite(pitchIn) ? pitchIn : 0)];
+  return [-pitch, pitch];
 }
 
 function HoldDownStation({ item, selected, onSelect, showLabel, geo }) {
   const z = Number(item.station_from_marked_end) || 0;
   const color = holdDownColor(item);
   const web = inchesToFt(geo?.web_thick_in || 6);
+  const xs = holdDownClampXs(item);
   const handle = (e) => {
     e.stopPropagation();
     onSelect({ kind: "hold_down", item });
   };
   return (
     <group position={[0, 0, z]} onClick={handle}>
+      <mesh
+        position={[0, 0.55, 0]}
+        onClick={handle}
+        onPointerOver={() => { document.body.style.cursor = "pointer"; }}
+        onPointerOut={() => { document.body.style.cursor = "auto"; }}
+      >
+        <boxGeometry args={[web + 1.1, 1.35, 0.75]} />
+        <meshBasicMaterial transparent opacity={0} depthWrite={false} />
+      </mesh>
       <mesh position={[0, 0.04, 0]}>
         <boxGeometry args={[web + 0.55, 0.08, 0.42]} />
         <meshStandardMaterial color={color} metalness={0.7} roughness={0.28} emissive={selected ? color : "#000"} emissiveIntensity={selected ? 0.4 : 0} />
       </mesh>
-      {[-0.18, 0.18].map((ox) => (
+      {xs.map((ox) => (
         <group key={ox} position={[ox, 0, 0]}>
           <mesh position={[0, 0.55, 0]}>
             <cylinderGeometry args={[0.035, 0.035, 1.1, 10]} />
@@ -171,17 +184,12 @@ function HoldDownStation({ item, selected, onSelect, showLabel, geo }) {
         </group>
       ))}
       {showLabel && (
-        <Html position={[0, 1.35, 0]} center>
-          <div style={{
-            color,
-            fontFamily: "JetBrains Mono, monospace",
-            fontSize: 10,
-            whiteSpace: "nowrap",
-            pointerEvents: "none",
-          }}>
-            {item.type_spec || "H-56-S"} · {z}' ME
-          </div>
-        </Html>
+        <TwinBadge
+          text={`${item.type_spec || "H-56-S"} · ${z}' ME`}
+          color={color}
+          compact
+          position={[0, 1.35, 0]}
+        />
       )}
     </group>
   );
@@ -217,11 +225,21 @@ function Scene({ spec, strands, holdDowns, view, selected, onSelect }) {
           showLabel
         />
       ))}
-      <Html position={[0, inchesToFt(geo.depth_in) + 0.45, endView ? 0.15 : 0.2]} center>
-        <div style={{ color: "#2979FF", fontFamily: "JetBrains Mono, monospace", fontSize: 11, whiteSpace: "nowrap" }}>
-          {endView ? "MARKED END · STRAND PATTERN" : "MARKED END →"}
-        </div>
-      </Html>
+      <MarkedEndMarker
+        depthFt={inchesToFt(geo.depth_in)}
+        widthFt={inchesToFt(geo.top_flange_width_in || geo.width_in)}
+        compact={endView}
+        stripeFt={endView ? 0 : undefined}
+        label={endView ? "ME · STRAND PATTERN" : (spec.marked_end_id || "MARKED END")}
+      />
+      {!endView && (
+        <UnmarkedEndMarker
+          depthFt={inchesToFt(geo.depth_in)}
+          widthFt={inchesToFt(geo.top_flange_width_in || geo.width_in)}
+          z={length}
+          label={spec.unmarked_end_id || "UE"}
+        />
+      )}
     </group>
   );
 }
@@ -249,7 +267,7 @@ export default function TensionTwin({
         <Suspense fallback={null}>
           <color attach="background" args={["#0A0C10"]} />
           {endView ? (
-            <OrthographicCamera makeDefault position={[0, depth * 0.5, -6]} zoom={118} near={0.1} far={80} />
+            <OrthographicCamera makeDefault position={[0, depth * 0.5, -6]} zoom={height >= 480 ? 118 : 96} near={0.1} far={80} />
           ) : (
             <PerspectiveCamera makeDefault position={perspPos} fov={42} />
           )}

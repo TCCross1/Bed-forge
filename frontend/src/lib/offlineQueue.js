@@ -93,9 +93,17 @@ export async function removeAction(id) {
 }
 
 export function isFieldWrite(url = "", method = "get") {
-  if (String(method).toLowerCase() !== "post" && String(method).toLowerCase() !== "patch") return false;
+  const verb = String(method).toLowerCase();
+  if (verb !== "post" && verb !== "patch") return false;
   const path = String(url).split("?")[0];
-  return FIELD_WRITE_RE.test(path) || path.includes("/ar-tape-runs") || path.includes("/cylinders/") && path.includes("/crush");
+  if (FIELD_WRITE_RE.test(path)) return true;
+  if (/\/strand-rolls\/[^/]+\/(confirm|assign)$/.test(path)) return true;
+  if (/\/beam-specs\/[^/]+\/strands\/[^/]+\/tension$/.test(path)) return true;
+  if (/\/beam-specs\/[^/]+\/hold-downs\/[^/]+\/check$/.test(path)) return true;
+  if (/\/beams\/[^/]+$/.test(path) && verb === "patch") return true;
+  if (path.includes("/ar-tape-runs")) return true;
+  if (path.includes("/cylinders/") && path.includes("/crush")) return true;
+  return false;
 }
 
 export function shouldQueueError(err) {
@@ -103,6 +111,68 @@ export function shouldQueueError(err) {
   if (!err.response && (err.code === "ERR_NETWORK" || err.message === "Network Error" || !navigator.onLine)) return true;
   if (err.response?.status >= 500) return false;
   return false;
+}
+
+function blobToDataUrl(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(reader.error || new Error("read failed"));
+    reader.readAsDataURL(blob);
+  });
+}
+
+function dataUrlToBlob(dataUrl, filename, type) {
+  const [meta, body] = String(dataUrl || "").split(",");
+  const mime = type || (meta.match(/data:(.*?);/) || [])[1] || "application/octet-stream";
+  const binary = atob(body || "");
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+  return new File([bytes], filename || "upload.bin", { type: mime });
+}
+
+export async function serializeRequestBody(raw) {
+  if (raw == null) return raw;
+  if (typeof FormData !== "undefined" && raw instanceof FormData) {
+    const entries = [];
+    for (const [name, value] of raw.entries()) {
+      if (typeof Blob !== "undefined" && value instanceof Blob) {
+        const dataUrl = await blobToDataUrl(value);
+        entries.push({
+          name,
+          filename: value.name || "upload.bin",
+          type: value.type || "application/octet-stream",
+          dataUrl,
+        });
+      } else {
+        entries.push({ name, value: String(value) });
+      }
+    }
+    return { __formData: true, entries };
+  }
+  if (typeof raw === "string") {
+    try {
+      return JSON.parse(raw);
+    } catch (err) {
+      return raw;
+    }
+  }
+  return raw;
+}
+
+export function reviveRequestBody(data) {
+  if (data && data.__formData && Array.isArray(data.entries)) {
+    const fd = new FormData();
+    data.entries.forEach((entry) => {
+      if (entry.dataUrl) {
+        fd.append(entry.name, dataUrlToBlob(entry.dataUrl, entry.filename, entry.type));
+      } else {
+        fd.append(entry.name, entry.value);
+      }
+    });
+    return fd;
+  }
+  return data;
 }
 
 let flushing = false;
@@ -118,7 +188,7 @@ export async function flushQueue(api) {
         await api.request({
           method: item.method,
           url: item.url,
-          data: item.data,
+          data: reviveRequestBody(item.data),
           headers: item.headers,
           skipOfflineQueue: true,
         });
@@ -127,8 +197,20 @@ export async function flushQueue(api) {
       } catch (err) {
         console.error("[offline] flush item failed id=%s", item.id, err);
         if (shouldQueueError(err)) break;
+        const status = err.response?.status;
+        if (status === 409) {
+          continue;
+        }
         item.tries = (item.tries || 0) + 1;
-        if (item.tries >= 8) await removeAction(item.id);
+        if (item.tries >= 8 && status && status >= 400 && status < 500) {
+          await removeAction(item.id);
+        } else {
+          try {
+            await enqueueAction(item);
+          } catch (saveErr) {
+            console.error("[offline] retry save failed", saveErr);
+          }
+        }
       }
     }
   } finally {

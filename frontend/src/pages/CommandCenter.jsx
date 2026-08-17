@@ -375,8 +375,14 @@ export default function CommandCenter() {
                   <option value="qc_force">Force QC passed</option>
                 </select>
               </Field>
-              <Field label="Target id (bed, spec, or beam)">
-                <input className={inputClass} value={override.target_id} onChange={(e) => setOverride({ ...override, target_id: e.target.value })} required />
+              <Field label="Bed number, beam mark, or UUID">
+                <input
+                  className={inputClass}
+                  value={override.target_id}
+                  onChange={(e) => setOverride({ ...override, target_id: e.target.value })}
+                  placeholder="e.g. 3  ·  L25390-B1  ·  or UUID"
+                  required
+                />
               </Field>
               <div className="sm:col-span-2">
                 <Field label="Written reason (required, audited)">

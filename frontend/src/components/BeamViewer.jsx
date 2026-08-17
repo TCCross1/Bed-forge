@@ -1,9 +1,10 @@
 import React, { useMemo, useState, Suspense } from "react";
 import { Canvas } from "@react-three/fiber";
-import { OrbitControls, Environment, Html, ContactShadows } from "@react-three/drei";
+import { OrbitControls, Environment, ContactShadows } from "@react-three/drei";
 import * as THREE from "three";
 import { hardwareColor, inchesToFt, strandPathPoints } from "../lib/beamSpec";
 import { COMPACT_HARDWARE_KINDS } from "../lib/bedLayout";
+import { MarkedEndMarker, UnmarkedEndMarker } from "./MarkedEndMarker";
 
 function iBeamShape(geo) {
   const s = new THREE.Shape();
@@ -236,35 +237,6 @@ function Stirrups({ zones, geo }) {
   );
 }
 
-function EndStamp({ label, z, depth }) {
-  return (
-    <Html position={[0, depth + 0.35, z]} center>
-      <div style={{
-        background: "#0F1218",
-        border: "1px solid #2979FF",
-        color: "#2979FF",
-        fontFamily: "JetBrains Mono, monospace",
-        fontSize: 9,
-        padding: "3px 6px",
-        whiteSpace: "nowrap",
-      }}>
-        {label}
-      </div>
-    </Html>
-  );
-}
-
-function MarkedEndArrow({ depth }) {
-  return (
-    <group position={[0, depth + 0.35, 0.35]}>
-      <mesh rotation={[-Math.PI / 2, 0, 0]}>
-        <coneGeometry args={[0.22, 0.7, 8]} />
-        <meshStandardMaterial color="#2979FF" emissive="#2979FF" emissiveIntensity={0.45} />
-      </mesh>
-    </group>
-  );
-}
-
 export function SpecBeam({
   spec,
   compact = false,
@@ -323,24 +295,20 @@ export function SpecBeam({
           </mesh>
         );
       })}
-      <MarkedEndArrow depth={depth} />
-      {!compact && <EndStamp label={spec.marked_end_id || "MARKED END"} z={0.2} depth={depth} />}
-      {!compact && <EndStamp label={spec.unmarked_end_id || "UNMARKED END"} z={length - 0.2} depth={depth} />}
-      {compact && mark && (
-        <Html position={[0, depth + 1.1, length / 2]} center>
-          <div style={{
-            background: "#0F1218",
-            border: highlighted ? "1px solid #FFD600" : "1px solid #1C2230",
-            color: highlighted ? "#FFD600" : "#FFFFFF",
-            fontFamily: "JetBrains Mono, monospace",
-            fontSize: 10,
-            padding: "3px 7px",
-            whiteSpace: "nowrap",
-          }}>
-            {mark} · ME
-          </div>
-        </Html>
-      )}
+      <MarkedEndMarker
+        depthFt={depth}
+        widthFt={inchesToFt(geo.top_flange_width_in || geo.width_in)}
+        compact={compact}
+        label={compact ? "ME" : (spec.marked_end_id || "MARKED END")}
+        sublabel={compact ? (mark || spec.beam_mark || "") : ""}
+      />
+      <UnmarkedEndMarker
+        depthFt={depth}
+        widthFt={inchesToFt(geo.top_flange_width_in || geo.width_in)}
+        z={Number(length) || 0}
+        compact={compact}
+        label={spec.unmarked_end_id || "UE"}
+      />
     </group>
   );
 }
@@ -377,6 +345,8 @@ function FallbackBeam({ twinType, length, pickPos, onPick }) {
   return (
     <group position={[0, 0, -scaled / 2]}>
       <BeamBody geo={geo} onPick={onPick} />
+      <MarkedEndMarker depthFt={inchesToFt(geo.depth_in)} widthFt={inchesToFt(geo.top_flange_width_in)} label="ME" />
+      <UnmarkedEndMarker depthFt={inchesToFt(geo.depth_in)} widthFt={inchesToFt(geo.top_flange_width_in)} z={scaled} label="UE" />
       {pickPos && (
         <mesh position={[pickPos.x, pickPos.y, pickPos.z + scaled / 2]}>
           <sphereGeometry args={[0.1, 12, 12]} />

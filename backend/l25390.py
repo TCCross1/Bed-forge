@@ -22,6 +22,8 @@ DEPTH_IN = 36.0
 HOLD_DOWN_ME_FT = 29.333  # 29'-4"
 HOLD_DOWN_UE_FT = 44.0    # 44'-0"
 HOLD_DOWN_TYPE = "Dayton/Richmond H-56-S"
+DEMO_MARK = "L25390-B1"
+HOLD_DOWN_CLAMP_OFFSET_IN = 2.0  # H-56-S pair, ±2" from web centerline (matches draped strands)
 
 
 def _hw(kind, name, station_ft, height_in, *, offset_in=0.0, face="top",
@@ -204,19 +206,21 @@ def build_l25390_spec(beam_id=None, job_id=None, pour_id=None, blueprint_id=None
         HoldDownItem(
             station_from_marked_end=hd1,
             height=2.5,
+            offset_in=HOLD_DOWN_CLAMP_OFFSET_IN,
             type_spec=HOLD_DOWN_TYPE,
             quantity_at_station=2,
             orientation="transverse",
-            notes="Dayton/Richmond H-56-S. Casting bed layout Spans 1 & 3 — 29'-4\" ME.",
+            notes="Dayton/Richmond H-56-S. Casting bed layout Spans 1 & 3 — 29'-4\" ME. Pair at ±2\" web.",
             page=2,
         ),
         HoldDownItem(
             station_from_marked_end=hd2,
             height=2.5,
+            offset_in=HOLD_DOWN_CLAMP_OFFSET_IN,
             type_spec=HOLD_DOWN_TYPE,
             quantity_at_station=2,
             orientation="transverse",
-            notes="Dayton/Richmond H-56-S. Casting bed layout Spans 1 & 3 — 44'-0\" ME.",
+            notes="Dayton/Richmond H-56-S. Casting bed layout Spans 1 & 3 — 44'-0\" ME. Pair at ±2\" web.",
             page=2,
         ),
     ]

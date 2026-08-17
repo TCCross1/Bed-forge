@@ -13,6 +13,7 @@ from fastapi.responses import StreamingResponse
 from audit import write_audit
 from auth import hash_password, require_exec, require_roles
 from db import db
+from override_target import OverrideTargetError, classify_override_target
 from models import (
     OverrideRequest, SecuritySettingsUpdate, UserAdminCreate, UserAdminUpdate, new_id, now_iso,
 )
@@ -258,6 +259,21 @@ async def update_security(payload: SecuritySettingsUpdate, request: Request, use
         raise HTTPException(status_code=500, detail="Failed to update security settings")
 
 
+async def resolve_override_target(kind: str, raw: str) -> str:
+    try:
+        lookup = classify_override_target(kind, raw)
+    except OverrideTargetError as err:
+        raise HTTPException(status_code=err.status_code, detail=err.message) from err
+    coll = getattr(db, lookup["collection"])
+    doc = await coll.find_one(lookup["query"], {"_id": 0, "id": 1})
+    if not doc and lookup.get("alt_query"):
+        doc = await coll.find_one(lookup["alt_query"], {"_id": 0, "id": 1})
+    if not doc:
+        label = lookup.get("label") or "target"
+        raise HTTPException(status_code=404, detail=f"{label} not found — use bed number, beam mark, or UUID")
+    return doc["id"]
+
+
 @router.post("/override")
 async def create_override(payload: OverrideRequest, request: Request, user=Depends(office_guard)):
     try:
@@ -266,11 +282,13 @@ async def create_override(payload: OverrideRequest, request: Request, user=Depen
             raise HTTPException(status_code=400, detail="Unknown override kind")
         if not payload.reason.strip():
             raise HTTPException(status_code=400, detail="A written reason is required")
+        target_id = await resolve_override_target(kind, payload.target_id)
         expires = (datetime.now(timezone.utc) + timedelta(hours=max(1, min(payload.hours, 72)))).isoformat()
         rec = {
             "id": new_id(),
             "kind": kind,
-            "target_id": payload.target_id,
+            "target_id": target_id,
+            "target_input": (payload.target_id or "").strip()[:80],
             "reason": payload.reason.strip()[:500],
             "created_by": user.get("email"),
             "created_at": now_iso(),
@@ -278,19 +296,19 @@ async def create_override(payload: OverrideRequest, request: Request, user=Depen
             "revoked": False,
         }
         if kind == "spec_unlock":
-            spec = await db.beam_specs.find_one({"id": payload.target_id}, {"_id": 0})
+            spec = await db.beam_specs.find_one({"id": target_id}, {"_id": 0})
             if not spec:
                 raise HTTPException(status_code=404, detail="BeamSpec not found")
-            await db.beam_specs.update_one({"id": payload.target_id}, {"$set": {"status": "reviewed", "unlocked_by": user.get("email"), "unlocked_at": now_iso()}})
+            await db.beam_specs.update_one({"id": target_id}, {"$set": {"status": "reviewed", "unlocked_by": user.get("email"), "unlocked_at": now_iso()}})
         if kind == "qc_force":
-            beam = await db.beams.find_one({"id": payload.target_id}, {"_id": 0})
+            beam = await db.beams.find_one({"id": target_id}, {"_id": 0})
             if not beam:
                 raise HTTPException(status_code=404, detail="Beam not found")
             rec["before_qc_state"] = beam.get("qc_state")
-            await db.beams.update_one({"id": payload.target_id}, {"$set": {"qc_state": "passed", "override_reason": payload.reason.strip()}})
+            await db.beams.update_one({"id": target_id}, {"$set": {"qc_state": "passed", "override_reason": payload.reason.strip()}})
         await db.overrides.insert_one(rec)
-        await write_audit(action="override.create", user=user, request=request, entity_type=kind, entity_id=payload.target_id, after=rec, reason=payload.reason)
-        logger.info("override kind=%s target=%s by=%s", kind, payload.target_id, user.get("email"))
+        await write_audit(action="override.create", user=user, request=request, entity_type=kind, entity_id=target_id, after=rec, reason=payload.reason)
+        logger.info("override kind=%s target=%s input=%s by=%s", kind, target_id, rec.get("target_input"), user.get("email"))
         rec.pop("_id", None)
         return rec
     except HTTPException:

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import api, { formatApiErrorDetail } from "../lib/api";
 import Layout, { PageHeader, cardClass, ARMeasureLink } from "../components/Layout";
 import PlantFloor from "../components/PlantFloor";
@@ -189,6 +189,32 @@ export default function Dashboard() {
               <Stat label="Release expected pass" value={s.release_expected_pass} color="#00E676" icon={CheckCircle2} testid="stat-release-pass" />
               <Stat label="Release borderline" value={s.release_borderline} color="#FFD600" icon={AlertTriangle} testid="stat-release-border" />
               <Stat label="Release fail risk" value={s.release_fail_risk} color="#FF3366" icon={XCircle} testid="stat-release-fail" />
+            </div>
+
+            <div className={`${cardClass} p-4 sm:p-5 mb-6`} data-testid="plant-demo-path">
+              <div className="text-[10px] font-mono uppercase tracking-[0.25em] text-[#C9A227]">Today’s plant path</div>
+              <div className="font-display font-bold uppercase tracking-wider mt-1 mb-3">One clean walk from mill tag to DOT package</div>
+              <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2">
+                {[
+                  { n: "01", label: "Log rolls", to: "/rolls" },
+                  { n: "02", label: "Assign beds", to: "/planner" },
+                  { n: "03", label: "Tension twin", to: "/tension" },
+                  { n: "04", label: "Inspect", to: "/inspection" },
+                  { n: "05", label: "Camber", to: "/camber" },
+                  { n: "06", label: "Tags + QR", to: "/tags" },
+                  { n: "07", label: "Release", to: "/release" },
+                  { n: "08", label: "DOT package", to: "/packages" },
+                ].map((step) => (
+                  <Link
+                    key={step.n}
+                    to={step.to}
+                    className="min-h-12 border border-[#1C2230] px-2 py-2 hover:border-primary hover:text-primary flex flex-col justify-center"
+                  >
+                    <span className="font-mono text-[10px] text-muted-foreground">{step.n}</span>
+                    <span className="text-xs font-semibold uppercase tracking-wider">{step.label}</span>
+                  </Link>
+                ))}
+              </div>
             </div>
 
             {(measurements[0] || events[0]) && (

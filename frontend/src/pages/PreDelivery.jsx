@@ -4,7 +4,7 @@ import api, { formatApiErrorDetail } from "../lib/api";
 import Layout, { PageHeader, Field, inputClass, cardClass } from "../components/Layout";
 import { toast } from "sonner";
 import { Loader2, Truck } from "lucide-react";
-import { useAuth } from "../context/AuthContext";
+import { pickBeamId, useBeamQuery } from "../lib/useBeamQuery";
 
 const CHECKS = [
   { key: "dimensional_check", label: "Dimensional check complete" },
@@ -33,8 +33,9 @@ const EMPTY = {
 
 export default function PreDelivery() {
   const { user } = useAuth();
+  const queryBeam = useBeamQuery();
   const [beams, setBeams] = useState([]);
-  const [beamId, setBeamId] = useState("");
+  const [beamId, setBeamId] = useState(queryBeam);
   const [form, setForm] = useState({ ...EMPTY, qc_signoff: user?.name || "" });
   const [history, setHistory] = useState([]);
   const [saving, setSaving] = useState(false);
@@ -45,7 +46,7 @@ export default function PreDelivery() {
       .then((r) => {
         if (cancelled) return;
         setBeams(r.data);
-        setBeamId((current) => current || r.data[0]?.id || "");
+        setBeamId((current) => pickBeamId(current, queryBeam, r.data));
       })
       .catch((err) => {
         if (cancelled) return;
@@ -55,7 +56,7 @@ export default function PreDelivery() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [queryBeam]);
 
   useEffect(() => {
     if (!beamId) return undefined;
