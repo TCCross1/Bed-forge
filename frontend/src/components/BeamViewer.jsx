@@ -361,7 +361,7 @@ function StrandPaths({ beam, spec, onHardwareSelect }) {
     } else {
       points.push(new THREE.Vector3(strand.x, strand.y, spec.length / 2));
     }
-    points.push(new THREE.Vector3(strand.x, strand.y, spec.length]);
+    points.push(new THREE.Vector3(strand.x, strand.y, spec.length));
     const payload = { id: `strand-${index}`, type: "Prestressing strand", beamMark: beam.mark, spec: { index: index + 1, draped: beam.twin_type === "i_beam", row_y_ft: strand.y } };
     return (
       <group key={payload.id} onClick={(event) => clickHardware(event, payload, onHardwareSelect)}>
