@@ -5,7 +5,7 @@ Heights are inches from soffit. Offsets are inches from beam centerline
 (+ toward the right when looking from Marked End toward Unmarked End).
 """
 from typing import Any, Dict, List, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from models import new_id, now_iso
 
@@ -55,21 +55,86 @@ class HardwareItem(BaseModel):
     tolerance_in: float = 1.0
 
 
+HOLD_DOWN_STATES = ["pending", "installed", "stressed", "released", "inspected", "verified", "issue"]
+DEFAULT_MODULUS_KSI = 28500.0
+
+
 class StrandItem(BaseModel):
     id: str = Field(default_factory=new_id)
+    strand_id: str = ""
     number: int = 1
+    row: int = 0
+    column: int = 0
     size: str = "0.5in"
     detensioning: str = "straight"  # straight | draped
+    draped: bool = False
     area_in2: float = 0.153
     jacking_kip: float = 31.0
     soffit_in: float = 2.0
+    offset_in: float = 0.0
+    x_in: Optional[float] = None
+    y_in: Optional[float] = None
     drape_peak_in: Optional[float] = None
     hold_down_stations_ft: List[float] = Field(default_factory=list)
     debond_me_ft: float = 0.0
     debond_ue_ft: float = 0.0
-    offset_in: float = 0.0
+    modulus_ksi: float = DEFAULT_MODULUS_KSI
+    theoretical_elongation: Optional[float] = None
+    measured_elongation: Optional[float] = None
+    jacking_force: Optional[float] = None
+    variance_pct: Optional[float] = None
+    within_tolerance: Optional[bool] = None
+    na: bool = False
+    recorded_by: str = ""
+    recorded_at: Optional[str] = None
     notes: str = ""
     page: Optional[int] = None
+
+    @model_validator(mode="after")
+    def sync_pattern_fields(self):
+        if not self.strand_id:
+            self.strand_id = self.id
+        if self.detensioning == "draped":
+            self.draped = True
+        elif self.draped:
+            self.detensioning = "draped"
+        if self.x_in is None:
+            self.x_in = self.offset_in
+        else:
+            self.offset_in = self.x_in
+        if self.y_in is None:
+            self.y_in = self.soffit_in
+        else:
+            self.soffit_in = self.y_in
+        return self
+
+
+class HoldDownItem(BaseModel):
+    id: str = Field(default_factory=new_id)
+    station_from_marked_end: float = 0.0
+    height: float = 2.5
+    offset_in: float = 0.0
+    type_spec: str = "I-beam hold-down"
+    quantity_at_station: int = 1
+    orientation: str = "transverse"
+    status: str = "pending"
+    notes: str = ""
+    verified_by: str = ""
+    verified_at: Optional[str] = None
+    page: Optional[int] = None
+
+
+class StrandTensionCapture(BaseModel):
+    measured_elongation_in: Optional[float] = None
+    jacking_force_kip: Optional[float] = None
+    bed_length_ft: Optional[float] = None
+    na: bool = False
+    notes: str = ""
+
+
+class HoldDownCapture(BaseModel):
+    status: str = "pending"
+    notes: str = ""
 
 
 class StirrupZone(BaseModel):
@@ -121,6 +186,7 @@ class BeamSpec(BaseModel):
     marked_end_id: str = ""
     unmarked_end_id: str = ""
     strands: List[StrandItem] = Field(default_factory=list)
+    hold_downs: List[HoldDownItem] = Field(default_factory=list)
     hardware: List[HardwareItem] = Field(default_factory=list)
     stirrup_zones: List[StirrupZone] = Field(default_factory=list)
     bill_of_materials: List[BillItem] = Field(default_factory=list)
@@ -187,6 +253,7 @@ class BeamSpecPatch(BaseModel):
     marked_end_id: Optional[str] = None
     unmarked_end_id: Optional[str] = None
     strands: Optional[List[StrandItem]] = None
+    hold_downs: Optional[List[HoldDownItem]] = None
     hardware: Optional[List[HardwareItem]] = None
     stirrup_zones: Optional[List[StirrupZone]] = None
     notes: Optional[List[str]] = None
@@ -245,3 +312,90 @@ def compare_measurement(spec: BeamSpec, payload: SpecMeasurementCreate, inspecto
 
 def flatten_hardware(spec: Dict[str, Any]) -> List[Dict[str, Any]]:
     return list(spec.get("hardware") or [])
+
+
+def assign_strand_grid(strands: List[StrandItem]) -> List[StrandItem]:
+    """Assign row/column from physical x/y so the end-view pattern is unique per beam."""
+    if not strands:
+        return strands
+    heights = sorted({round(float(s.y_in if s.y_in is not None else s.soffit_in), 2) for s in strands})
+    height_row = {h: i + 1 for i, h in enumerate(heights)}
+    by_row: Dict[int, List[StrandItem]] = {}
+    for strand in strands:
+        y = round(float(strand.y_in if strand.y_in is not None else strand.soffit_in), 2)
+        strand.row = height_row.get(y, 1)
+        strand.x_in = float(strand.x_in if strand.x_in is not None else strand.offset_in)
+        strand.y_in = float(strand.y_in if strand.y_in is not None else strand.soffit_in)
+        strand.offset_in = strand.x_in
+        strand.soffit_in = strand.y_in
+        if not strand.strand_id:
+            strand.strand_id = strand.id
+        by_row.setdefault(strand.row, []).append(strand)
+    for row_strands in by_row.values():
+        ordered = sorted(row_strands, key=lambda s: float(s.x_in if s.x_in is not None else s.offset_in))
+        for col, strand in enumerate(ordered, start=1):
+            strand.column = col
+    return strands
+
+
+def hold_downs_from_hardware(hardware: List[Any]) -> List[HoldDownItem]:
+    items = []
+    for raw in hardware or []:
+        kind = raw.get("kind") if isinstance(raw, dict) else getattr(raw, "kind", "")
+        if kind != "hold_down":
+            continue
+        if isinstance(raw, dict):
+            pos = raw.get("position") or {}
+            station = float(pos.get("station_ft") or raw.get("station_from_marked_end") or 0)
+            height = float(pos.get("height_from_soffit_in") or raw.get("height") or 2.5)
+            offset = float(pos.get("offset_in") or raw.get("offset_in") or 0)
+            type_spec = raw.get("type_code") or raw.get("size") or raw.get("name") or "I-beam hold-down"
+            qty = int(raw.get("quantity") or 1)
+            notes = raw.get("notes") or ""
+            hid = raw.get("id") or new_id()
+            page = pos.get("page")
+        else:
+            pos = raw.position
+            station = float(pos.station_ft)
+            height = float(pos.height_from_soffit_in)
+            offset = float(pos.offset_in)
+            type_spec = raw.type_code or raw.size or raw.name or "I-beam hold-down"
+            qty = int(raw.quantity or 1)
+            notes = raw.notes or ""
+            hid = raw.id
+            page = pos.page
+        items.append(HoldDownItem(
+            id=hid,
+            station_from_marked_end=station,
+            height=height,
+            offset_in=offset,
+            type_spec=type_spec,
+            quantity_at_station=max(qty, 1),
+            orientation="transverse",
+            notes=notes,
+            page=page,
+        ))
+    return items
+
+
+def ensure_tension_geometry(spec: BeamSpec) -> BeamSpec:
+    assign_strand_grid(spec.strands)
+    if not spec.hold_downs:
+        spec.hold_downs = hold_downs_from_hardware(spec.hardware)
+    return spec
+
+
+def strand_status_key(strand: Dict[str, Any]) -> str:
+    if strand.get("na"):
+        return "na"
+    if strand.get("measured_elongation") is None:
+        return "pending"
+    if strand.get("within_tolerance") is True:
+        return "pass"
+    if strand.get("within_tolerance") is False:
+        return "fail"
+    return "pending"
+
+
+def hold_down_done(item: Dict[str, Any]) -> bool:
+    return item.get("status") in ("verified", "inspected", "released")

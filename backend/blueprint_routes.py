@@ -250,7 +250,7 @@ async def patch_spec(spec_id: str, payload: BeamSpecPatch, user=Depends(get_curr
     updates = {k: v for k, v in payload.model_dump().items() if v is not None}
     if "geometry" in updates and hasattr(updates["geometry"], "model_dump"):
         updates["geometry"] = updates["geometry"].model_dump()
-    for key in ("strands", "hardware", "stirrup_zones"):
+    for key in ("strands", "hardware", "stirrup_zones", "hold_downs"):
         if key in updates:
             updates[key] = [x.model_dump() if hasattr(x, "model_dump") else x for x in updates[key]]
     updates["updated_at"] = now_iso()

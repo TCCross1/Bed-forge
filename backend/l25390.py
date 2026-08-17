@@ -8,7 +8,8 @@ Geometry follows AASHTO Type II / KYTC PC I-Beam Type 2:
 36" deep, 18" bottom flange, 12" top flange, 6" web.
 """
 from beam_spec import (
-    BeamSpec, BeamGeometry, HardwareItem, StationRef, StrandItem, StirrupZone,
+    BeamSpec, BeamGeometry, HardwareItem, StationRef, StrandItem, StirrupZone, HoldDownItem,
+    ensure_tension_geometry,
 )
 
 
@@ -53,40 +54,54 @@ def build_l25390_spec(beam_id=None, job_id=None, pour_id=None, blueprint_id=None
     strand_offsets = [-6.0, -3.6, -1.2, 1.2, 3.6, 6.0]
     strands = []
     n = 1
-    for _row in range(2):
-        for off in strand_offsets:
+    for row in range(2):
+        soffit = 2.0 + row * 2.25
+        for col, off in enumerate(strand_offsets, start=1):
             debond = 4.0 if abs(off) >= 5.5 and n <= 4 else 0.0
             strands.append(StrandItem(
                 number=n,
+                row=row + 1,
+                column=col,
                 size="0.5in",
                 detensioning="straight",
+                draped=False,
                 area_in2=0.153,
                 jacking_kip=31.0,
-                soffit_in=2.0,
+                soffit_in=soffit,
                 offset_in=off,
+                x_in=off,
+                y_in=soffit,
                 debond_me_ft=debond,
                 debond_ue_ft=debond,
                 notes="Bottom flange straight. Outer pair bituminous-debonded 4'-0\" each end." if debond else "",
                 page=2,
             ))
             n += 1
-    # 8 draped strands
-    drape_off = [-4.8, -1.6, 1.6, 4.8, -4.8, -1.6, 1.6, 4.8]
-    for i, off in enumerate(drape_off):
-        strands.append(StrandItem(
-            number=n,
-            size="0.5in",
-            detensioning="draped",
-            area_in2=0.153,
-            jacking_kip=31.0,
-            soffit_in=2.0,
-            drape_peak_in=18.0,
-            hold_down_stations_ft=[hd1, hd2],
-            offset_in=off,
-            notes="Harped / draped. Hold-downs at 0.4L and 0.6L.",
-            page=2,
-        ))
-        n += 1
+    drape_rows = [
+        (2.0, [-4.8, -1.6, 1.6, 4.8]),
+        (4.25, [-4.8, -1.6, 1.6, 4.8]),
+    ]
+    for row_i, (soffit, offs) in enumerate(drape_rows, start=1):
+        for col, off in enumerate(offs, start=1):
+            strands.append(StrandItem(
+                number=n,
+                row=row_i,
+                column=col,
+                size="0.5in",
+                detensioning="draped",
+                draped=True,
+                area_in2=0.153,
+                jacking_kip=31.0,
+                soffit_in=soffit,
+                drape_peak_in=18.0,
+                hold_down_stations_ft=[hd1, hd2],
+                offset_in=off,
+                x_in=off,
+                y_in=soffit,
+                notes="Harped / draped. Hold-downs at 0.4L and 0.6L.",
+                page=2,
+            ))
+            n += 1
 
     hardware = []
 
@@ -165,19 +180,39 @@ def build_l25390_spec(beam_id=None, job_id=None, pour_id=None, blueprint_id=None
         notes="Diaphragm tie-rod opening, Unmarked End.", tolerance_in=0.5, page=3,
     ))
 
-    # Hold-downs
+    # Hold-downs — I-beam clamps, pair at each harped station
     hardware.append(_hw(
         "hold_down", "Hold-down 1", hd1, 2.5,
-        face="bottom", type_code="HD-1", size="hold-down assembly",
-        material="steel", notes="Draped-strand hold-down at 0.4L.",
-        tolerance_in=1.0, page=2,
+        face="bottom", type_code="HD-1", size="I-beam hold-down",
+        material="steel", notes="Draped-strand hold-down at 0.4L. Pair across web.",
+        tolerance_in=1.0, quantity=2, page=2,
     ))
     hardware.append(_hw(
         "hold_down", "Hold-down 2", hd2, 2.5,
-        face="bottom", type_code="HD-2", size="hold-down assembly",
-        material="steel", notes="Draped-strand hold-down at 0.6L.",
-        tolerance_in=1.0, page=2,
+        face="bottom", type_code="HD-2", size="I-beam hold-down",
+        material="steel", notes="Draped-strand hold-down at 0.6L. Pair across web.",
+        tolerance_in=1.0, quantity=2, page=2,
     ))
+    hold_downs = [
+        HoldDownItem(
+            station_from_marked_end=hd1,
+            height=2.5,
+            type_spec="I-beam hold-down HD-1",
+            quantity_at_station=2,
+            orientation="transverse",
+            notes="Draped-strand hold-down at 0.4L. Pair across web.",
+            page=2,
+        ),
+        HoldDownItem(
+            station_from_marked_end=hd2,
+            height=2.5,
+            type_spec="I-beam hold-down HD-2",
+            quantity_at_station=2,
+            orientation="transverse",
+            notes="Draped-strand hold-down at 0.6L. Pair across web.",
+            page=2,
+        ),
+    ]
 
     # Projecting rebar at unmarked end (continuity)
     hardware.append(_hw(
@@ -224,7 +259,7 @@ def build_l25390_spec(beam_id=None, job_id=None, pour_id=None, blueprint_id=None
                     shape="hoop", notes="Confined end-zone hoops — Unmarked End", page=2),
     ]
 
-    return BeamSpec(
+    spec = BeamSpec(
         beam_id=beam_id,
         job_id=job_id,
         pour_id=pour_id,
@@ -248,6 +283,7 @@ def build_l25390_spec(beam_id=None, job_id=None, pour_id=None, blueprint_id=None
         marked_end_id=f"{JOB_NUMBER} / {beam_mark} / ME",
         unmarked_end_id=f"{JOB_NUMBER} / {beam_mark} / UE",
         strands=strands,
+        hold_downs=hold_downs,
         hardware=hardware,
         stirrup_zones=stirrup_zones,
         notes=[
@@ -269,3 +305,4 @@ def build_l25390_spec(beam_id=None, job_id=None, pour_id=None, blueprint_id=None
         extractor_confidence=0.92,
         source_pages=3,
     )
+    return ensure_tension_geometry(spec)

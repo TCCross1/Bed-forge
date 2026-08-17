@@ -55,3 +55,36 @@ export function latestMeasurements(list) {
 export function inchesToFt(inches) {
   return (Number(inches) || 0) / 12;
 }
+
+export const STRAND_TENSION_COLORS = {
+  pending: "#8B949E",
+  pass: "#00E676",
+  fail: "#FF3366",
+  na: "#2979FF",
+};
+
+export const HOLD_DOWN_STATUS_COLORS = {
+  pending: "#8B949E",
+  installed: "#2979FF",
+  stressed: "#FFD600",
+  released: "#00BCD4",
+  inspected: "#00E676",
+  verified: "#00E676",
+  issue: "#FF3366",
+};
+
+export function strandTensionStatus(strand) {
+  if (strand?.na) return "na";
+  if (strand?.measured_elongation == null && strand?.measured_elongation_in == null) return "pending";
+  if (strand?.within_tolerance === true || strand?.status === "pass") return "pass";
+  if (strand?.within_tolerance === false || strand?.status === "fail") return "fail";
+  return strand?.status || "pending";
+}
+
+export function strandTensionColor(strand) {
+  return STRAND_TENSION_COLORS[strandTensionStatus(strand)] || STRAND_TENSION_COLORS.pending;
+}
+
+export function holdDownColor(item) {
+  return HOLD_DOWN_STATUS_COLORS[item?.status] || HOLD_DOWN_STATUS_COLORS.pending;
+}

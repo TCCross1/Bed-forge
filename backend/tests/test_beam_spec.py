@@ -50,6 +50,8 @@ def test_l25390_strands_and_hardware():
     assert len(inserts) == 16
     loops = [h for h in spec.hardware if h.kind == "lift_loop"]
     assert len(loops) == 2
+    assert len(spec.hold_downs) == 2
+    assert all(s.row >= 1 and s.column >= 1 for s in spec.strands)
     assert spec.notes
     assert spec.special_finishes
     assert any(z.shape == "hoop" for z in spec.stirrup_zones)

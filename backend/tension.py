@@ -1,4 +1,7 @@
 """Strand elongation / tension calculations for prestressed concrete beds."""
+from typing import Optional
+
+from beam_spec import DEFAULT_MODULUS_KSI
 
 
 def calc_theoretical_elongation(
@@ -50,3 +53,38 @@ def run_tension_calc(payload: dict) -> dict:
         result["variance_pct"] = variance
         result["within_tolerance"] = within
     return result
+
+
+def strand_capture_result(
+    *,
+    jacking_force_kip: float,
+    bed_length_ft: float,
+    strand_area_in2: float,
+    modulus_ksi: float = DEFAULT_MODULUS_KSI,
+    measured_elongation_in: Optional[float] = None,
+    na: bool = False,
+) -> dict:
+    theo = round(calc_theoretical_elongation(
+        jacking_force_kip, bed_length_ft, strand_area_in2, modulus_ksi,
+    ), 3)
+    payload = {
+        "theoretical_elongation": theo,
+        "jacking_force": jacking_force_kip,
+        "measured_elongation": None,
+        "variance_pct": None,
+        "within_tolerance": None,
+        "na": bool(na),
+        "status": "na" if na else "pending",
+        "lower_bound_in": round(theo * 0.95, 3),
+        "upper_bound_in": round(theo * 1.05, 3),
+    }
+    if na:
+        return payload
+    if measured_elongation_in is None:
+        return payload
+    variance, within = evaluate_tension(theo, float(measured_elongation_in))
+    payload["measured_elongation"] = float(measured_elongation_in)
+    payload["variance_pct"] = variance
+    payload["within_tolerance"] = within
+    payload["status"] = "pass" if within else "fail"
+    return payload

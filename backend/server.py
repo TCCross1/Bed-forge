@@ -26,6 +26,7 @@ from tension import run_tension_calc, calc_theoretical_elongation, evaluate_tens
 from seed import seed_plant, seed_l25390, seed_bed_assignments
 from blueprint_routes import router as blueprint_router
 from bed_routes import router as bed_router
+from tension_routes import router as tension_router
 from bed_layout import covers, map_production_status
 import excel_export
 
@@ -522,6 +523,7 @@ app.include_router(auth_router)
 app.include_router(api)
 app.include_router(blueprint_router)
 app.include_router(bed_router)
+app.include_router(tension_router)
 
 app.add_middleware(
     CORSMiddleware,

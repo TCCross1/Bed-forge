@@ -14,7 +14,7 @@ import re
 from pathlib import Path
 from typing import List, Optional, Tuple
 
-from beam_spec import BeamSpec, BeamGeometry, HardwareItem, StationRef
+from beam_spec import BeamSpec, BeamGeometry, HardwareItem, StationRef, StrandItem, HoldDownItem, ensure_tension_geometry
 from corpus import clone_spec, detect_section, match_corpus, spec_from_section
 from l25390 import JOB_NUMBER, PRODUCT_NAME, build_l25390_spec
 
@@ -34,14 +34,17 @@ Extract a JSON object with this exact shape (no markdown):
   "bot_flange_width_in": 0,
   "web_thick_in": 0,
   "marked_end_id": "",
-  "strands": [{"number":1,"size":"0.5in","detensioning":"straight|draped","debond_me_ft":0,"debond_ue_ft":0,"offset_in":0}],
+  "strands": [{"number":1,"row":1,"column":1,"size":"0.5in","detensioning":"straight|draped","draped":false,"soffit_in":2,"offset_in":0,"debond_me_ft":0,"debond_ue_ft":0}],
+  "hold_downs": [{"station_from_marked_end":0,"height":2.5,"type_spec":"I-beam hold-down","quantity_at_station":2,"orientation":"transverse","notes":""}],
   "hardware": [{"kind":"lift_loop|insert|tube|drain|downspout|tie_rod|hold_down|projecting_rebar|grout_groove|diaphragm|bearing_plate|bituminous_zone","name":"","type_code":"","size":"","station_ft":0,"height_from_soffit_in":0,"offset_in":0,"notes":""}],
   "notes": [],
   "special_finishes": []
 }
 Read EVERY lift loop, F-64/insert, drain, tube, tie-rod, hold-down, bearing plate,
 bituminous/debond zone, diaphragm angle, grout groove, shear key, transverse tendon,
-and marked-end stamp.
+and marked-end stamp. Extract the FULL strand pattern (every strand unique: row, column,
+offset from centerline, height from soffit, straight vs draped) and every I-beam hold-down
+(station from Marked End, height, type/spec, quantity at that station).
 Stations are feet from the Marked End. Heights are inches from soffit.
 Also return bill_of_materials: [{"item":"","quantity":0,"unit":"EA","notes":""}].
 Gold examples follow AASHTO Type II (36x12x18x6), Type III (45x16x22x7), Type IV (54x20x26x8),
@@ -98,7 +101,6 @@ def _box_grout_grooves(length_ft: float, width_in: float) -> list:
 
 
 def _spec_from_vision_json(data: dict, beam_id, job_id, pour_id, blueprint_id, beam_mark) -> BeamSpec:
-    from beam_spec import StrandItem
 
     geo = data.get("geometry") or data
     spec = build_l25390_spec(beam_id, job_id, pour_id, blueprint_id, beam_mark or data.get("beam_mark") or "B1")
@@ -148,15 +150,34 @@ def _spec_from_vision_json(data: dict, beam_id, job_id, pour_id, blueprint_id, b
         for s in data["strands"]:
             vision_strands.append(StrandItem(
                 number=int(s.get("number") or 0),
+                row=int(s.get("row") or 0),
+                column=int(s.get("column") or 0),
                 size=s.get("size") or "0.5in",
                 detensioning=s.get("detensioning") or "straight",
+                draped=bool(s.get("draped") or s.get("detensioning") == "draped"),
+                soffit_in=float(s.get("soffit_in") or s.get("y_in") or 2),
+                offset_in=float(s.get("offset_in") or s.get("x_in") or 0),
+                x_in=float(s.get("x_in") or s.get("offset_in") or 0),
+                y_in=float(s.get("y_in") or s.get("soffit_in") or 2),
                 debond_me_ft=float(s.get("debond_me_ft") or 0),
                 debond_ue_ft=float(s.get("debond_ue_ft") or 0),
-                offset_in=float(s.get("offset_in") or 0),
             ))
         if vision_strands:
             spec.strands = vision_strands
-    return spec
+    hold_downs = []
+    for hd in data.get("hold_downs") or []:
+        hold_downs.append(HoldDownItem(
+            station_from_marked_end=float(hd.get("station_from_marked_end") or hd.get("station_ft") or 0),
+            height=float(hd.get("height") or hd.get("height_from_soffit_in") or 2.5),
+            offset_in=float(hd.get("offset_in") or 0),
+            type_spec=hd.get("type_spec") or hd.get("type") or "I-beam hold-down",
+            quantity_at_station=int(hd.get("quantity_at_station") or hd.get("quantity") or 1),
+            orientation=hd.get("orientation") or "transverse",
+            notes=hd.get("notes") or "",
+        ))
+    if hold_downs:
+        spec.hold_downs = hold_downs
+    return ensure_tension_geometry(spec)
 
 
 def _extract_openai(files: List[Path], beam_id, job_id, pour_id, blueprint_id, beam_mark) -> Optional[BeamSpec]:
@@ -220,7 +241,7 @@ def extract_beam_spec(
         spec.extractor = "l25390_reference"
         spec.notes = [f"Matched Larue County / {JOB_NUMBER} shop-drawing fingerprint from '{names}'."] + spec.notes
         logger.info("extract used l25390_reference files=%s", names)
-        return spec, spec.extractor
+        return ensure_tension_geometry(spec), spec.extractor
 
     if mode in ("auto", "corpus"):
         gold = match_corpus(names, text)
@@ -235,13 +256,13 @@ def extract_beam_spec(
             )
             spec.notes = [f"Matched gold corpus '{gold.catalog_id}' from '{names}'."] + spec.notes
             logger.info("extract used gold_corpus id=%s files=%s", gold.catalog_id, names)
-            return spec, spec.extractor
+            return ensure_tension_geometry(spec), spec.extractor
 
     if mode in ("auto", "openai"):
         vision = _extract_openai(files, beam_id, job_id, pour_id, blueprint_id, beam_mark)
         if vision:
             logger.info("extract used openai_vision files=%s", names)
-            return vision, vision.extractor
+            return ensure_tension_geometry(vision), vision.extractor
 
     section = detect_section(names, text)
     heur = _heuristic_geometry(text, names)
@@ -259,7 +280,7 @@ def extract_beam_spec(
             if heur["twin_type"] == "box_beam":
                 seeded.geometry.twin_type = "box_beam"
             logger.info("extract used section_heuristic section=%s files=%s", section, names)
-            return seeded, seeded.extractor
+            return ensure_tension_geometry(seeded), seeded.extractor
 
     spec = build_l25390_spec(beam_id, job_id, pour_id, blueprint_id, beam_mark)
     spec.geometry.length_ft = heur["length_ft"]
@@ -273,4 +294,4 @@ def extract_beam_spec(
         "QC Supervisor must review and lock before the twin is treated as design-of-record.",
     ] + spec.notes
     logger.info("extract used heuristic_fallback files=%s", names)
-    return spec, spec.extractor
+    return ensure_tension_geometry(spec), spec.extractor
