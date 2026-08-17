@@ -19,7 +19,7 @@ def verify_password(plain: str, hashed: str) -> bool:
 
 
 def get_jwt_secret() -> str:
-    return os.environ["JWT_SECRET"]
+    return os.environ.get("JWT_SECRET", "bedforge-dev-secret")
 
 
 def create_access_token(user_id: str, email: str) -> str:

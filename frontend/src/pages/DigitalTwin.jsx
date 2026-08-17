@@ -5,7 +5,7 @@ import Layout, { PageHeader } from "../components/Layout";
 import BeamViewer from "../components/BeamViewer";
 import { qcState } from "../lib/constants";
 import { toast } from "sonner";
-import { Loader2, MapPin } from "lucide-react";
+import { Loader2, MapPin, Ruler, ScanLine } from "lucide-react";
 
 export default function DigitalTwin() {
   const [params] = useSearchParams();
@@ -38,7 +38,7 @@ export default function DigitalTwin() {
         severity: form.severity,
         note: form.note,
         length_in: parseFloat(form.length_in) || 0,
-        position: { x: +(pickPos.z * 10).toFixed(1), y: +pickPos.y.toFixed(2), z: +pickPos.x.toFixed(2) },
+        position: { x: +pickPos.z.toFixed(1), y: +pickPos.y.toFixed(2), z: +pickPos.x.toFixed(2) },
       });
       toast.success("Anomaly captured on twin");
       setPickPos(null);
@@ -50,12 +50,19 @@ export default function DigitalTwin() {
   };
 
   const q = beam ? qcState(beam.qc_state) : null;
+  const blueprint = beam?.product_type?.blueprint || {};
+  const featureCounts = [
+    ["Lift loops", blueprint.lift_loops?.length || 0],
+    ["Inserts", blueprint.inserts?.length || 0],
+    ["Tubes", blueprint.tubes?.length || 0],
+    ["Drain holes", blueprint.drain_holes?.length || 0],
+    ["Hold-downs", blueprint.hold_downs?.length || 0],
+  ];
 
   return (
     <Layout>
-      <PageHeader title="Digital Twin Viewer" subtitle="Interactive 3D beam · tap surface to capture anomalies" />
+      <PageHeader title="Digital Twin Viewer" subtitle="Blueprint-driven 3D beam twin with dimensional callouts and QC markup" />
       <div className="p-8 grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* 3D viewer */}
         <div className="lg:col-span-2 bg-card border border-border rounded-sm overflow-hidden flex flex-col" style={{ minHeight: 520 }}>
           <div className="flex items-center justify-between px-5 py-3 border-b border-border">
             <select
@@ -70,20 +77,58 @@ export default function DigitalTwin() {
           </div>
           <div className="flex-1">
             {beam ? (
-              <BeamViewer twinType={beam.twin_type} length={beam.length_ft} anomalies={beam.anomalies || []} onPick={(p) => { setPickPos(p); toast.info("Point marked — fill details & save"); }} />
+              <BeamViewer beam={beam} anomalies={beam.anomalies || []} onPick={(p) => { setPickPos(p); toast.info("Point marked — fill details & save"); }} />
             ) : (
               <div className="flex items-center justify-center h-full text-muted-foreground"><Loader2 className="w-6 h-6 animate-spin" /></div>
             )}
           </div>
         </div>
 
-        {/* Anomaly capture */}
         <div className="space-y-6">
+          <div className="bg-card border border-border rounded-sm p-6">
+            <h3 className="font-display font-bold uppercase tracking-wider text-lg mb-4 flex items-center gap-2"><Ruler className="w-5 h-5 text-primary" /> Blueprint Callouts</h3>
+            {beam ? (
+              <div className="space-y-4 text-sm font-mono">
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="border border-border rounded-sm px-3 py-2">
+                    <div className="text-xs uppercase tracking-widest text-muted-foreground">Beam type</div>
+                    <div className="mt-1 text-white">{beam.product_type?.name || (beam.twin_type === "box_beam" ? "Box beam" : "I-beam")}</div>
+                  </div>
+                  <div className="border border-border rounded-sm px-3 py-2">
+                    <div className="text-xs uppercase tracking-widest text-muted-foreground">Length</div>
+                    <div className="mt-1 text-white">{beam.length_ft} ft</div>
+                  </div>
+                  <div className="border border-border rounded-sm px-3 py-2">
+                    <div className="text-xs uppercase tracking-widest text-muted-foreground">Depth</div>
+                    <div className="mt-1 text-white">{beam.product_type?.depth_in || "—"} in</div>
+                  </div>
+                  <div className="border border-border rounded-sm px-3 py-2">
+                    <div className="text-xs uppercase tracking-widest text-muted-foreground">Width</div>
+                    <div className="mt-1 text-white">{beam.product_type?.width_in || "—"} in</div>
+                  </div>
+                </div>
+                <div className="border border-border rounded-sm p-3">
+                  <div className="text-xs uppercase tracking-widest text-muted-foreground mb-3 flex items-center gap-2"><ScanLine className="w-4 h-4" /> Embedded details</div>
+                  <div className="grid grid-cols-2 gap-2">
+                    {featureCounts.map(([label, count]) => (
+                      <div key={label} className="flex items-center justify-between text-xs">
+                        <span className="text-muted-foreground">{label}</span>
+                        <span className="text-white">{count}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="text-sm text-muted-foreground font-mono">Load a beam to inspect blueprint-driven dimensions.</div>
+            )}
+          </div>
+
           <div className="bg-card border border-border rounded-sm p-6">
             <h3 className="font-display font-bold uppercase tracking-wider text-lg mb-4 flex items-center gap-2"><MapPin className="w-5 h-5 text-primary" /> Capture Anomaly</h3>
             <div className="space-y-4">
               <div className={`text-xs font-mono px-3 py-2 rounded-sm border ${pickPos ? "border-primary text-primary" : "border-border text-muted-foreground"}`} data-testid="pick-status">
-                {pickPos ? `POINT SET · x${(pickPos.z*10).toFixed(1)} y${pickPos.y.toFixed(2)}` : "TAP THE BEAM TO SET LOCATION"}
+                {pickPos ? `POINT SET · STA ${pickPos.z.toFixed(1)} FT · EL ${pickPos.y.toFixed(2)}` : "TAP THE BEAM TO SET LOCATION"}
               </div>
               <div>
                 <label className="text-xs font-mono uppercase tracking-widest text-muted-foreground">Type</label>

@@ -42,6 +42,7 @@ class ProductType(BaseModel):
     width_in: float
     default_length_ft: float
     description: str = ""
+    blueprint: Dict[str, Any] = Field(default_factory=dict)
     created_at: str = Field(default_factory=now_iso)
 
 
@@ -52,6 +53,7 @@ class ProductTypeCreate(BaseModel):
     width_in: float
     default_length_ft: float
     description: str = ""
+    blueprint: Dict[str, Any] = Field(default_factory=dict)
 
 
 # ---------- Jobs ----------
