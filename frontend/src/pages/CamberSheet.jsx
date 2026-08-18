@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import api, { formatApiErrorDetail } from "../lib/api";
 import Layout, { PageHeader, Field, inputClass, cardClass, ARMeasureLink } from "../components/Layout";
+import CamberTwin from "../components/CamberTwin";
 import { releaseForecast } from "../lib/constants";
 import { toast } from "sonner";
 import { toastNcrFromResponse } from "../lib/ncr";
@@ -18,12 +19,18 @@ const EMPTY = {
   notes: "",
 };
 
+function formatCamber(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? `${n.toFixed(2)} in camber` : "camber —";
+}
+
 export default function CamberSheet() {
   const queryBeam = useBeamQuery();
   const [beams, setBeams] = useState([]);
   const [beamId, setBeamId] = useState(queryBeam);
   const [form, setForm] = useState(EMPTY);
   const [history, setHistory] = useState([]);
+  const [beamDetail, setBeamDetail] = useState(null);
   const [cylinders, setCylinders] = useState([]);
   const [forecast, setForecast] = useState(null);
   const [tempF, setTempF] = useState("");
@@ -79,6 +86,7 @@ export default function CamberSheet() {
     api.get(`/beams/${beamId}`)
       .then((r) => {
         if (cancelled) return;
+        setBeamDetail(r.data || null);
         const spec = r.data?.spec || {};
         const notes = [].concat(spec.notes || []).join(" ");
         const camber = notes.match(/design camber\s+([\d.]+)/i);
@@ -91,7 +99,10 @@ export default function CamberSheet() {
             : cur.required_strength_psi,
         }));
       })
-      .catch((err) => console.error("[camber] spec prefill failed", err));
+      .catch((err) => {
+        if (!cancelled) setBeamDetail(null);
+        console.error("[camber] spec prefill failed", err);
+      });
     return () => {
       cancelled = true;
     };
@@ -103,6 +114,11 @@ export default function CamberSheet() {
   const required = parseFloat(form.required_strength_psi) || 0;
   const release = parseFloat(form.release_strength_psi);
   const strengthOk = Number.isFinite(release) && release >= required && required > 0;
+  const latest = history[0] || {};
+  const camberForTwin = Number.isFinite(measured)
+    ? measured
+    : (parseFloat(latest.midspan_in ?? latest.measured_camber_in) || parseFloat(form.design_camber_in) || 1.5);
+  const selectedBeam = beamDetail || beams.find((b) => b.id === beamId);
 
   const save = async () => {
     if (!beamId) {
@@ -142,7 +158,23 @@ export default function CamberSheet() {
         subtitle="Release strength + 3-point camber (Marked / Mid / Unmarked)"
         right={<ARMeasureLink beamId={beamId} purpose="camber" />}
       />
-      <div className="p-4 sm:p-6 lg:p-8 grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6 max-w-6xl">
+      <div className="p-4 sm:p-6 lg:p-8 space-y-4 sm:space-y-6 max-w-7xl">
+        <div className={`${cardClass} overflow-hidden`}>
+          <div className="px-4 py-3 border-b border-[#1C2230] flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+            <div>
+              <h3 className="font-display font-bold uppercase tracking-wider text-lg">Camber Visual</h3>
+              <p className="text-xs font-mono text-muted-foreground mt-1">
+                Full beam on concrete end pillars with field shims · midspan bow driven by current reading or design camber.
+              </p>
+            </div>
+            <div className="text-[10px] font-mono uppercase tracking-widest text-[#73BCFF]">
+              {selectedBeam?.mark || "—"} · {formatCamber(camberForTwin)}
+            </div>
+          </div>
+          <CamberTwin beam={selectedBeam} camberIn={camberForTwin} height={460} />
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
         <div className={`${cardClass} p-5 sm:p-8 space-y-4`}>
           <h3 className="font-display font-bold uppercase tracking-wider text-lg flex items-center gap-2">
             <Ruler className="w-5 h-5 text-primary" /> Record Reading
@@ -273,6 +305,7 @@ export default function CamberSheet() {
               <Link to="/tags" className="inline-block mt-2 text-[10px] font-mono uppercase tracking-widest text-primary">Open cylinder tags</Link>
             </div>
           )}
+        </div>
         </div>
       </div>
     </Layout>
