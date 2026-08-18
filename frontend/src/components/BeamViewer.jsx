@@ -11,8 +11,8 @@ const steelBright = "#B9C2CF";
 const brassGold = "#E3C565";
 const asphaltBlack = "#1A1A1A";
 const runningDimensionColor = "#22D3EE";
-const spanDimensionColor = "#FBBF24";
 const elevationDimensionColor = "#050505";
+const overallDimensionColor = "#CBD5E1";
 
 function TwinCanvasFallback({ message = "Digital Twin unavailable on this device." }) {
   return (
@@ -745,29 +745,18 @@ function stationValue(item) {
 }
 
 function runningDimensionStations(spec) {
-  const add = (rows, source, kind, labeler) => {
+  const add = (rows, source, kind) => {
     (source || []).forEach((item, index) => {
       const station = stationValue(item);
       if (station == null) return;
-      rows.push({ key: `${kind}-${index}`, kind, station, label: labeler(item, station, index) });
+      rows.push({ key: `${kind}-${index}`, kind, station });
     });
   };
   const rows = [];
-  add(rows, spec.blueprint.lift_loops, "Lift", (_item, station) => `LIFT ${formatStation(station)}`);
-  add(rows, spec.blueprint.inserts, "Insert", (_item, station) => `INSERT ${formatStation(station)}`);
-  add(rows, spec.blueprint.tubes, "Tube", (_item, station) => `TUBE ${formatStation(station)}`);
-  add(rows, spec.blueprint.tie_rod_openings, "Tie", (_item, station) => `TIE ${formatStation(station)}`);
-  add(rows, spec.blueprint.drain_holes, "Drain", (_item, station) => `DRAIN ${formatStation(station)}`);
-  add(rows, spec.blueprint.hold_downs, "Hold", (_item, station) => `HOLD ${formatStation(station)}`);
-  add(rows, spec.blueprint.grout_grooves, "Groove", (_item, station) => `GROOVE ${formatStation(station)}`);
-  (spec.blueprint.bituminous_ends || []).forEach((item, index) => {
-    const lengthFt = inchesToFeet(item.length_in || 0);
-    if (!lengthFt) return;
-    const start = item.end === "end" ? Math.max(spec.length - lengthFt, 0) : 0;
-    const end = item.end === "end" ? spec.length : lengthFt;
-    rows.push({ key: `bit-start-${index}`, kind: "Bitumen", station: start, label: `BIT START ${formatStation(start)}` });
-    rows.push({ key: `bit-end-${index}`, kind: "Bitumen", station: end, label: `BIT END ${formatStation(end)}` });
-  });
+  add(rows, spec.blueprint.inserts, "Insert");
+  add(rows, spec.blueprint.tubes, "Tube");
+  add(rows, spec.blueprint.tie_rod_openings, "Tie");
+  add(rows, spec.blueprint.drain_holes, "Drain");
   const sorted = rows
     .filter((item) => item.station >= 0 && item.station <= spec.length)
     .sort((a, b) => a.station - b.station || a.kind.localeCompare(b.kind));
@@ -778,7 +767,7 @@ function runningDimensionStations(spec) {
       previous.label = previous.kinds.map((kind) => kind.toUpperCase()).join(" / ");
       previous.key = `${previous.key}-${item.key}`;
     } else {
-      grouped.push({ ...item, kinds: [item.kind], label: item.kind.toUpperCase() });
+      grouped.push({ ...item, kinds: [item.kind] });
     }
     return grouped;
   }, []);
@@ -801,6 +790,16 @@ function elevationDimensionTargets(spec) {
     if (station == null) return;
     targets.push({ key: `elev-tube-${index}`, station, y: centerElevation(item, spec.depth * 0.56), kind: "tube" });
   });
+  (spec.blueprint.tie_rod_openings || []).forEach((item, index) => {
+    const station = stationValue(item);
+    if (station == null) return;
+    targets.push({ key: `elev-tie-${index}`, station, y: centerElevation(item, spec.depth * 0.42), kind: "tie" });
+  });
+  (spec.blueprint.drain_holes || []).forEach((item, index) => {
+    const station = stationValue(item);
+    if (station == null) return;
+    targets.push({ key: `elev-drain-${index}`, station, y: centerElevation(item, 0.18), kind: "drain" });
+  });
   const unique = [];
   targets
     .filter((item) => item.station >= 0 && item.station <= spec.length)
@@ -819,92 +818,49 @@ function EngineeringDimensions({ beam, spec }) {
   const outsideX = -spec.width / 2 - 0.42;
   const tubeRowY = spec.depth * 0.56;
   const runLineY = Math.max(spec.depth * 0.34, tubeRowY - 0.52);
-  const overallY = Math.max(0.18, runLineY - 0.42);
-  const spanLineY = Math.max(0.1, runLineY - 0.28);
-  const color = runningDimensionColor;
-  const stationColor = runningDimensionColor;
-  const spanColor = spanDimensionColor;
+  const overallY = -0.42;
   const elevationTargets = elevationDimensionTargets(spec);
-  const firstSideTarget = [
-    ...(spec.blueprint.inserts || []).map((item, index) => ({ key: `gap-insert-${index}`, station: stationValue(item), y: spec.depth * 0.7 })),
-    ...(spec.blueprint.tubes || []).map((item, index) => ({ key: `gap-tube-${index}`, station: stationValue(item), y: tubeRowY })),
-  ]
-    .filter((item) => item.station != null && item.station > 0 && item.station <= spec.length)
-    .sort((a, b) => a.station - b.station)[0];
-  const gapY = firstSideTarget ? Math.max(runLineY + 0.24, firstSideTarget.y - 0.22) : null;
-  const uniqueStations = stations
-    .map((item) => item.station)
-    .filter((station, index, rows) => station > 0 && station < spec.length && rows.findIndex((candidate) => Math.abs(candidate - station) < 0.05) === index)
-    .sort((a, b) => a - b);
-  const spanPairs = uniqueStations
-    .slice(1)
-    .map((station, index) => ({ start: uniqueStations[index], end: station, delta: station - uniqueStations[index] }))
-    .filter((pair) => pair.delta > 0.25);
+  const finalStation = stations.length ? Math.max(...stations.map((item) => item.station)) : 0;
   return (
     <group>
       {lengthFt && (
         <group>
-          <Line points={[[outsideX, overallY, 0], [outsideX, overallY, spec.length]]} color={color} lineWidth={1} />
-          <Line points={[[outsideX - 0.18, overallY, 0], [outsideX + 0.18, overallY, 0]]} color={color} lineWidth={1} />
-          <Line points={[[outsideX - 0.18, overallY, spec.length], [outsideX + 0.18, overallY, spec.length]]} color={color} lineWidth={1} />
-          <MeasurementText position={[outsideX - 0.1, overallY - 0.16, spec.length / 2]} label={formatFeet(lengthFt)} color={color} size={11} />
+          <Line points={[[outsideX, overallY, 0], [outsideX, overallY, spec.length]]} color={overallDimensionColor} lineWidth={1.05} />
+          <Line points={[[outsideX - 0.18, overallY, 0], [outsideX + 0.18, overallY, 0]]} color={overallDimensionColor} lineWidth={1} />
+          <Line points={[[outsideX - 0.18, overallY, spec.length], [outsideX + 0.18, overallY, spec.length]]} color={overallDimensionColor} lineWidth={1} />
+          <MeasurementText position={[outsideX - 0.1, overallY - 0.18, spec.length / 2]} label={formatFeet(lengthFt)} color={overallDimensionColor} size={11} />
         </group>
       )}
-      <Line points={[[sideX, runLineY, 0], [sideX, runLineY, spec.length]]} color={color} lineWidth={1.1} />
-      <Line points={[[sideX - 0.16, runLineY, 0], [sideX + 0.16, runLineY, 0]]} color={color} lineWidth={1} />
-      <Line points={[[sideX - 0.16, runLineY, spec.length], [sideX + 0.16, runLineY, spec.length]]} color={color} lineWidth={1} />
-      <MeasurementText position={[sideX - 0.08, runLineY + 0.22, 0]} label={formatFeet(0)} color={stationColor} />
-      <MeasurementText position={[sideX - 0.08, runLineY + 0.22, spec.length]} label={formatFeet(spec.length)} color={stationColor} />
+      {finalStation > 0 && (
+        <Line points={[[sideX, runLineY, 0], [sideX, runLineY, finalStation]]} color={runningDimensionColor} lineWidth={1.1} />
+      )}
+      <Line points={[[sideX - 0.16, runLineY, 0], [sideX + 0.16, runLineY, 0]]} color={runningDimensionColor} lineWidth={1} />
+      <MeasurementText position={[sideX - 0.08, runLineY + 0.22, 0]} label={formatFeet(0)} color={runningDimensionColor} />
       {stations.map((item, index) => {
-        const textLift = index % 2 === 0 ? 0.2 : -0.2;
+        const textY = runLineY + 0.22 + (index % 2) * 0.18;
         return (
           <group key={item.key}>
-            <Line points={[[sideX - 0.18, runLineY, item.station], [sideX + 0.18, runLineY, item.station]]} color={stationColor} lineWidth={1} />
-            <Line points={[[sideX, runLineY, item.station], [sideX, runLineY + textLift * 0.55, item.station]]} color={stationColor} lineWidth={0.6} />
-            <MeasurementText position={[sideX - 0.08, runLineY + textLift, item.station]} label={formatFeet(item.station)} color={stationColor} />
-          </group>
-        );
-      })}
-      {spanPairs.map((pair, index) => {
-        const y = spanLineY - (index % 2) * 0.18;
-        const mid = (pair.start + pair.end) / 2;
-        return (
-          <group key={`span-${pair.start}-${pair.end}`}>
-            <Line points={[[sideX - 0.06, y, pair.start], [sideX - 0.06, y, pair.end]]} color={spanColor} lineWidth={0.95} />
-            <Line points={[[sideX - 0.16, y, pair.start], [sideX + 0.04, y, pair.start]]} color={spanColor} lineWidth={0.8} />
-            <Line points={[[sideX - 0.16, y, pair.end], [sideX + 0.04, y, pair.end]]} color={spanColor} lineWidth={0.8} />
-            <Line points={[[sideX, y - 0.18, pair.start], [sideX, y + 0.18, pair.start]]} color={spanColor} lineWidth={0.7} />
-            <Line points={[[sideX, y - 0.18, pair.end], [sideX, y + 0.18, pair.end]]} color={spanColor} lineWidth={0.7} />
-            <MeasurementText position={[sideX - 0.1, y - 0.16, mid]} label={formatFeet(pair.delta)} color={spanColor} size={9} />
+            <Line points={[[sideX - 0.18, runLineY, item.station], [sideX + 0.18, runLineY, item.station]]} color={runningDimensionColor} lineWidth={1} />
+            <Line points={[[sideX, runLineY, item.station], [sideX, textY - 0.08, item.station]]} color={runningDimensionColor} lineWidth={0.6} />
+            <MeasurementText position={[sideX - 0.08, textY, item.station]} label={formatFeet(item.station)} color={runningDimensionColor} />
           </group>
         );
       })}
       {elevationTargets.map((item, index) => {
-        const x = sideX - 0.48 - (index % 4) * 0.16;
-        const z = item.station + ((index % 2) * 2 - 1) * 0.04;
+        const x = sideX - 0.46 - (index % 3) * 0.14;
+        const z = item.station;
         const tick = 0.14;
         return (
           <group key={item.key}>
             <Line points={[[x, 0, z], [x, item.y, z]]} color={elevationDimensionColor} lineWidth={1.1} />
-            <Line points={[[x, item.y, z], [x, spec.depth, z]]} color={elevationDimensionColor} lineWidth={1.1} />
-            {[0, item.y, spec.depth].map((y) => (
+            {[0, item.y].map((y) => (
               <Line key={`${item.key}-${y}`} points={[[x - tick, y, z], [x + tick, y, z]]} color={elevationDimensionColor} lineWidth={1.05} />
             ))}
             <Line points={[[x + tick, item.y, z], [sideX + 0.02, item.y, item.station]]} color={elevationDimensionColor} lineWidth={0.65} />
-            <ElevationMeasurementText position={[x - 0.13, Math.max(item.y / 2, 0.14), z]} label={formatFeet(item.y)} />
-            <ElevationMeasurementText position={[x - 0.13, item.y + Math.max((spec.depth - item.y) / 2, 0.14), z]} label={formatFeet(spec.depth - item.y)} />
+            <ElevationMeasurementText position={[x - 0.13, item.y + 0.16, z]} label={formatFeet(item.y)} />
           </group>
         );
       })}
-      {firstSideTarget && (
-        <group key={firstSideTarget.key}>
-          <Line points={[[sideX, gapY, 0], [sideX, gapY, firstSideTarget.station]]} color={spanColor} lineWidth={1} />
-          <Line points={[[sideX - 0.14, gapY, 0], [sideX + 0.14, gapY, 0]]} color={spanColor} lineWidth={1} />
-          <Line points={[[sideX, firstSideTarget.y - 0.42, firstSideTarget.station], [sideX, firstSideTarget.y + 0.42, firstSideTarget.station]]} color={spanColor} lineWidth={1} />
-          <Line points={[[sideX, gapY, firstSideTarget.station], [sideX, firstSideTarget.y, firstSideTarget.station]]} color={spanColor} lineWidth={0.8} />
-          <MeasurementText position={[sideX - 0.08, firstSideTarget.y + 0.55, firstSideTarget.station]} label={formatFeet(firstSideTarget.station)} color={spanColor} size={11} />
-        </group>
-      )}
     </group>
   );
 }
@@ -1475,8 +1431,8 @@ function DimensionColorLegend() {
       letterSpacing: "0.12em",
       pointerEvents: "none",
     }}>
+      {item(overallDimensionColor, "OVERALL")}
       {item(runningDimensionColor, "RUNNING")}
-      {item(spanDimensionColor, "SPAN")}
       {item(elevationDimensionColor, "ELEV")}
     </div>
   );
