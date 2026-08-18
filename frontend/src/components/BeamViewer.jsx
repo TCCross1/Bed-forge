@@ -10,6 +10,8 @@ const steelGray = "#7D8795";
 const steelBright = "#B9C2CF";
 const brassGold = "#E3C565";
 const asphaltBlack = "#1A1A1A";
+const runningDimensionColor = "#22D3EE";
+const spanDimensionColor = "#FBBF24";
 
 function TwinCanvasFallback({ message = "Digital Twin unavailable on this device." }) {
   return (
@@ -736,8 +738,10 @@ function EngineeringDimensions({ beam, spec }) {
   const tubeRowY = spec.depth * 0.56;
   const runLineY = Math.max(spec.depth * 0.34, tubeRowY - 0.52);
   const overallY = Math.max(0.18, runLineY - 0.42);
-  const color = "#73BCFF";
-  const stationColor = "#D8ECFF";
+  const spanLineY = Math.max(0.1, runLineY - 0.28);
+  const color = runningDimensionColor;
+  const stationColor = runningDimensionColor;
+  const spanColor = spanDimensionColor;
   const firstSideTarget = [
     ...(spec.blueprint.inserts || []).map((item, index) => ({ key: `gap-insert-${index}`, station: stationValue(item), y: spec.depth * 0.7 })),
     ...(spec.blueprint.tubes || []).map((item, index) => ({ key: `gap-tube-${index}`, station: stationValue(item), y: tubeRowY })),
@@ -745,6 +749,14 @@ function EngineeringDimensions({ beam, spec }) {
     .filter((item) => item.station != null && item.station > 0 && item.station <= spec.length)
     .sort((a, b) => a.station - b.station)[0];
   const gapY = firstSideTarget ? Math.max(runLineY + 0.24, firstSideTarget.y - 0.22) : null;
+  const uniqueStations = stations
+    .map((item) => item.station)
+    .filter((station, index, rows) => station > 0 && station < spec.length && rows.findIndex((candidate) => Math.abs(candidate - station) < 0.05) === index)
+    .sort((a, b) => a - b);
+  const spanPairs = uniqueStations
+    .slice(1)
+    .map((station, index) => ({ start: uniqueStations[index], end: station, delta: station - uniqueStations[index] }))
+    .filter((pair) => pair.delta > 0.25);
   return (
     <group>
       {lengthFt && (
@@ -758,25 +770,39 @@ function EngineeringDimensions({ beam, spec }) {
       <Line points={[[sideX, runLineY, 0], [sideX, runLineY, spec.length]]} color={color} lineWidth={1.1} />
       <Line points={[[sideX - 0.16, runLineY, 0], [sideX + 0.16, runLineY, 0]]} color={color} lineWidth={1} />
       <Line points={[[sideX - 0.16, runLineY, spec.length], [sideX + 0.16, runLineY, spec.length]]} color={color} lineWidth={1} />
-      <MeasurementText position={[sideX - 0.08, runLineY + 0.22, 0]} label={formatFeet(0)} color="#8FC5FF" />
-      <MeasurementText position={[sideX - 0.08, runLineY + 0.22, spec.length]} label={formatFeet(spec.length)} color="#8B949E" />
+      <MeasurementText position={[sideX - 0.08, runLineY + 0.22, 0]} label={formatFeet(0)} color={stationColor} />
+      <MeasurementText position={[sideX - 0.08, runLineY + 0.22, spec.length]} label={formatFeet(spec.length)} color={stationColor} />
       {stations.map((item, index) => {
         const textLift = index % 2 === 0 ? 0.2 : -0.2;
         return (
           <group key={item.key}>
             <Line points={[[sideX - 0.18, runLineY, item.station], [sideX + 0.18, runLineY, item.station]]} color={stationColor} lineWidth={1} />
-            <Line points={[[sideX, runLineY, item.station], [sideX, runLineY + textLift * 0.55, item.station]]} color="#566578" lineWidth={0.6} />
+            <Line points={[[sideX, runLineY, item.station], [sideX, runLineY + textLift * 0.55, item.station]]} color={stationColor} lineWidth={0.6} />
             <MeasurementText position={[sideX - 0.08, runLineY + textLift, item.station]} label={formatFeet(item.station)} color={stationColor} />
+          </group>
+        );
+      })}
+      {spanPairs.map((pair, index) => {
+        const y = spanLineY - (index % 2) * 0.18;
+        const mid = (pair.start + pair.end) / 2;
+        return (
+          <group key={`span-${pair.start}-${pair.end}`}>
+            <Line points={[[sideX - 0.06, y, pair.start], [sideX - 0.06, y, pair.end]]} color={spanColor} lineWidth={0.95} />
+            <Line points={[[sideX - 0.16, y, pair.start], [sideX + 0.04, y, pair.start]]} color={spanColor} lineWidth={0.8} />
+            <Line points={[[sideX - 0.16, y, pair.end], [sideX + 0.04, y, pair.end]]} color={spanColor} lineWidth={0.8} />
+            <Line points={[[sideX, y - 0.18, pair.start], [sideX, y + 0.18, pair.start]]} color={spanColor} lineWidth={0.7} />
+            <Line points={[[sideX, y - 0.18, pair.end], [sideX, y + 0.18, pair.end]]} color={spanColor} lineWidth={0.7} />
+            <MeasurementText position={[sideX - 0.1, y - 0.16, mid]} label={formatFeet(pair.delta)} color={spanColor} size={9} />
           </group>
         );
       })}
       {firstSideTarget && (
         <group key={firstSideTarget.key}>
-          <Line points={[[sideX, gapY, 0], [sideX, gapY, firstSideTarget.station]]} color="#9AD1FF" lineWidth={1} />
-          <Line points={[[sideX - 0.14, gapY, 0], [sideX + 0.14, gapY, 0]]} color="#9AD1FF" lineWidth={1} />
-          <Line points={[[sideX, firstSideTarget.y - 0.42, firstSideTarget.station], [sideX, firstSideTarget.y + 0.42, firstSideTarget.station]]} color="#9AD1FF" lineWidth={1} />
-          <Line points={[[sideX, gapY, firstSideTarget.station], [sideX, firstSideTarget.y, firstSideTarget.station]]} color="#9AD1FF" lineWidth={0.8} />
-          <MeasurementText position={[sideX - 0.08, firstSideTarget.y + 0.55, firstSideTarget.station]} label={formatFeet(firstSideTarget.station)} color="#9AD1FF" size={11} />
+          <Line points={[[sideX, gapY, 0], [sideX, gapY, firstSideTarget.station]]} color={spanColor} lineWidth={1} />
+          <Line points={[[sideX - 0.14, gapY, 0], [sideX + 0.14, gapY, 0]]} color={spanColor} lineWidth={1} />
+          <Line points={[[sideX, firstSideTarget.y - 0.42, firstSideTarget.station], [sideX, firstSideTarget.y + 0.42, firstSideTarget.station]]} color={spanColor} lineWidth={1} />
+          <Line points={[[sideX, gapY, firstSideTarget.station], [sideX, firstSideTarget.y, firstSideTarget.station]]} color={spanColor} lineWidth={0.8} />
+          <MeasurementText position={[sideX - 0.08, firstSideTarget.y + 0.55, firstSideTarget.station]} label={formatFeet(firstSideTarget.station)} color={spanColor} size={11} />
         </group>
       )}
     </group>
@@ -1325,6 +1351,36 @@ function CrossSectionInset({ beam }) {
   );
 }
 
+function DimensionColorLegend() {
+  const item = (color, label) => (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+      <span style={{ width: 18, height: 2, background: color, boxShadow: `0 0 10px ${color}66` }} />
+      <span>{label}</span>
+    </span>
+  );
+  return (
+    <div style={{
+      position: "absolute",
+      right: 14,
+      bottom: 14,
+      display: "flex",
+      gap: 12,
+      alignItems: "center",
+      border: "1px solid #263244",
+      background: "rgba(7,9,14,0.78)",
+      padding: "6px 8px",
+      color: "#C7D2E1",
+      fontFamily: "JetBrains Mono, ui-monospace, SFMono-Regular, monospace",
+      fontSize: 10,
+      letterSpacing: "0.12em",
+      pointerEvents: "none",
+    }}>
+      {item(runningDimensionColor, "RUNNING")}
+      {item(spanDimensionColor, "SPAN")}
+    </div>
+  );
+}
+
 export default function BeamTwinViewer({ beam, anomalies = [], onSurfacePick, onHardwareSelect, showCallouts = true, layers }) {
   const safeBeam = beam || { twin_type: "i_beam", length_ft: 90, product_type: {}, mark: "Beam" };
   const spec = useBeamSpec(safeBeam);
@@ -1348,6 +1404,7 @@ export default function BeamTwinViewer({ beam, anomalies = [], onSurfacePick, on
         <gridHelper args={[Math.max(safeBeam.length_ft * 1.25, 50), Math.max(Math.round(safeBeam.length_ft / 4), 24), "#2B313B", "#161B24"]} position={[0, -spec.depth / 2 - 0.05, 0]} />
       </Scene>
       {activeLayers.dimensions && <CrossSectionInset beam={safeBeam} />}
+      {activeLayers.dimensions && <DimensionColorLegend />}
     </div>
   );
 }
