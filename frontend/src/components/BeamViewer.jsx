@@ -295,21 +295,34 @@ function SectionRevealLines({ beam, spec }) {
 }
 
 function LiftLoops({ beam, spec, onHardwareSelect }) {
-  const radius = Math.max(spec.width * 0.08, 0.12);
   return (spec.blueprint.lift_loops || []).map((item, index) => {
+    const radius = Math.max(inchesToFeet(item.diameter_in || 0) / 2, spec.width * 0.2, 0.38);
+    const legHeight = Math.max(radius * 1.35, 0.55);
+    const spread = Math.max(radius * 0.58, 0.22);
+    const cable = Math.max(radius * 0.08, 0.035);
+    const arch = [
+      [-spread, 0, 0],
+      [-spread * 0.86, legHeight * 0.54, 0],
+      [0, legHeight, 0],
+      [spread * 0.86, legHeight * 0.54, 0],
+      [spread, 0, 0],
+    ];
     const payload = { id: `lift-loop-${index}`, type: "Lift loop", beamMark: beam.mark, spec: item };
     return (
-      <group key={payload.id} position={[0, spec.depth + radius * 0.85, item.x_ft]}>
-        {[-0.09, 0.09].map((offset) => (
-          <mesh key={offset} position={[offset, -radius * 0.72, 0]}>
-            <cylinderGeometry args={[0.03, 0.03, radius * 1.18, 10]} />
-            <meshStandardMaterial color={steelGray} roughness={0.35} metalness={0.65} />
-          </mesh>
+      <group key={payload.id} position={[0, spec.depth + 0.05, item.x_ft]} onClick={(event) => clickHardware(event, payload, onHardwareSelect)}>
+        <Line points={arch} color={steelBright} lineWidth={3.4} />
+        {[-spread, spread].map((offset) => (
+          <React.Fragment key={offset}>
+            <mesh position={[offset, 0.11, 0]}>
+              <cylinderGeometry args={[cable, cable, 0.24, 12]} />
+              <meshStandardMaterial color={steelBright} roughness={0.34} metalness={0.72} />
+            </mesh>
+            <mesh position={[offset, -0.02, 0]}>
+              <cylinderGeometry args={[cable * 1.55, cable * 1.55, 0.08, 16]} />
+              <meshStandardMaterial color="#465160" roughness={0.5} metalness={0.36} />
+            </mesh>
+          </React.Fragment>
         ))}
-        <mesh rotation={[Math.PI / 2, 0, 0]} onClick={(event) => clickHardware(event, payload, onHardwareSelect)}>
-          <torusGeometry args={[radius, radius * 0.18, 12, 42, Math.PI]} />
-          <meshStandardMaterial color={steelBright} roughness={0.32} metalness={0.72} />
-        </mesh>
       </group>
     );
   });
@@ -395,25 +408,30 @@ function CylindricalOpenings({ beam, spec, items, type, color, y, onHardwareSele
 
 function HoldDowns({ beam, spec, onHardwareSelect }) {
   if (beam.twin_type !== "i_beam") return null;
-  const width = Math.max(spec.width * 0.16, 0.28);
-  const height = Math.max(spec.depth * 0.28, 0.52);
+  const width = Math.max(spec.width * 0.28, 0.42);
+  const height = Math.max(inchesToFeet(8), spec.depth * 0.16);
+  const embeddedY = Math.max(inchesToFeet(5), height / 2 + 0.08);
   return (spec.blueprint.hold_downs || []).map((item, index) => {
     const payload = { id: `hold-down-${index}`, type: "Hold-down", beamMark: beam.mark, spec: item };
     return (
-      <group key={payload.id} position={[0, spec.depth + height / 2 + 0.03, item.x_ft]} onClick={(event) => clickHardware(event, payload, onHardwareSelect)}>
-        <mesh position={[0, -height / 2, 0]}>
-          <boxGeometry args={[spec.width * 0.84, 0.08, width * 0.6]} />
-          <meshStandardMaterial color="#565F6C" roughness={0.72} metalness={0.12} />
+      <group key={payload.id} position={[0, embeddedY, item.x_ft]} onClick={(event) => clickHardware(event, payload, onHardwareSelect)}>
+        <mesh position={[0, -embeddedY + 0.025, 0]}>
+          <boxGeometry args={[spec.width * 0.58, 0.05, width * 0.52]} />
+          <meshStandardMaterial color="#B97838" roughness={0.58} metalness={0.34} transparent opacity={0.72} depthWrite={false} />
+        </mesh>
+        <mesh>
+          <boxGeometry args={[spec.width * 0.46, height * 0.16, width * 0.72]} />
+          <meshStandardMaterial color="#F0A85C" roughness={0.5} metalness={0.38} transparent opacity={0.42} depthWrite={false} depthTest={false} />
         </mesh>
         {[-width * 0.42, width * 0.42].map((x) => (
           <mesh key={x} position={[x, 0, 0]}>
             <boxGeometry args={[0.08, height, width * 0.32]} />
-            <meshStandardMaterial color="#85592F" roughness={0.54} metalness={0.24} />
+            <meshStandardMaterial color="#F0A85C" roughness={0.54} metalness={0.28} transparent opacity={0.46} depthWrite={false} depthTest={false} />
           </mesh>
         ))}
         <mesh position={[0, height * 0.24, 0]}>
           <boxGeometry args={[width * 1.32, 0.1, width * 0.42]} />
-          <meshStandardMaterial color="#85592F" roughness={0.54} metalness={0.24} />
+          <meshStandardMaterial color="#F0A85C" roughness={0.54} metalness={0.28} transparent opacity={0.46} depthWrite={false} depthTest={false} />
         </mesh>
       </group>
     );
@@ -460,14 +478,27 @@ function GroutGrooves({ beam, spec, onHardwareSelect }) {
 }
 
 function Stirrups({ beam, spec, onHardwareSelect }) {
-  const stirrup = spec.blueprint.stirrups || {};
-  const start = stirrup.start_ft ?? 2;
-  const end = Math.min(stirrup.end_ft ?? spec.length - 2, spec.length - 1);
-  const spacing = inchesToFeet(stirrup.spacing_in || 24);
+  const stirrup = useMemo(() => spec.blueprint.stirrups || {}, [spec.blueprint.stirrups]);
   const stations = useMemo(() => {
-    const count = Math.max(Math.floor(Math.max(end - start, 0) / Math.max(spacing, 0.25)) + 1, 0);
-    return Array.from({ length: count }).map((_, index) => Math.min(start + index * Math.max(spacing, 0.25), end));
-  }, [start, end, spacing]);
+    const makeRange = (startFt, endFt, spacingIn) => {
+      const start = Math.max(0.15, Math.min(startFt ?? 0.15, spec.length - 0.15));
+      const end = Math.max(start, Math.min(endFt ?? spec.length - 0.15, spec.length - 0.15));
+      const spacing = Math.max(inchesToFeet(spacingIn || stirrup.spacing_in || 24), 0.25);
+      const count = Math.max(Math.floor(Math.max(end - start, 0) / spacing) + 1, 1);
+      const range = Array.from({ length: count }).map((_, index) => Math.min(start + index * spacing, end));
+      const last = range[range.length - 1];
+      if (end - last > spacing * 0.35) range.push(end);
+      return range;
+    };
+    const zones = Array.isArray(stirrup.zones) ? stirrup.zones : [];
+    const rawStations = zones.length
+      ? zones.flatMap((zone) => makeRange(zone.from_ft, zone.to_ft, zone.spacing_in))
+      : makeRange(0.2, spec.length - 0.2, stirrup.spacing_in || 24);
+    return rawStations
+      .filter((station) => station >= 0 && station <= spec.length)
+      .sort((a, b) => a - b)
+      .filter((station, index, rows) => index === 0 || Math.abs(station - rows[index - 1]) > 0.04);
+  }, [stirrup, spec.length]);
   const loopRef = useRef();
   const legARef = useRef();
   const legBRef = useRef();
@@ -501,7 +532,7 @@ function Stirrups({ beam, spec, onHardwareSelect }) {
     });
   }, [stations, pairXs, spec.depth, legHeight, loopRadius, dummy]);
   if (!stations.length) return null;
-  const payload = { id: "epoxy-stirrups", type: beam.twin_type === "box_beam" ? "Epoxy rebar hoop" : "Epoxy stirrup loop", beamMark: beam.mark, spec: { count: stations.length * 2, start_ft: start, end_ft: end, spacing_in: stirrup.spacing_in || 24 } };
+  const payload = { id: "epoxy-stirrups", type: beam.twin_type === "box_beam" ? "Epoxy rebar hoop" : "Epoxy stirrup loop", beamMark: beam.mark, spec: { count: stations.length * 2, start_ft: stations[0], end_ft: stations[stations.length - 1], spacing_in: stirrup.spacing_in || 24 } };
   const instanceCount = stations.length * pairXs.length;
   return (
     <group onClick={(event) => clickHardware(event, payload, onHardwareSelect)}>
@@ -1057,7 +1088,7 @@ function BeamAssembly({ beam, anomalies = [], onSurfacePick, onHardwareSelect, s
       {activeLayers.hardware && <BituminousEnds beam={beam} spec={spec} onHardwareSelect={onHardwareSelect} />}
       {activeLayers.strands && <StrandPaths beam={beam} spec={spec} onHardwareSelect={onHardwareSelect} />}
       {activeLayers.stirrups && <Stirrups beam={beam} spec={spec} onHardwareSelect={onHardwareSelect} />}
-      {activeLayers.hardware && <LiftLoops beam={beam} spec={spec} onHardwareSelect={onHardwareSelect} />}
+      {(activeLayers.hardware || activeLayers.stirrups) && <LiftLoops beam={beam} spec={spec} onHardwareSelect={onHardwareSelect} />}
       {activeLayers.hardware && <SideInserts beam={beam} spec={spec} onHardwareSelect={onHardwareSelect} />}
       {activeLayers.hardware && <CylindricalOpenings beam={beam} spec={spec} items={spec.blueprint.tubes} type="Tube" color="#4F5968" y={spec.depth * 0.56} onHardwareSelect={onHardwareSelect} />}
       {activeLayers.hardware && <CylindricalOpenings beam={beam} spec={spec} items={spec.blueprint.tie_rod_openings} type="Tie-rod opening" color="#0F172A" y={spec.depth * 0.42} onHardwareSelect={onHardwareSelect} />}
