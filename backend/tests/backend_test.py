@@ -4,7 +4,7 @@ import io
 import pytest
 import requests
 
-BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://beam-forge-2.preview.emergentagent.com").rstrip("/")
+BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "http://localhost:8000").rstrip("/")
 API = f"{BASE_URL}/api"
 
 ADMIN = ("tccrossmusic@gmail.com", "BedForge2026!")

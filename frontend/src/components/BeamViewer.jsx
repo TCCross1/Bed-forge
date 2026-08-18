@@ -32,7 +32,9 @@ class TwinCanvasErrorBoundary extends React.Component {
     return { hasError: true };
   }
 
-  componentDidCatch() {}
+  componentDidCatch(error, errorInfo) {
+    console.error("Digital Twin renderer failed", error, errorInfo);
+  }
 
   render() {
     if (this.state.hasError) {

@@ -57,16 +57,17 @@ def package_scope(package_type, job, pour, beams):
     return f"Pour complete · {pour.get('pour_number', '—')}"
 
 
-def job_qr_payload(package_type, job, pour, beds, beams):
+def job_qr_payload(package_type, job, pour, pours, beds, beams):
     bed_text = safe_join(f"Bed {bed.get('bed_number')}" for bed in beds if bed.get("bed_number") is not None)
     beam_marks = safe_join(beam.get("mark") for beam in beams)
+    pour_text = safe_join(pour.get("pour_number") for pour in pours)
     return "\n".join([
         f"Package: {package_title(package_type)}",
         f"Scope: {package_scope(package_type, job, pour, beams)}",
         f"Job: {job.get('job_number', '—')} · {job.get('name', '—')}",
         f"Customer: {job.get('customer', '—')}",
         f"DOT Spec: {job.get('state_spec', '—')}",
-        f"Pour: {pour.get('pour_number', '—')}",
+        f"Pours: {pour_text}",
         f"Beds: {bed_text}",
         f"Beams: {beam_marks}",
     ])
@@ -147,7 +148,7 @@ def add_section(story, number, title, element):
     story.append(Spacer(1, 0.16 * inch))
 
 
-def cover_sections(batch_record):
+def cover_sections(batch_records):
     sections = [
         ["1", "Beams", "Beam schedule, bed positions, QC status, and traceability"],
         ["2", "Batch / environment", "Ticket, mix, weather, concrete temperature, and batch detail"],
@@ -159,13 +160,13 @@ def cover_sections(batch_record):
         ["8", "Strand traceability", "Beam-to-roll and release tag traceability"],
         ["9", "NCR summary", "Linked NCR status and photo references"],
     ]
-    if batch_record.get("ingredients"):
+    if any(record.get("ingredients") for record in batch_records):
         sections[1][2] = "Ticket, mix, weather, concrete temperature, and ingredient checks"
     return sections
 
 
-def draw_cover_banner(package_type, job, pour, beds, beams):
-    qr_draw = qr_block(job_qr_payload(package_type, job, pour, beds, beams))
+def draw_cover_banner(package_type, job, pour, pours, beds, beams):
+    qr_draw = qr_block(job_qr_payload(package_type, job, pour, pours, beds, beams))
     brand_block = [
         Paragraph(BRAND, styles["BrandTitle"]),
         Spacer(1, 0.04 * inch),
@@ -245,12 +246,17 @@ def build_package_pdf(context: dict) -> bytes:
     package_type = context.get("package_type", "pour_complete")
     job = context.get("job", {})
     pour = context.get("pour", {})
+    pours = context.get("pours", [])
+    if not pours and pour:
+        pours = [pour]
     beds = context.get("beds", [])
     beams = context.get("beams", [])
     inspections = context.get("inspections", [])
     tension_reports = context.get("tension_reports", [])
     camber_readings = context.get("camber_readings", [])
-    batch_record = context.get("batch_record") or {}
+    batch_records = context.get("batch_records", [])
+    if not batch_records and context.get("batch_record"):
+        batch_records = [context["batch_record"]]
     ncrs = context.get("ncrs", [])
     anomalies = context.get("anomalies", [])
 
@@ -258,14 +264,14 @@ def build_package_pdf(context: dict) -> bytes:
     bed_labels = [f"Bed {bed.get('bed_number')}" for bed in beds if bed.get("bed_number") is not None]
     beam_ids = {beam.get("id") for beam in beams}
 
-    story.append(draw_cover_banner(package_type, job, pour, beds, beams))
+    story.append(draw_cover_banner(package_type, job, pour, pours, beds, beams))
     story.append(Spacer(1, 0.16 * inch))
     story.append(kv_table([
         ("Scope", package_scope(package_type, job, pour, beams)),
         ("Job", f"{job.get('job_number', '—')} · {job.get('name', '—')}"),
         ("Customer", job.get("customer", "—")),
         ("DOT / Spec", job.get("state_spec", "—")),
-        ("Pour", pour.get("pour_number", "—")),
+        ("Pour" if len(pours) == 1 else "Pours", safe_join(item.get("pour_number") for item in pours)),
         ("Beds", safe_join(bed_labels)),
         ("Beam count", len(beams)),
         ("Beam marks", safe_join(beam.get("mark") for beam in beams)),
@@ -278,7 +284,7 @@ def build_package_pdf(context: dict) -> bytes:
         story,
         "COVER",
         "Package Contents",
-        grid_table(["Ref", "Section", "Purpose"], cover_sections(batch_record), widths=[0.55 * inch, 1.95 * inch, 4.6 * inch]),
+        grid_table(["Ref", "Section", "Purpose"], cover_sections(batch_records), widths=[0.55 * inch, 1.95 * inch, 4.6 * inch]),
     )
     add_section(
         story,
@@ -313,12 +319,35 @@ def build_package_pdf(context: dict) -> bytes:
     ]
     add_section(story, 1, "Beams", grid_table(["Beam", "Product", "Bed", "Pos", "Length (ft)", "Blueprint", "QC", "Strand Rolls"], beam_rows or [["—", "—", "—", "—", "—", "—", "—", "—"]], widths=[0.75 * inch, 1.85 * inch, 0.45 * inch, 0.45 * inch, 0.75 * inch, 1.15 * inch, 0.65 * inch, 1.65 * inch]))
 
-    batch_rows = [[batch_record.get("ticket_number", "—"), batch_record.get("mix_design", pour.get("concrete_mix", "—")), batch_record.get("ambient_temp_f", "—"), batch_record.get("concrete_temp_f", "—"), batch_record.get("humidity_pct", "—"), batch_record.get("wind_mph", "—"), batch_record.get("weather", "—")]]
-    add_section(story, 2, "Batch / Environment", grid_table(["Ticket", "Mix", "Ambient °F", "Concrete °F", "Humidity %", "Wind MPH", "Weather"], batch_rows, widths=[0.95 * inch, 1.75 * inch, 0.85 * inch, 0.95 * inch, 0.85 * inch, 0.85 * inch, 1.25 * inch]))
+    pours_by_id = {item.get("id"): item for item in pours}
+    batch_rows = [
+        [
+            pours_by_id.get(record.get("pour_id"), {}).get("pour_number", "—"),
+            record.get("ticket_number", "—"),
+            record.get("mix_design", pours_by_id.get(record.get("pour_id"), {}).get("concrete_mix", "—")),
+            record.get("ambient_temp_f", "—"),
+            record.get("concrete_temp_f", "—"),
+            record.get("humidity_pct", "—"),
+            record.get("wind_mph", "—"),
+            record.get("weather", "—"),
+        ]
+        for record in batch_records
+    ]
+    add_section(story, 2, "Batch / Environment", grid_table(["Pour", "Ticket", "Mix", "Ambient °F", "Concrete °F", "Humidity %", "Wind MPH", "Weather"], batch_rows or [["—"] * 8], widths=[0.6 * inch, 0.8 * inch, 1.35 * inch, 0.7 * inch, 0.8 * inch, 0.7 * inch, 0.65 * inch, 1.0 * inch]))
 
-    if batch_record.get("ingredients"):
-        ingredient_rows = [[item.get("name", "—"), item.get("target_lb", item.get("target", "—")), item.get("actual_lb", item.get("actual", "—"))] for item in batch_record["ingredients"]]
-        add_section(story, "2A", "Batch Ingredient Check", grid_table(["Ingredient", "Target (lb)", "Actual (lb)"], ingredient_rows, widths=[3.7 * inch, 1.35 * inch, 1.35 * inch]))
+    ingredient_rows = [
+        [
+            pours_by_id.get(record.get("pour_id"), {}).get("pour_number", "—"),
+            record.get("ticket_number", "—"),
+            item.get("name", "—"),
+            item.get("target_lb", item.get("target", "—")),
+            item.get("actual_lb", item.get("actual", "—")),
+        ]
+        for record in batch_records
+        for item in record.get("ingredients", [])
+    ]
+    if ingredient_rows:
+        add_section(story, "2A", "Batch Ingredient Check", grid_table(["Pour", "Ticket", "Ingredient", "Target (lb)", "Actual (lb)"], ingredient_rows, widths=[0.75 * inch, 0.9 * inch, 2.8 * inch, 1.0 * inch, 1.0 * inch]))
 
     qir_rows = [[next((beam.get("mark") for beam in beams if beam.get("id") == item.get("beam_id")), item.get("beam_id", "—")), item.get("section", "—"), item.get("status", "—"), item.get("inspector", "—"), item.get("notes", "—")] for item in inspections]
     add_section(story, 3, "QIR", grid_table(["Beam", "Section", "Status", "Inspector", "Notes"], qir_rows or [["—", "—", "—", "—", "—"]], widths=[1.0 * inch, 1.2 * inch, 0.85 * inch, 1.2 * inch, 2.7 * inch]))

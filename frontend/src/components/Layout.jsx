@@ -7,15 +7,15 @@ import api from "../lib/api";
 
 const NAV = [
   { to: "/", label: "Dashboard", icon: LayoutGrid, testid: "nav-dashboard" },
-  { to: "/twin", label: "Digital Twin", icon: Box, testid: "nav-twin" },
+  { to: "/twin", label: "Digital Twin", icon: Box, testid: "nav-twin", feature: "digital_twin" },
   { to: "/inspection", label: "New Inspection", icon: ClipboardCheck, testid: "nav-inspection" },
   { to: "/tension", label: "Tension Calc", icon: Calculator, testid: "nav-tension" },
-  { to: "/forms", label: "Forms Export", icon: FileSpreadsheet, testid: "nav-forms" },
-  { to: "/ncr", label: "NCR Board", icon: ShieldAlert, testid: "nav-ncr" },
-  { to: "/batch", label: "Batch Plant", icon: Factory, testid: "nav-batch" },
+  { to: "/forms", label: "Forms Export", icon: FileSpreadsheet, testid: "nav-forms", feature: "package_export" },
+  { to: "/ncr", label: "NCR Board", icon: ShieldAlert, testid: "nav-ncr", feature: "ncr" },
+  { to: "/batch", label: "Batch Plant", icon: Factory, testid: "nav-batch", feature: "batch_plant" },
   { to: "/licensing", label: "Licensing", icon: KeyRound, testid: "nav-licensing" },
-  { to: "/blueprints", label: "Blueprints", icon: ScrollText, testid: "nav-blueprints" },
-  { to: "/command-board", label: "Command Board", icon: MonitorPlay, testid: "nav-command-board" },
+  { to: "/blueprints", label: "Blueprints", icon: ScrollText, testid: "nav-blueprints", feature: "blueprint_intelligence" },
+  { to: "/command-board", label: "Command Board", icon: MonitorPlay, testid: "nav-command-board", feature: "command_board" },
 ];
 
 export default function Layout({ children }) {
@@ -43,7 +43,11 @@ export default function Layout({ children }) {
         </div>
 
         <nav className="flex-1 py-4 flex flex-col gap-1 px-3">
-          {NAV.map((item) => {
+          {NAV.filter((item) => (
+            !item.feature
+            || !license
+            || (license.status !== "expired" && license.feature_flags?.[item.feature])
+          )).map((item) => {
             const Icon = item.icon;
             return (
               <NavLink

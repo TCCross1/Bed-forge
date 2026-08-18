@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime, timezone
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Literal
 from pydantic import BaseModel, Field, EmailStr
 
 
@@ -362,8 +362,8 @@ class LicenseState(BaseModel):
 
 
 class LicenseActivateInput(BaseModel):
-    license_key: str
-    tier: str = "standard"
+    license_key: str = Field(min_length=12)
+    tier: Literal["standard", "enterprise"] = "standard"
     expires_at: str
 
 

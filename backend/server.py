@@ -6,8 +6,9 @@ load_dotenv(ROOT_DIR / ".env")
 
 import os
 import logging
+import secrets
 from collections import Counter
-from datetime import datetime, timezone, timedelta
+from datetime import date, datetime, timezone, timedelta
 from fastapi import FastAPI, APIRouter, Depends, HTTPException, File, Form, UploadFile
 from fastapi.responses import StreamingResponse
 from starlette.middleware.cors import CORSMiddleware
@@ -44,6 +45,99 @@ app = FastAPI(title="BedForge QC")
 api = APIRouter(prefix="/api")
 BLUEPRINT_STORAGE_DIR = ROOT_DIR / "uploads" / "blueprints"
 BLUEPRINT_STORAGE_DIR.mkdir(parents=True, exist_ok=True)
+
+LICENSE_FEATURES_BY_TIER = {
+    "trial": {
+        "digital_twin": True,
+        "package_export": True,
+        "ncr": True,
+        "batch_plant": True,
+        "licensing": True,
+        "command_board": True,
+        "blueprint_intelligence": True,
+        "advanced_exports": False,
+    },
+    "standard": {
+        "digital_twin": True,
+        "package_export": True,
+        "ncr": True,
+        "batch_plant": True,
+        "licensing": True,
+        "command_board": True,
+        "blueprint_intelligence": True,
+        "advanced_exports": False,
+    },
+    "enterprise": {
+        "digital_twin": True,
+        "package_export": True,
+        "ncr": True,
+        "batch_plant": True,
+        "licensing": True,
+        "command_board": True,
+        "blueprint_intelligence": True,
+        "advanced_exports": True,
+    },
+}
+
+
+def license_features_for_tier(tier: str) -> dict:
+    return dict(LICENSE_FEATURES_BY_TIER.get(tier, LICENSE_FEATURES_BY_TIER["trial"]))
+
+
+def license_has_expired(expires_at: str) -> bool:
+    if not expires_at:
+        return False
+    try:
+        return date.fromisoformat(expires_at) < datetime.now(timezone.utc).date()
+    except ValueError:
+        return True
+
+
+async def load_license_state() -> dict:
+    license_state = await db.licenses.find_one({"id": "license"}, {"_id": 0})
+    if not license_state:
+        created = LicenseState(
+            status="trial",
+            tier="trial",
+            feature_flags=license_features_for_tier("trial"),
+        ).model_dump()
+        await db.licenses.insert_one(created)
+        return created
+
+    updates = {}
+    normalized_flags = {
+        **license_features_for_tier(license_state.get("tier", "trial")),
+        **license_state.get("feature_flags", {}),
+    }
+    if normalized_flags != license_state.get("feature_flags", {}):
+        updates["feature_flags"] = normalized_flags
+        license_state["feature_flags"] = normalized_flags
+    if license_has_expired(license_state.get("expires_at", "")) and license_state.get("status") != "expired":
+        updates["status"] = "expired"
+        license_state["status"] = "expired"
+    if updates:
+        updates["updated_at"] = now_iso()
+        license_state["updated_at"] = updates["updated_at"]
+        await db.licenses.update_one({"id": "license"}, {"$set": updates})
+    return license_state
+
+
+async def ensure_feature_enabled(feature: str) -> dict:
+    license_state = await load_license_state()
+    if license_state.get("status") == "expired":
+        raise HTTPException(status_code=403, detail="License expired")
+    if not license_state.get("feature_flags", {}).get(feature, False):
+        raise HTTPException(status_code=403, detail=f"Feature not licensed: {feature}")
+    return license_state
+
+
+def require_feature(feature: str, *roles: str):
+    async def checker(user: dict = Depends(get_current_user)):
+        if roles and user.get("role") not in roles:
+            raise HTTPException(status_code=403, detail="Insufficient permissions")
+        await ensure_feature_enabled(feature)
+        return user
+    return checker
 
 
 async def enrich_beam(beam: dict, include_details: bool = False) -> dict:
@@ -226,8 +320,17 @@ async def build_package_context(package_type: str, pour_id: str = None, beam_id:
     if not selected_beams:
         raise HTTPException(status_code=404, detail="No beams found for package request")
 
-    selected_pour_id = pour_id or selected_beams[0].get("pour_id")
     selected_job_id = job_id or selected_beams[0].get("job_id")
+    if package_type == "full_job":
+        selected_pour_ids = sorted(
+            item["id"] for item in pours.values()
+            if item.get("job_id") == selected_job_id
+        )
+    else:
+        selected_pour_ids = sorted({
+            beam.get("pour_id") for beam in selected_beams if beam.get("pour_id")
+        })
+    selected_pour_id = pour_id or (selected_pour_ids[0] if len(selected_pour_ids) == 1 else None)
     selected_bed_ids = sorted({beam["bed_id"] for beam in selected_beams})
 
     for reading in camber_readings:
@@ -239,6 +342,7 @@ async def build_package_context(package_type: str, pour_id: str = None, beam_id:
         "package_type": package_type,
         "job": jobs.get(selected_job_id, {}),
         "pour": pours.get(selected_pour_id, {}),
+        "pours": [pours[item_id] for item_id in selected_pour_ids if item_id in pours],
         "beds": [beds[bed_id] for bed_id in selected_bed_ids if bed_id in beds],
         "beams": selected_beams,
         "inspections": [item for item in inspections if item.get("beam_id") in {beam["id"] for beam in selected_beams}],
@@ -246,7 +350,12 @@ async def build_package_context(package_type: str, pour_id: str = None, beam_id:
         "camber_readings": [item for item in camber_readings if item.get("beam_id") in {beam["id"] for beam in selected_beams}],
         "tension_reports": [item for item in tension_reports if not selected_bed_ids or item.get("bed_id") in selected_bed_ids],
         "batch_record": next((item for item in batch_records if item.get("pour_id") == selected_pour_id), None),
-        "ncrs": [item for item in ncrs if item.get("beam_id") in {beam["id"] for beam in selected_beams} or item.get("pour_id") == selected_pour_id],
+        "batch_records": [item for item in batch_records if item.get("pour_id") in selected_pour_ids],
+        "ncrs": [
+            item for item in ncrs
+            if item.get("beam_id") in {beam["id"] for beam in selected_beams}
+            or item.get("pour_id") in selected_pour_ids
+        ],
     }
 
 
@@ -270,13 +379,13 @@ async def create_product_type(payload: ProductTypeCreate, user=Depends(get_curre
 
 # ---------------- Blueprint Intelligence ----------------
 @api.get("/blueprints")
-async def list_blueprints(user=Depends(get_current_user)):
+async def list_blueprints(user=Depends(require_feature("blueprint_intelligence"))):
     documents = await db.blueprint_documents.find({}, {"_id": 0}).sort("created_at", -1).to_list(500)
     return [await blueprint_detail(item["id"]) for item in documents]
 
 
 @api.get("/blueprints/{document_id}")
-async def get_blueprint(document_id: str, user=Depends(get_current_user)):
+async def get_blueprint(document_id: str, user=Depends(require_feature("blueprint_intelligence"))):
     return await blueprint_detail(document_id)
 
 
@@ -289,7 +398,7 @@ async def upload_blueprint(
     product_family_hint: str | None = Form(default=""),
     beam_mark_hint: str | None = Form(default=""),
     project_name_hint: str | None = Form(default=""),
-    user=Depends(get_current_user),
+    user=Depends(require_feature("blueprint_intelligence")),
 ):
     filename = file.filename or "blueprint.pdf"
     if not filename.lower().endswith(".pdf"):
@@ -325,7 +434,7 @@ async def upload_blueprint(
 
 
 @api.get("/blueprints/{document_id}/file")
-async def download_blueprint_file(document_id: str, user=Depends(get_current_user)):
+async def download_blueprint_file(document_id: str, user=Depends(require_feature("blueprint_intelligence"))):
     document = await fetch_blueprint_document(document_id)
     storage_path = Path(document["storage_path"])
     if not storage_path.exists():
@@ -338,7 +447,7 @@ async def download_blueprint_file(document_id: str, user=Depends(get_current_use
 
 
 @api.post("/blueprints/{document_id}/extract")
-async def extract_blueprint(document_id: str, user=Depends(require_roles("qc_supervisor", "admin"))):
+async def extract_blueprint(document_id: str, user=Depends(require_feature("blueprint_intelligence", "qc_supervisor", "admin"))):
     document = await fetch_blueprint_document(document_id)
     storage_path = Path(document["storage_path"])
     if not storage_path.exists():
@@ -375,7 +484,7 @@ async def extract_blueprint(document_id: str, user=Depends(require_roles("qc_sup
 
 
 @api.patch("/blueprints/{document_id}/extraction")
-async def patch_blueprint_extraction(document_id: str, payload: BlueprintExtractionPatch, user=Depends(require_roles("qc_supervisor", "admin"))):
+async def patch_blueprint_extraction(document_id: str, payload: BlueprintExtractionPatch, user=Depends(require_feature("blueprint_intelligence", "qc_supervisor", "admin"))):
     document = await fetch_blueprint_document(document_id)
     if not document.get("latest_extraction_id"):
         raise HTTPException(status_code=400, detail="Blueprint has not been extracted yet")
@@ -425,7 +534,7 @@ async def patch_blueprint_extraction(document_id: str, payload: BlueprintExtract
 
 
 @api.post("/blueprints/{document_id}/lock")
-async def lock_blueprint(document_id: str, payload: BlueprintLockInput, user=Depends(require_roles("qc_supervisor", "admin"))):
+async def lock_blueprint(document_id: str, payload: BlueprintLockInput, user=Depends(require_feature("blueprint_intelligence", "qc_supervisor", "admin"))):
     document = await fetch_blueprint_document(document_id)
     if not document.get("latest_extraction_id"):
         raise HTTPException(status_code=400, detail="Blueprint must be extracted before it can be locked")
@@ -506,7 +615,7 @@ async def list_beds(user=Depends(get_current_user)):
 
 
 @api.get("/beds/{bed_id}/twin")
-async def get_bed_twin(bed_id: str, user=Depends(get_current_user)):
+async def get_bed_twin(bed_id: str, user=Depends(require_feature("digital_twin"))):
     bed = await db.beds.find_one({"id": bed_id}, {"_id": 0})
     if not bed:
         raise HTTPException(status_code=404, detail="Bed not found")
@@ -567,7 +676,7 @@ async def dashboard(user=Depends(get_current_user)):
 
 
 @api.get("/command-board")
-async def command_board(user=Depends(get_current_user)):
+async def command_board(user=Depends(require_feature("command_board"))):
     now = datetime.now(timezone.utc)
     beds = await db.beds.find({}, {"_id": 0}).sort("bed_number", 1).to_list(50)
     beams = await db.beams.find({}, {"_id": 0}).to_list(1000)
@@ -854,12 +963,12 @@ async def create_anomaly(payload: AnomalyCreate, user=Depends(get_current_user))
 
 # ---------------- Batch Plant ----------------
 @api.get("/batch-records")
-async def list_batch_records(user=Depends(get_current_user)):
+async def list_batch_records(user=Depends(require_feature("batch_plant"))):
     return await db.batch_records.find({}, {"_id": 0}).to_list(500)
 
 
 @api.post("/batch-records")
-async def create_batch_record(payload: BatchRecordCreate, user=Depends(get_current_user)):
+async def create_batch_record(payload: BatchRecordCreate, user=Depends(require_feature("batch_plant"))):
     record = BatchRecord(**payload.model_dump(), created_by=user["name"])
     await db.batch_records.insert_one(record.model_dump())
     return record.model_dump()
@@ -867,12 +976,12 @@ async def create_batch_record(payload: BatchRecordCreate, user=Depends(get_curre
 
 # ---------------- NCR ----------------
 @api.get("/ncrs")
-async def list_ncrs(user=Depends(get_current_user)):
+async def list_ncrs(user=Depends(require_feature("ncr"))):
     return await db.ncrs.find({}, {"_id": 0}).to_list(500)
 
 
 @api.post("/ncrs")
-async def create_ncr(payload: NCRCreate, user=Depends(get_current_user)):
+async def create_ncr(payload: NCRCreate, user=Depends(require_feature("ncr"))):
     count = await db.ncrs.count_documents({})
     ncr = NCR(
         code=f"NCR-{datetime.now(timezone.utc).strftime('%y')}-{count + 1:03d}",
@@ -884,7 +993,7 @@ async def create_ncr(payload: NCRCreate, user=Depends(get_current_user)):
 
 
 @api.patch("/ncrs/{ncr_id}")
-async def update_ncr(ncr_id: str, payload: NCRUpdate, user=Depends(get_current_user)):
+async def update_ncr(ncr_id: str, payload: NCRUpdate, user=Depends(require_feature("ncr"))):
     current = await db.ncrs.find_one({"id": ncr_id}, {"_id": 0})
     if not current:
         raise HTTPException(status_code=404, detail="NCR not found")
@@ -901,42 +1010,28 @@ async def update_ncr(ncr_id: str, payload: NCRUpdate, user=Depends(get_current_u
 # ---------------- Licensing ----------------
 @api.get("/license")
 async def get_license(user=Depends(get_current_user)):
-    license_state = await db.licenses.find_one({"id": "license"}, {"_id": 0})
-    if license_state:
-        expires_at = license_state.get("expires_at")
-        if expires_at and expires_at < now_iso()[:10] and license_state.get("status") != "expired":
-            license_state["status"] = "expired"
-            await db.licenses.update_one({"id": "license"}, {"$set": {"status": "expired", "updated_at": now_iso()}})
-        return license_state
-    created = LicenseState(
-        status="trial",
-        tier="trial",
-        feature_flags={
-            "digital_twin": True,
-            "package_export": True,
-            "ncr": True,
-            "batch_plant": True,
-            "licensing": True,
-        },
-    )
-    await db.licenses.insert_one(created.model_dump())
-    return created.model_dump()
+    return await load_license_state()
 
 
 @api.post("/license/activate")
-async def activate_license(payload: LicenseActivateInput, user=Depends(get_current_user)):
-    features = {
-        "digital_twin": True,
-        "package_export": True,
-        "ncr": payload.tier in ("standard", "enterprise"),
-        "batch_plant": payload.tier in ("standard", "enterprise"),
-        "licensing": True,
-        "advanced_exports": payload.tier == "enterprise",
-    }
+async def activate_license(payload: LicenseActivateInput, user=Depends(require_roles("admin"))):
+    configured_key = os.environ.get("LICENSE_ACTIVATION_KEY", "").strip()
+    if not configured_key:
+        raise HTTPException(status_code=503, detail="License activation is not configured")
+    if not secrets.compare_digest(payload.license_key, configured_key):
+        raise HTTPException(status_code=403, detail="Invalid license activation key")
+    try:
+        expires_at = date.fromisoformat(payload.expires_at)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Expiration date must use YYYY-MM-DD") from exc
+    if expires_at < datetime.now(timezone.utc).date():
+        raise HTTPException(status_code=400, detail="License expiration date cannot be in the past")
+
+    features = license_features_for_tier(payload.tier)
     updates = LicenseState(
         status="active",
         tier=payload.tier,
-        license_key=payload.license_key,
+        license_key=f"****{payload.license_key[-4:]}",
         expires_at=payload.expires_at,
         feature_flags=features,
         last_checked_at=now_iso(),
@@ -952,7 +1047,7 @@ async def activate_license(payload: LicenseActivateInput, user=Depends(get_curre
 
 # ---------------- Forms Export ----------------
 @api.get("/forms/export/{form_type}")
-async def export_form(form_type: str, beam_id: str = None, user=Depends(get_current_user)):
+async def export_form(form_type: str, beam_id: str = None, user=Depends(require_feature("package_export"))):
     if form_type not in excel_export.BUILDERS:
         raise HTTPException(status_code=400, detail="Unknown form type")
 
@@ -1000,10 +1095,12 @@ async def export_package_pdf(
     pour_id: str = None,
     beam_id: str = None,
     job_id: str = None,
-    user=Depends(get_current_user),
+    user=Depends(require_feature("package_export")),
 ):
     if package_type not in ("pour_complete", "single_beam", "full_job"):
         raise HTTPException(status_code=400, detail="Unknown package type")
+    if package_type == "full_job":
+        await ensure_feature_enabled("advanced_exports")
     context = await build_package_context(package_type, pour_id=pour_id, beam_id=beam_id, job_id=job_id)
     data = package_export.build_package_pdf(context)
     return StreamingResponse(

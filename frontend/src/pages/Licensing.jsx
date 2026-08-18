@@ -1,11 +1,13 @@
 import React, { useEffect, useState } from "react";
-import api from "../lib/api";
+import api, { formatApiErrorDetail } from "../lib/api";
 import Layout, { PageHeader } from "../components/Layout";
+import { useAuth } from "../context/AuthContext";
 import { toast } from "sonner";
 
 export default function Licensing() {
+  const { user } = useAuth();
   const [license, setLicense] = useState(null);
-  const [form, setForm] = useState({ license_key: "BF-ENT-2026-DEMO", tier: "enterprise", expires_at: "2027-12-31" });
+  const [form, setForm] = useState({ license_key: "", tier: "standard", expires_at: "" });
 
   const load = () => api.get("/license").then((res) => setLicense(res.data));
   useEffect(() => { load(); }, []);
@@ -15,8 +17,8 @@ export default function Licensing() {
       await api.post("/license/activate", form);
       await load();
       toast.success("License activated");
-    } catch {
-      toast.error("Activation failed");
+    } catch (err) {
+      toast.error(formatApiErrorDetail(err.response?.data?.detail) || "Activation failed");
     }
   };
 
@@ -39,13 +41,19 @@ export default function Licensing() {
         </div>
         <div className="bg-card border border-border rounded-sm p-6 space-y-4">
           <h3 className="font-display font-bold uppercase tracking-wider text-lg">Activate / Upgrade</h3>
-          <input value={form.license_key} onChange={(e) => setForm({ ...form, license_key: e.target.value })} placeholder="License key" className="w-full bg-background border border-border rounded-sm px-3 min-h-12 font-mono text-sm" />
-          <select value={form.tier} onChange={(e) => setForm({ ...form, tier: e.target.value })} className="w-full bg-background border border-border rounded-sm px-3 min-h-12 font-mono text-sm">
-            {['standard','enterprise'].map((tier) => <option key={tier} value={tier}>{tier}</option>)}
-          </select>
-          <input value={form.expires_at} onChange={(e) => setForm({ ...form, expires_at: e.target.value })} placeholder="YYYY-MM-DD" className="w-full bg-background border border-border rounded-sm px-3 min-h-12 font-mono text-sm" />
-          <button onClick={activate} className="w-full min-h-12 bg-primary text-white rounded-sm font-display font-bold uppercase tracking-widest">Activate License</button>
-          <div className="text-xs text-muted-foreground font-mono">Historical data and exports remain available; feature locks can be applied gracefully by tier or expiry.</div>
+          {user?.role === "admin" ? (
+            <>
+              <input type="password" value={form.license_key} onChange={(e) => setForm({ ...form, license_key: e.target.value })} placeholder="Provisioned activation key" className="w-full bg-background border border-border rounded-sm px-3 min-h-12 font-mono text-sm" />
+              <select value={form.tier} onChange={(e) => setForm({ ...form, tier: e.target.value })} className="w-full bg-background border border-border rounded-sm px-3 min-h-12 font-mono text-sm">
+                {['standard','enterprise'].map((tier) => <option key={tier} value={tier}>{tier}</option>)}
+              </select>
+              <input type="date" value={form.expires_at} onChange={(e) => setForm({ ...form, expires_at: e.target.value })} className="w-full bg-background border border-border rounded-sm px-3 min-h-12 font-mono text-sm" />
+              <button onClick={activate} disabled={!form.license_key || !form.expires_at} className="w-full min-h-12 bg-primary text-white rounded-sm font-display font-bold uppercase tracking-widest disabled:opacity-50">Activate License</button>
+            </>
+          ) : (
+            <div className="border border-border rounded-sm p-4 text-sm text-muted-foreground font-mono">Administrator access is required to activate or upgrade a license.</div>
+          )}
+          <div className="text-xs text-muted-foreground font-mono">Feature access is enforced by license status, tier, and server-side feature flags.</div>
         </div>
       </div>
     </Layout>

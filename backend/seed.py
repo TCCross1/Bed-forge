@@ -352,6 +352,9 @@ async def seed_plant():
                 "ncr": True,
                 "batch_plant": True,
                 "licensing": True,
+                "command_board": True,
+                "blueprint_intelligence": True,
+                "advanced_exports": False,
             },
         ).model_dump()
     )

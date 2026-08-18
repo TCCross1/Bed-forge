@@ -22,6 +22,7 @@ export default function FormsExport() {
   const [pours, setPours] = useState([]);
   const [beds, setBeds] = useState([]);
   const [beams, setBeams] = useState([]);
+  const [license, setLicense] = useState(null);
   const [jobId, setJobId] = useState("");
   const [pourId, setPourId] = useState("");
   const [beamId, setBeamId] = useState("");
@@ -33,11 +34,13 @@ export default function FormsExport() {
       api.get("/pours"),
       api.get("/beds"),
       api.get("/beams"),
-    ]).then(([jobsRes, poursRes, bedsRes, beamsRes]) => {
+      api.get("/license"),
+    ]).then(([jobsRes, poursRes, bedsRes, beamsRes, licenseRes]) => {
       setJobs(jobsRes.data);
       setPours(poursRes.data);
       setBeds(bedsRes.data);
       setBeams(beamsRes.data);
+      setLicense(licenseRes.data);
       setJobId(jobsRes.data[0]?.id || "");
       setPourId(poursRes.data[0]?.id || "");
       setBeamId(beamsRes.data[0]?.id || "");
@@ -70,6 +73,13 @@ export default function FormsExport() {
   };
 
   const exportPackage = async (pkg) => {
+    const enabled = license?.status !== "expired"
+      && license?.feature_flags?.package_export
+      && (pkg.type !== "full_job" || license?.feature_flags?.advanced_exports);
+    if (!enabled) {
+      toast.error("This export is not enabled by the current license");
+      return;
+    }
     setBusy(pkg.type);
     try {
       const params = new URLSearchParams({ package_type: pkg.type });
@@ -127,8 +137,8 @@ export default function FormsExport() {
                   <div><h3 className="font-display font-bold text-lg uppercase tracking-wide leading-tight">{pkg.title}</h3></div>
                 </div>
                 <p className="text-sm text-muted-foreground mb-6 flex-1">{pkg.desc}</p>
-                <button onClick={() => exportPackage(pkg)} disabled={busy === pkg.type} className="min-h-12 w-full bg-primary text-white rounded-sm flex items-center justify-center gap-2 font-semibold uppercase tracking-wider hover:bg-white hover:text-black transition-colors duration-100 disabled:opacity-60">
-                  {busy === pkg.type ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />} Export PDF
+                <button onClick={() => exportPackage(pkg)} disabled={busy === pkg.type || license?.status === "expired" || !license?.feature_flags?.package_export || (pkg.type === "full_job" && !license?.feature_flags?.advanced_exports)} className="min-h-12 w-full bg-primary text-white rounded-sm flex items-center justify-center gap-2 font-semibold uppercase tracking-wider hover:bg-white hover:text-black transition-colors duration-100 disabled:opacity-60">
+                  {busy === pkg.type ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />} {pkg.type === "full_job" && !license?.feature_flags?.advanced_exports ? "Enterprise Required" : "Export PDF"}
                 </button>
               </div>
             ))}
@@ -145,7 +155,7 @@ export default function FormsExport() {
                   <div><h3 className="font-display font-bold text-lg uppercase tracking-wide leading-tight">{form.title}</h3></div>
                 </div>
                 <p className="text-sm text-muted-foreground mb-6 flex-1">{form.desc}</p>
-                <button data-testid={`export-${form.type}`} onClick={() => exportLegacy(form)} disabled={busy === form.type} className="min-h-12 w-full border border-border rounded-sm flex items-center justify-center gap-2 font-semibold uppercase tracking-wider hover:bg-primary hover:border-primary hover:text-white transition-colors duration-100 disabled:opacity-60">
+                <button data-testid={`export-${form.type}`} onClick={() => exportLegacy(form)} disabled={busy === form.type || license?.status === "expired" || !license?.feature_flags?.package_export} className="min-h-12 w-full border border-border rounded-sm flex items-center justify-center gap-2 font-semibold uppercase tracking-wider hover:bg-primary hover:border-primary hover:text-white transition-colors duration-100 disabled:opacity-60">
                   {busy === form.type ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />} Export XLSX
                 </button>
               </div>
