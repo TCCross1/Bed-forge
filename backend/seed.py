@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from db import db
 from models import (
     ProductType, Job, Pour, Bed, Beam, Anomaly, TensionReport, CamberReading,
-    BedAssignment, CompanySettings, MixDesign, now_iso,
+    BedAssignment, CompanySettings, MixDesign, now_iso, new_id,
 )
 from tension import calc_theoretical_elongation, evaluate_tension
 from bed_layout import map_production_status, pack_stations
@@ -397,6 +397,165 @@ async def seed_strand_rolls():
         logger.info("seeded strand rolls for %s beds", len(beds))
     except Exception:
         logger.exception("seed_strand_rolls failed")
+
+
+def _mock_station_hardware(length_ft: float, twin_type: str = "i_beam") -> tuple[list[dict], list[dict], list[dict]]:
+    """Blueprint-like station layout for legacy/demo beams missing shop-drawing stations."""
+    length = max(float(length_ft or 80), 20.0)
+
+    def st(frac: float, precision: int = 2) -> float:
+        return round(length * frac, precision)
+
+    def hw(kind, name, station_ft, height_in, *, offset_in=0.0, face="top", type_code="", size="", diameter_in=None,
+           side="", embed="", quantity=1, end_station_ft=None, end="", length_in=None, notes=""):
+        row = {
+            "id": new_id(),
+            "kind": kind,
+            "name": name,
+            "type_code": type_code,
+            "size": size,
+            "quantity": quantity,
+            "position": {
+                "station_ft": round(float(station_ft), 3),
+                "offset_in": offset_in,
+                "height_from_soffit_in": height_in,
+                "face": face,
+                "source_note": "Mock proportional station layout for 3D twin visualization.",
+            },
+            "notes": notes or "MOCK station data — replace with locked shop drawing.",
+            "station_source": "mock",
+            "tolerance_in": 1.0,
+        }
+        if diameter_in is not None:
+            row["diameter_in"] = diameter_in
+        if side:
+            row["side"] = side
+        if embed:
+            row["embed"] = embed
+        if end_station_ft is not None:
+            row["end_station_ft"] = round(float(end_station_ft), 3)
+        if end:
+            row["end"] = end
+        if length_in is not None:
+            row["length_in"] = length_in
+        return row
+
+    hardware = [
+        hw("lift_loop", "Mock lift loop ME", st(0.13), 36.0, type_code="LL-MOCK", size='1" strand loop', notes="MOCK lift loop at 13% from Marked End."),
+        hw("lift_loop", "Mock lift loop UE", st(0.87), 36.0, type_code="LL-MOCK", size='1" strand loop', notes="MOCK lift loop at 13% from Unmarked End."),
+        hw("tube", "Mock harping / vent tube 1", st(1 / 3), 18.0, face="web_left", type_code="VENT", size='3" Ø PVC', diameter_in=3.0),
+        hw("tube", "Mock harping / vent tube 2", st(2 / 3), 18.0, face="web_right", type_code="VENT", size='3" Ø PVC', diameter_in=3.0),
+        hw("tie_rod", "Mock tie-rod ME", max(1.5, st(0.025)), 18.0, face="web_left", type_code="TR", size='2-1/2" Ø', diameter_in=2.5),
+        hw("tie_rod", "Mock tie-rod UE", min(length - 1.5, st(0.975)), 18.0, face="web_right", type_code="TR", size='2-1/2" Ø', diameter_in=2.5),
+        hw("drain", "Mock drain ME", st(0.10), 3.0, face="bottom", type_code="DR", size='2" Ø', diameter_in=2.0),
+        hw("drain", "Mock drain UE", st(0.90), 3.0, face="bottom", type_code="DR", size='2" Ø', diameter_in=2.0),
+        hw("bituminous", "Mock bituminous pocket ME", 0.0, 2.0, face="bottom", type_code="BIT", size='24"', end_station_ft=2.0, end="start", length_in=24),
+        hw("bituminous", "Mock bituminous pocket UE", max(length - 2.0, 0), 2.0, face="bottom", type_code="BIT", size='24"', end_station_ft=length, end="end", length_in=24),
+    ]
+    for idx, station in enumerate([st(0.18), st(0.32), st(0.50), st(0.68), st(0.82)], start=1):
+        for side, offset in (("left", -4.0), ("right", 4.0)):
+            hardware.append(hw("insert", f"Mock insert {idx} {side[0].upper()}", station, 30.0, offset_in=offset, face="top", side=side, embed="F-64", type_code="F-64", size='3/4"-10 ferrule'))
+    hold_downs = [
+        {
+            "id": new_id(),
+            "station_from_marked_end": station,
+            "height": 2.5,
+            "offset_in": 2.0,
+            "type_spec": "MOCK H-56-S hold-down",
+            "quantity_at_station": 2,
+            "orientation": "transverse",
+            "status": "pending",
+            "notes": "MOCK four-piece hold-down layout at proportional beam stations.",
+        }
+        for station in [st(0.22), st(0.40), st(0.60), st(0.78)]
+    ]
+    for item in hold_downs:
+        hardware.append(hw("hold_down", "Mock hold-down", item["station_from_marked_end"], item["height"], face="bottom", type_code="H-56-S", size="mock hold-down", quantity=2))
+    stirrup_zones = [
+        {"id": new_id(), "from_ft": 0.0, "to_ft": round(min(6.0, length * 0.08), 2), "spacing_in": 6.0, "bar_size": "#4", "shape": "hoop", "notes": "MOCK end-zone stirrups."},
+        {"id": new_id(), "from_ft": round(min(6.0, length * 0.08), 2), "to_ft": round(max(length - min(6.0, length * 0.08), 0), 2), "spacing_in": 18.0, "bar_size": "#4", "shape": "stirrup", "notes": "MOCK typical stirrup spacing."},
+        {"id": new_id(), "from_ft": round(max(length - min(6.0, length * 0.08), 0), 2), "to_ft": round(length, 2), "spacing_in": 6.0, "bar_size": "#4", "shape": "hoop", "notes": "MOCK end-zone stirrups."},
+    ]
+    return hardware, hold_downs, stirrup_zones
+
+
+async def seed_mock_hardware_stations():
+    """Idempotently attach mock station BeamSpecs to beams missing locked shop drawings."""
+    try:
+        from beam_spec import BeamSpec, BeamGeometry, StrandItem
+
+        beams = await db.beams.find({}, {"_id": 0}).to_list(5000)
+        if not beams:
+            return
+        product_types = {pt["id"]: pt for pt in await db.product_types.find({}, {"_id": 0}).to_list(1000)}
+        seeded = 0
+        for beam in beams:
+            existing = None
+            if beam.get("spec_id"):
+                existing = await db.beam_specs.find_one({"id": beam["spec_id"]}, {"_id": 0})
+                if existing and existing.get("station_source") != "mock":
+                    continue
+            if not existing:
+                rows = await db.beam_specs.find({"beam_id": beam["id"]}, {"_id": 0}).sort("created_at", -1).to_list(1)
+                existing = rows[0] if rows else None
+                if existing and existing.get("station_source") != "mock":
+                    continue
+            pt = product_types.get(beam.get("product_type_id")) or {}
+            length = float(beam.get("length_ft") or pt.get("default_length_ft") or 80)
+            twin_type = beam.get("twin_type") or pt.get("category") or "i_beam"
+            depth = float(pt.get("depth_in") or (33 if twin_type == "box_beam" else 45))
+            width = float(pt.get("width_in") or (48 if twin_type == "box_beam" else 18))
+            hardware, hold_downs, stirrup_zones = _mock_station_hardware(length, twin_type)
+            strands = [
+                StrandItem(number=i + 1, row=1 + (i // 4), column=1 + (i % 4), size="0.5in", area_in2=0.153, jacking_kip=31.0, soffit_in=2.0 + (i // 4) * 2.0, offset_in=(-3 + (i % 4) * 2.0), x_in=(-3 + (i % 4) * 2.0), y_in=2.0 + (i // 4) * 2.0).model_dump()
+                for i in range(8)
+            ]
+            spec = BeamSpec(
+                id=(existing or {}).get("id") or new_id(),
+                beam_id=beam["id"],
+                job_id=beam.get("job_id"),
+                pour_id=beam.get("pour_id"),
+                source_drawing="MOCK proportional station layout",
+                job_number=(existing or {}).get("job_number") or "",
+                beam_mark=beam.get("mark", ""),
+                station_source="mock",
+                station_notes="MOCK proportional station data seeded so 3D twin hardware stations render; replace with locked BeamSpec/shop drawing.",
+                product_name=pt.get("name") or beam.get("mark", ""),
+                geometry=BeamGeometry(
+                    twin_type=twin_type,
+                    length_ft=length,
+                    depth_in=depth,
+                    width_in=width,
+                    top_flange_width_in=width if twin_type == "box_beam" else max(width, 12.0),
+                    top_flange_thick_in=6.0,
+                    bot_flange_width_in=width if twin_type == "box_beam" else max(width * 1.6, width + 10),
+                    bot_flange_thick_in=6.0,
+                    web_thick_in=6.0,
+                    product_name=pt.get("name") or beam.get("mark", ""),
+                ),
+                strands=[StrandItem(**row) for row in strands],
+                status="locked",
+                locked_by="system-mock-station-seed",
+                locked_at=(existing or {}).get("locked_at") or now_iso(),
+                extractor="mock_station_seed",
+                extractor_confidence=0.5,
+                review_notes="MOCK proportional station data for visual twin only.",
+                notes=[
+                    "MOCK station data — generated from beam length proportions to populate 3D twin hardware stations.",
+                    "Replace with locked shop drawing BeamSpec when available.",
+                ],
+            ).model_dump()
+            spec["hardware"] = hardware
+            spec["hold_downs"] = hold_downs
+            spec["stirrup_zones"] = stirrup_zones
+            spec["updated_at"] = now_iso()
+            await db.beam_specs.update_one({"id": spec["id"]}, {"$set": spec}, upsert=True)
+            await db.beams.update_one({"id": beam["id"]}, {"$set": {"spec_id": spec["id"], "station_source": "mock", "station_notes": spec["station_notes"]}})
+            seeded += 1
+        if seeded:
+            logger.info("mock hardware station specs refreshed for %s beams", seeded)
+    except Exception:
+        logger.exception("seed_mock_hardware_stations failed")
 
 
 async def seed_company():

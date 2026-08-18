@@ -191,6 +191,8 @@ class BeamSpec(BaseModel):
     source_url: str = ""
     job_number: str = ""
     beam_mark: str = ""
+    station_source: str = ""
+    station_notes: str = ""
     product_name: str = ""
     state_spec: str = "KYTC"
     geometry: BeamGeometry = Field(default_factory=BeamGeometry)

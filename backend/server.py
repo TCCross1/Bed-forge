@@ -28,7 +28,7 @@ from audit import write_audit, override_active
 from control_routes import router as control_router
 from security_core import assert_production_safe, is_production, security_headers_middleware
 from tension import run_tension_calc, calc_theoretical_elongation, evaluate_tension
-from seed import seed_plant, seed_l25390, seed_bed_assignments, seed_strand_rolls, seed_company, seed_beam_qr_tokens, seed_mix_designs
+from seed import seed_plant, seed_l25390, seed_bed_assignments, seed_strand_rolls, seed_company, seed_beam_qr_tokens, seed_mix_designs, seed_mock_hardware_stations
 from blueprint_routes import router as blueprint_router
 from blueprint_intelligence_routes import router as blueprint_intelligence_router
 from bed_routes import router as bed_router
@@ -79,9 +79,17 @@ def _station_item(item: dict, kind: str = "hardware") -> dict:
         "id": item.get("id") or item.get("name") or kind,
         "kind": item.get("kind") or kind,
         "name": item.get("name") or item.get("type_code") or kind.replace("_", " ").title(),
+        "type_code": item.get("type_code") or "",
+        "size": item.get("size") or "",
         "x_ft": _as_float(pos.get("station_ft") if isinstance(pos, dict) else item.get("station_ft")),
         "offset_in": _as_float(pos.get("offset_in") if isinstance(pos, dict) else item.get("offset_in")),
         "height_in": _as_float(pos.get("height_from_soffit_in") if isinstance(pos, dict) else item.get("height_from_soffit_in")),
+        "diameter_in": _as_float(item.get("diameter_in") or item.get("diameter"), 0),
+        "side": item.get("side") or (pos.get("face") if isinstance(pos, dict) else "") or item.get("face") or "",
+        "embed": item.get("embed") or item.get("type_code") or "",
+        "end": item.get("end") or "",
+        "length_in": _as_float(item.get("length_in"), 0),
+        "station_source": item.get("station_source") or "",
         "quantity": int(item.get("quantity") or item.get("quantity_at_station") or 1),
         "notes": item.get("notes") or "",
     }
@@ -157,9 +165,11 @@ def blueprint_from_legacy_spec(beam: dict, product_type: dict | None = None, spe
         "tie_rod_openings": by_kind.get("tie_rod", []),
         "drain_holes": by_kind.get("drain", []) + by_kind.get("drain_hole", []),
         "grout_grooves": by_kind.get("grout_groove", []),
-        "bituminous_ends": by_kind.get("bituminous", []),
+        "bituminous_ends": by_kind.get("bituminous", []) + by_kind.get("bituminous_zone", []),
         "hardware": hardware,
         "tolerances": spec.get("tolerances") or {},
+        "station_source": spec.get("station_source") or "",
+        "station_notes": spec.get("station_notes") or "",
     }
 
 
@@ -190,11 +200,14 @@ async def enrich_beam_for_twin(beam: dict, include_details: bool = False) -> dic
     elif data.get("blueprint_document_id"):
         document = await db.blueprint_documents.find_one({"id": data["blueprint_document_id"]}, {"_id": 0})
         extraction = await db.blueprint_extractions.find_one({"id": document.get("latest_extraction_id")}, {"_id": 0}) if document and document.get("latest_extraction_id") else None
-        product_type["blueprint"] = product_type.get("blueprint") or blueprint_from_legacy_spec(data, product_type, spec)
+        product_type["blueprint"] = blueprint_from_legacy_spec(data, product_type, spec) if spec and spec.get("station_source") == "mock" else (product_type.get("blueprint") or blueprint_from_legacy_spec(data, product_type, spec))
         data["blueprint_source"] = {"status": "draft", "document_id": data.get("blueprint_document_id"), "revision_id": None, "beam_mark": extraction and extraction.get("fields", {}).get("beam_mark", {}).get("value"), "locked_at": None, "critical_fields_complete": False}
     else:
-        product_type["blueprint"] = product_type.get("blueprint") or blueprint_from_legacy_spec(data, product_type, spec)
+        product_type["blueprint"] = blueprint_from_legacy_spec(data, product_type, spec) if spec and spec.get("station_source") == "mock" else (product_type.get("blueprint") or blueprint_from_legacy_spec(data, product_type, spec))
         data["blueprint_source"] = {"status": "legacy_seed", "document_id": None, "revision_id": None, "beam_mark": data.get("mark"), "locked_at": None, "critical_fields_complete": False}
+        if spec and spec.get("station_source"):
+            data["blueprint_source"]["station_source"] = spec.get("station_source")
+            data["blueprint_source"]["station_notes"] = spec.get("station_notes") or ""
     if not product_type.get("name") and spec:
         product_type["name"] = spec.get("product_name") or spec.get("geometry", {}).get("product_name") or data.get("mark")
     if product_type:
@@ -1190,6 +1203,7 @@ async def startup():
     await seed_plant()
     await seed_l25390()
     await seed_bed_assignments()
+    await seed_mock_hardware_stations()
     await seed_strand_rolls()
     await seed_mix_designs()
     await seed_beam_qr_tokens()
