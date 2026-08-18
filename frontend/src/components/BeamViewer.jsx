@@ -1,4 +1,4 @@
-import React, { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import React, { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useThree } from "@react-three/fiber";
 import { Html, Line, OrbitControls } from "@react-three/drei";
 import * as THREE from "three";
@@ -63,8 +63,13 @@ function CanvasContextMonitor({ onContextLost }) {
   return null;
 }
 
-function formatFeet(value = 0, digits = 1) {
-  return `${Number(value).toFixed(digits)} ft`;
+function formatFeet(value = 0) {
+  const numeric = Number(value) || 0;
+  const sign = numeric < 0 ? "-" : "";
+  const totalInches = Math.round(Math.abs(numeric) * 12);
+  const feet = Math.floor(totalInches / 12);
+  const inches = totalInches % 12;
+  return `${sign}${feet}'-${inches}"`;
 }
 
 function formatInches(value = 0, digits = 0) {
@@ -658,6 +663,25 @@ function DimensionLine({ start, end, label, labelPosition, color = "#73BCFF", ti
   );
 }
 
+function MeasurementText({ position, label, color = "#D8ECFF", size = 10 }) {
+  return (
+    <Html position={position} center distanceFactor={18} occlude={false}>
+      <span style={{
+        color,
+        fontSize: size,
+        fontFamily: "JetBrains Mono, ui-monospace, SFMono-Regular, monospace",
+        fontWeight: 700,
+        letterSpacing: "0.03em",
+        whiteSpace: "nowrap",
+        textShadow: "0 1px 2px rgba(0,0,0,0.95), 0 0 8px rgba(10,12,16,0.9)",
+        pointerEvents: "none",
+      }}>
+        {label}
+      </span>
+    </Html>
+  );
+}
+
 function stationValue(item) {
   const raw = item?.x_ft ?? item?.station_ft ?? item?.station_from_marked_end;
   const value = finiteNumber(raw);
@@ -707,44 +731,54 @@ function runningDimensionStations(spec) {
 function EngineeringDimensions({ beam, spec }) {
   const lengthFt = valueOrNull(spec.blueprint.dimensions?.overall_length_ft, beam.length_ft, spec.length);
   const stations = runningDimensionStations(spec);
-  const x = -spec.width * 1.18;
-  const yTop = spec.depth + 0.68;
-  const yChain = spec.depth + 0.34;
-  const yDelta = spec.depth + 0.08;
+  const sideX = -spec.width / 2 - 0.1;
+  const outsideX = -spec.width / 2 - 0.42;
+  const tubeRowY = spec.depth * 0.56;
+  const runLineY = Math.max(spec.depth * 0.34, tubeRowY - 0.52);
+  const overallY = Math.max(0.18, runLineY - 0.42);
   const color = "#73BCFF";
   const stationColor = "#D8ECFF";
-  let previous = 0;
+  const firstSideTarget = [
+    ...(spec.blueprint.inserts || []).map((item, index) => ({ key: `gap-insert-${index}`, station: stationValue(item), y: spec.depth * 0.7 })),
+    ...(spec.blueprint.tubes || []).map((item, index) => ({ key: `gap-tube-${index}`, station: stationValue(item), y: tubeRowY })),
+  ]
+    .filter((item) => item.station != null && item.station > 0 && item.station <= spec.length)
+    .sort((a, b) => a.station - b.station)[0];
+  const gapY = firstSideTarget ? Math.max(runLineY + 0.24, firstSideTarget.y - 0.22) : null;
   return (
     <group>
       {lengthFt && (
-        <DimensionLine
-          start={[x - 0.42, yTop, 0]}
-          end={[x - 0.42, yTop, spec.length]}
-          label={`OVERALL LENGTH ${formatFeet(lengthFt)}`}
-          color={color}
-          tickAxis="x"
-          tick={0.22}
-        />
+        <group>
+          <Line points={[[outsideX, overallY, 0], [outsideX, overallY, spec.length]]} color={color} lineWidth={1} />
+          <Line points={[[outsideX - 0.18, overallY, 0], [outsideX + 0.18, overallY, 0]]} color={color} lineWidth={1} />
+          <Line points={[[outsideX - 0.18, overallY, spec.length], [outsideX + 0.18, overallY, spec.length]]} color={color} lineWidth={1} />
+          <MeasurementText position={[outsideX - 0.1, overallY - 0.16, spec.length / 2]} label={formatFeet(lengthFt)} color={color} size={11} />
+        </group>
       )}
-      <Line points={[[x, yChain, 0], [x, yChain, spec.length]]} color={color} lineWidth={1} />
-      <DimensionLabel position={[x, yChain + 0.36, 0]} label="MARKED END / STA 0+00" color="#8FC5FF" />
-      <DimensionLabel position={[x, yChain + 0.36, spec.length]} label={`END ${formatFeet(spec.length)}`} color="#8B949E" />
+      <Line points={[[sideX, runLineY, 0], [sideX, runLineY, spec.length]]} color={color} lineWidth={1.1} />
+      <Line points={[[sideX - 0.16, runLineY, 0], [sideX + 0.16, runLineY, 0]]} color={color} lineWidth={1} />
+      <Line points={[[sideX - 0.16, runLineY, spec.length], [sideX + 0.16, runLineY, spec.length]]} color={color} lineWidth={1} />
+      <MeasurementText position={[sideX - 0.08, runLineY + 0.22, 0]} label={formatFeet(0)} color="#8FC5FF" />
+      <MeasurementText position={[sideX - 0.08, runLineY + 0.22, spec.length]} label={formatFeet(spec.length)} color="#8B949E" />
       {stations.map((item, index) => {
-        const delta = item.station - previous;
-        const mid = previous + delta / 2;
-        previous = item.station;
-        const rowLift = (index % 4) * 0.24;
+        const textLift = index % 2 === 0 ? 0.2 : -0.2;
         return (
           <group key={item.key}>
-            <Line points={[[x - 0.18, yChain - 0.12, item.station], [x + 0.18, yChain + 0.12, item.station]]} color={stationColor} lineWidth={1} />
-            <Line points={[[x, yChain, item.station], [0, spec.depth + 0.03, item.station]]} color="#425064" lineWidth={0.55} />
-            <DimensionLabel position={[x - 0.08, yChain + 0.72 + rowLift, item.station]} label={`${item.label} RUN ${formatFeet(item.station)}`} color={stationColor} />
-            {delta > 0.05 && (
-              <DimensionLabel position={[x + 0.2, yDelta - (index % 2) * 0.22, mid]} label={`+${formatFeet(delta)} PREV`} color="#9AA6B5" />
-            )}
+            <Line points={[[sideX - 0.18, runLineY, item.station], [sideX + 0.18, runLineY, item.station]]} color={stationColor} lineWidth={1} />
+            <Line points={[[sideX, runLineY, item.station], [sideX, runLineY + textLift * 0.55, item.station]]} color="#566578" lineWidth={0.6} />
+            <MeasurementText position={[sideX - 0.08, runLineY + textLift, item.station]} label={formatFeet(item.station)} color={stationColor} />
           </group>
         );
       })}
+      {firstSideTarget && (
+        <group key={firstSideTarget.key}>
+          <Line points={[[sideX, gapY, 0], [sideX, gapY, firstSideTarget.station]]} color="#9AD1FF" lineWidth={1} />
+          <Line points={[[sideX - 0.14, gapY, 0], [sideX + 0.14, gapY, 0]]} color="#9AD1FF" lineWidth={1} />
+          <Line points={[[sideX, firstSideTarget.y - 0.42, firstSideTarget.station], [sideX, firstSideTarget.y + 0.42, firstSideTarget.station]]} color="#9AD1FF" lineWidth={1} />
+          <Line points={[[sideX, gapY, firstSideTarget.station], [sideX, firstSideTarget.y, firstSideTarget.station]]} color="#9AD1FF" lineWidth={0.8} />
+          <MeasurementText position={[sideX - 0.08, firstSideTarget.y + 0.55, firstSideTarget.station]} label={formatFeet(firstSideTarget.station)} color="#9AD1FF" size={11} />
+        </group>
+      )}
     </group>
   );
 }
@@ -1087,6 +1121,24 @@ export function SpecBeam({ spec, compact = false, bodyColor = "#9aa0aa", highlig
 
 function CrossSectionInset({ beam }) {
   const spec = useBeamSpec(beam);
+  const [position, setPosition] = useState(() => {
+    if (typeof window === "undefined") return { x: 16, y: 420 };
+    const saved = window.sessionStorage.getItem("bedforge-section-inset-position");
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (Number.isFinite(parsed.x) && Number.isFinite(parsed.y)) return parsed;
+      } catch {
+        // Ignore stale session state.
+      }
+    }
+    return { x: 16, y: Math.max(16, window.innerHeight - 244) };
+  });
+  const [viewState, setViewState] = useState(() => {
+    if (typeof window === "undefined") return "normal";
+    return window.sessionStorage.getItem("bedforge-section-inset-state") || "normal";
+  });
+  const dragRef = useRef(null);
   const section = spec.blueprint.cross_section || {};
   const isBox = beam?.twin_type === "box_beam";
   const depthIn = valueOrNull(section.overall_depth_in, section.outer_depth_in, beam?.product_type?.depth_in, spec.depth * 12);
@@ -1144,31 +1196,131 @@ function CrossSectionInset({ beam }) {
       <text x={tx} y={ty} fill="#D8ECFF" fontSize="9" textAnchor="middle">{label}</text>
     </g>
   );
+  const minimized = viewState === "minimized";
+  const maximized = viewState === "maximized";
+  const panelWidth = minimized ? 188 : maximized ? 430 : 292;
+  const panelHeight = minimized ? 34 : maximized ? 336 : 228;
+  const clampPosition = useCallback((next) => {
+    if (typeof window === "undefined") return next;
+    return {
+      x: Math.min(Math.max(8, next.x), Math.max(8, window.innerWidth - panelWidth - 8)),
+      y: Math.min(Math.max(8, next.y), Math.max(8, window.innerHeight - panelHeight - 8)),
+    };
+  }, [panelHeight, panelWidth]);
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+    window.sessionStorage.setItem("bedforge-section-inset-position", JSON.stringify(position));
+    return undefined;
+  }, [position]);
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+    window.sessionStorage.setItem("bedforge-section-inset-state", viewState);
+    setPosition((current) => clampPosition(current));
+    return undefined;
+  }, [viewState, panelWidth, panelHeight, clampPosition]);
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+    const handlePointerMove = (event) => {
+      if (!dragRef.current) return;
+      const next = {
+        x: event.clientX - dragRef.current.offsetX,
+        y: event.clientY - dragRef.current.offsetY,
+      };
+      setPosition(clampPosition(next));
+    };
+    const stopDrag = () => {
+      dragRef.current = null;
+    };
+    const handleResize = () => setPosition((current) => clampPosition(current));
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", stopDrag);
+    window.addEventListener("pointercancel", stopDrag);
+    window.addEventListener("resize", handleResize);
+    return () => {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", stopDrag);
+      window.removeEventListener("pointercancel", stopDrag);
+      window.removeEventListener("resize", handleResize);
+    };
+  }, [panelWidth, panelHeight, clampPosition]);
+  const beginDrag = (event) => {
+    event.preventDefault();
+    dragRef.current = {
+      offsetX: event.clientX - position.x,
+      offsetY: event.clientY - position.y,
+    };
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+  };
+  const cycleSize = (event) => {
+    event.stopPropagation();
+    setViewState((current) => current === "maximized" ? "normal" : "maximized");
+  };
+  const toggleMinimized = (event) => {
+    event.stopPropagation();
+    setViewState((current) => current === "minimized" ? "normal" : "minimized");
+  };
   return (
-    <div style={{ position: "absolute", left: 16, bottom: 16, width: 292, background: "rgba(7,9,14,0.94)", border: "1px solid #263244", padding: 10, pointerEvents: "none" }}>
-      <div style={{ color: "#FFFFFF", fontSize: 11, fontWeight: 700, letterSpacing: "0.16em", marginBottom: 6, fontFamily: "JetBrains Mono, monospace" }}>DIMENSIONED SECTION</div>
-      <svg viewBox="0 0 260 176" width="100%" height="176" role="img" aria-label="Dimensioned beam cross-section">
-        <polygon points={poly} fill="#B7BEC7" stroke="#F4F7FB" strokeWidth="1.2" />
-        {isBox && voidWidthIn && voidDepthIn && (
-          <rect x={x(-voidWidthIn / 2)} y={y((wallIn || 4) + voidDepthIn)} width={voidWidthIn * sx} height={voidDepthIn * sy} fill="#0A0C10" stroke="#8FA1B6" />
-        )}
-        {bottomWidthIn && dim(x(-bottomWidthIn / 2), 166, x(bottomWidthIn / 2), 166, `${formatInches(bottomWidthIn)}`, cx, 174)}
-        {topWidthIn && !isBox && dim(x(-topWidthIn / 2), 15, x(topWidthIn / 2), 15, `${formatInches(topWidthIn)} TOP`, cx, 10)}
-        {depthIn && (
-          <g>
-            <line x1="232" y1={y(0)} x2="232" y2={y(depthIn)} stroke="#73BCFF" strokeWidth="1" />
-            <line x1="228" y1={y(0)} x2="236" y2={y(0)} stroke="#73BCFF" strokeWidth="1" />
-            <line x1="228" y1={y(depthIn)} x2="236" y2={y(depthIn)} stroke="#73BCFF" strokeWidth="1" />
-            <text x="247" y="88" fill="#D8ECFF" fontSize="9" textAnchor="middle" transform="rotate(90 247 88)">{formatInches(depthIn)} DEPTH</text>
-          </g>
-        )}
-        {webIn && !isBox && dim(x(-webIn / 2), 88, x(webIn / 2), 88, `${formatInches(webIn)} WEB`, cx, 82)}
-        {topThickIn && <text x="22" y={y(depthIn - topThickIn / 2)} fill="#D8ECFF" fontSize="9">TOP {formatInches(topThickIn)}</text>}
-        {bottomThickIn && <text x="18" y={y(bottomThickIn / 2)} fill="#D8ECFF" fontSize="9">BOT {formatInches(bottomThickIn)}</text>}
-        {wallIn && isBox && <text x="24" y="92" fill="#D8ECFF" fontSize="9">WALL {formatInches(wallIn)}</text>}
-        {topAngle && <text x="192" y="33" fill="#FFD166" fontSize="9">ANGLE {topAngle}°</text>}
-        {bottomAngle && <text x="184" y="135" fill="#FFD166" fontSize="9">HAUNCH {bottomAngle}°</text>}
-      </svg>
+    <div style={{
+      position: "fixed",
+      left: position.x,
+      top: position.y,
+      width: panelWidth,
+      background: "rgba(7,9,14,0.94)",
+      border: "1px solid #263244",
+      boxShadow: "0 18px 48px rgba(0,0,0,0.38)",
+      pointerEvents: "auto",
+      zIndex: 30,
+      userSelect: "none",
+    }}>
+      <div
+        onPointerDown={beginDrag}
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 8,
+          color: "#FFFFFF",
+          fontSize: 11,
+          fontWeight: 700,
+          letterSpacing: "0.16em",
+          fontFamily: "JetBrains Mono, monospace",
+          padding: minimized ? "8px 10px" : "8px 10px 6px",
+          cursor: "grab",
+          touchAction: "none",
+        }}
+      >
+        <span>DIMENSIONED SECTION</span>
+        <span style={{ display: "flex", gap: 5, letterSpacing: 0 }}>
+          <button type="button" onPointerDown={(event) => event.stopPropagation()} onClick={cycleSize} aria-label={maximized ? "Restore section inset" : "Maximize section inset"} style={{ background: "#121925", border: "1px solid #344154", color: "#D8ECFF", height: 22, minWidth: 22, cursor: "pointer" }}>{maximized ? "↙" : "↗"}</button>
+          <button type="button" onPointerDown={(event) => event.stopPropagation()} onClick={toggleMinimized} aria-label={minimized ? "Restore section inset" : "Minimize section inset"} style={{ background: "#121925", border: "1px solid #344154", color: "#D8ECFF", height: 22, minWidth: 22, cursor: "pointer" }}>{minimized ? "+" : "−"}</button>
+        </span>
+      </div>
+      {!minimized && (
+        <div style={{ padding: "0 10px 10px" }}>
+          <svg viewBox="0 0 260 176" width="100%" height={maximized ? 286 : 176} role="img" aria-label="Dimensioned beam cross-section">
+            <polygon points={poly} fill="#B7BEC7" stroke="#F4F7FB" strokeWidth="1.2" />
+            {isBox && voidWidthIn && voidDepthIn && (
+              <rect x={x(-voidWidthIn / 2)} y={y((wallIn || 4) + voidDepthIn)} width={voidWidthIn * sx} height={voidDepthIn * sy} fill="#0A0C10" stroke="#8FA1B6" />
+            )}
+            {bottomWidthIn && dim(x(-bottomWidthIn / 2), 166, x(bottomWidthIn / 2), 166, `${formatInches(bottomWidthIn)}`, cx, 174)}
+            {topWidthIn && !isBox && dim(x(-topWidthIn / 2), 15, x(topWidthIn / 2), 15, `${formatInches(topWidthIn)} TOP`, cx, 10)}
+            {depthIn && (
+              <g>
+                <line x1="232" y1={y(0)} x2="232" y2={y(depthIn)} stroke="#73BCFF" strokeWidth="1" />
+                <line x1="228" y1={y(0)} x2="236" y2={y(0)} stroke="#73BCFF" strokeWidth="1" />
+                <line x1="228" y1={y(depthIn)} x2="236" y2={y(depthIn)} stroke="#73BCFF" strokeWidth="1" />
+                <text x="247" y="88" fill="#D8ECFF" fontSize="9" textAnchor="middle" transform="rotate(90 247 88)">{formatInches(depthIn)} DEPTH</text>
+              </g>
+            )}
+            {webIn && !isBox && dim(x(-webIn / 2), 88, x(webIn / 2), 88, `${formatInches(webIn)} WEB`, cx, 82)}
+            {topThickIn && <text x="22" y={y(depthIn - topThickIn / 2)} fill="#D8ECFF" fontSize="9">TOP {formatInches(topThickIn)}</text>}
+            {bottomThickIn && <text x="18" y={y(bottomThickIn / 2)} fill="#D8ECFF" fontSize="9">BOT {formatInches(bottomThickIn)}</text>}
+            {wallIn && isBox && <text x="24" y="92" fill="#D8ECFF" fontSize="9">WALL {formatInches(wallIn)}</text>}
+            {topAngle && <text x="192" y="33" fill="#FFD166" fontSize="9">ANGLE {topAngle}°</text>}
+            {bottomAngle && <text x="184" y="135" fill="#FFD166" fontSize="9">HAUNCH {bottomAngle}°</text>}
+          </svg>
+        </div>
+      )}
     </div>
   );
 }
