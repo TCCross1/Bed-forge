@@ -1,6 +1,6 @@
 import React, { useMemo, useState, Suspense } from "react";
 import { Canvas } from "@react-three/fiber";
-import { OrbitControls, Environment, ContactShadows } from "@react-three/drei";
+import { OrbitControls, ContactShadows } from "@react-three/drei";
 import * as THREE from "three";
 import { hardwareColor, inchesToFt, strandPathPoints } from "../lib/beamSpec";
 import { COMPACT_HARDWARE_KINDS } from "../lib/bedLayout";
@@ -392,7 +392,7 @@ export default function BeamViewer({
   return (
     <div style={{ width: "100%", height: "100%", background: "#0A0C10" }} data-testid="beam-3d-canvas">
       <Canvas camera={{ position: [camX, camY, camZ], fov: 42 }} shadows>
-        <Suspense fallback={null}>
+        <Suspense fallback={<group />}>
           <color attach="background" args={["#0A0C10"]} />
           <ambientLight intensity={0.95} />
           <directionalLight position={[10, 12, 8]} intensity={0.7} />
@@ -414,7 +414,6 @@ export default function BeamViewer({
           )}
           <gridHelper args={[Math.max(40, lengthFt + 10), 40, "#1C2230", "#12151C"]} position={[0, -0.02, lengthFt / 2]} />
           <ContactShadows position={[0, -0.02, lengthFt / 2]} opacity={0.3} scale={Math.max(40, lengthFt + 10)} blur={2.2} far={10} />
-          <Environment preset="warehouse" />
           <OrbitControls target={[0, depthFt / 2, lengthFt / 2]} enablePan enableZoom enableRotate makeDefault />
         </Suspense>
       </Canvas>
