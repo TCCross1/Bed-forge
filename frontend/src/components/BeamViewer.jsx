@@ -324,6 +324,14 @@ function SideInserts({ beam, spec, onHardwareSelect }) {
           <cylinderGeometry args={[radius, radius, spec.width * 0.14, 18]} />
           <meshStandardMaterial color="#D18C1B" roughness={0.34} metalness={0.52} />
         </mesh>
+        <mesh position={[side * radius * 0.52, 0, 0]} rotation={[0, Math.PI / 2, 0]}>
+          <cylinderGeometry args={[radius * 0.88, radius * 0.88, radius * 0.5, 6]} />
+          <meshStandardMaterial color="#A9B3C0" roughness={0.32} metalness={0.74} />
+        </mesh>
+        <mesh position={[side * radius * 0.86, 0, 0]} rotation={[0, Math.PI / 2, 0]}>
+          <cylinderGeometry args={[radius * 0.36, radius * 0.36, radius * 0.18, 16]} />
+          <meshStandardMaterial color="#202632" roughness={0.62} metalness={0.24} />
+        </mesh>
       </group>
     );
   });
@@ -332,6 +340,8 @@ function SideInserts({ beam, spec, onHardwareSelect }) {
 function CylindricalOpenings({ beam, spec, items, type, color, y, onHardwareSelect }) {
   return (items || []).map((item, index) => {
     const radius = Math.max(inchesToFeet(item.diameter_in || 2) / 2, 0.08);
+    const isDrain = type.toLowerCase().includes("drain");
+    const isTie = type.toLowerCase().includes("tie");
     const payload = { id: `${type}-${index}`, type, beamMark: beam.mark, spec: item };
     return (
       <group key={payload.id} position={[0, y, item.x_ft]} onClick={(event) => clickHardware(event, payload, onHardwareSelect)}>
@@ -350,6 +360,26 @@ function CylindricalOpenings({ beam, spec, items, type, color, y, onHardwareSele
             <boxGeometry args={[0.03, radius * 2.25, radius * 2.25]} />
             <meshStandardMaterial color="#D2D8E0" roughness={0.46} metalness={0.58} />
           </mesh>
+        ))}
+        {isDrain && [-1, 1].map((side) => (
+          <group key={`spout-${side}`} position={[side * (spec.width / 2 + radius * 0.9), -radius * 1.9, 0]}>
+            <mesh rotation={[Math.PI / 2, 0, 0]}>
+              <cylinderGeometry args={[radius * 0.45, radius * 0.45, radius * 2.8, 14]} />
+              <meshStandardMaterial color="#4D5966" roughness={0.48} metalness={0.45} />
+            </mesh>
+          </group>
+        ))}
+        {isTie && [-1, 1].map((side) => (
+          <group key={`nut-${side}`} position={[side * (spec.width / 2 + 0.08), 0, 0]} rotation={[0, Math.PI / 2, 0]}>
+            <mesh>
+              <cylinderGeometry args={[radius * 1.35, radius * 1.35, 0.14, 6]} />
+              <meshStandardMaterial color="#A9B3C0" roughness={0.34} metalness={0.72} />
+            </mesh>
+            <mesh position={[0, 0, side * 0.08]}>
+              <cylinderGeometry args={[radius * 0.58, radius * 0.58, 0.16, 16]} />
+              <meshStandardMaterial color="#1A1F28" roughness={0.62} metalness={0.18} />
+            </mesh>
+          </group>
         ))}
       </group>
     );
@@ -427,26 +457,61 @@ function Stirrups({ beam, spec, onHardwareSelect }) {
   const start = stirrup.start_ft ?? 2;
   const end = Math.min(stirrup.end_ft ?? spec.length - 2, spec.length - 1);
   const spacing = inchesToFeet(stirrup.spacing_in || 24);
-  const cover = inchesToFeet(stirrup.cover_in || 2.5);
-  const width = Math.max(spec.width - cover * 2, spec.width * 0.55);
-  const height = Math.max(spec.depth - cover * 2, spec.depth * 0.68);
-  const count = Math.max(Math.floor(Math.max(end - start, 0) / spacing) + 1, 0);
-  return Array.from({ length: count }).map((_, index) => {
-    const z = Math.min(start + index * spacing, end);
-    const isMajor = index === 0 || index === count - 1 || index === Math.floor(count / 2);
-    const barSize = isMajor ? 0.036 : 0.028;
-    const payload = { id: `stirrup-${index}`, type: beam.twin_type === "box_beam" ? "Rebar hoop" : "Rebar stirrup", beamMark: beam.mark, spec: { z_ft: z, cover_in: stirrup.cover_in || 2.5, spacing_in: stirrup.spacing_in || 24 } };
-    return (
-      <group key={payload.id} position={[0, cover, z]} onClick={(event) => clickHardware(event, payload, onHardwareSelect)}>
-        {[[0, 0, 0, width, barSize, barSize], [0, height, 0, width, barSize, barSize], [-width / 2, height / 2, 0, barSize, height, barSize], [width / 2, height / 2, 0, barSize, height, barSize]].map((part, i) => (
-          <mesh key={i} position={[part[0], part[1], part[2]]}>
-            <boxGeometry args={[part[3], part[4], part[5]]} />
-            <meshStandardMaterial color={isMajor ? "#798494" : "#4E5966"} roughness={0.72} metalness={isMajor ? 0.28 : 0.22} />
-          </mesh>
-        ))}
-      </group>
-    );
-  });
+  const stations = useMemo(() => {
+    const count = Math.max(Math.floor(Math.max(end - start, 0) / Math.max(spacing, 0.25)) + 1, 0);
+    return Array.from({ length: count }).map((_, index) => Math.min(start + index * Math.max(spacing, 0.25), end));
+  }, [start, end, spacing]);
+  const loopRef = useRef();
+  const legARef = useRef();
+  const legBRef = useRef();
+  const dummy = useMemo(() => new THREE.Object3D(), []);
+  const pairXs = useMemo(() => {
+    const spread = Math.max(spec.width * 0.24, 0.42);
+    return [-spread, spread];
+  }, [spec.width]);
+  const loopRadius = Math.max(spec.width * 0.055, 0.13);
+  const legHeight = Math.max(spec.depth * 0.22, 0.58);
+  useEffect(() => {
+    let instance = 0;
+    stations.forEach((z) => {
+      pairXs.forEach((x) => {
+        dummy.position.set(x, spec.depth + legHeight, z);
+        dummy.rotation.set(0, 0, 0);
+        dummy.updateMatrix();
+        loopRef.current?.setMatrixAt(instance, dummy.matrix);
+        dummy.position.set(x - loopRadius, spec.depth + legHeight / 2, z);
+        dummy.rotation.set(0, 0, 0);
+        dummy.updateMatrix();
+        legARef.current?.setMatrixAt(instance, dummy.matrix);
+        dummy.position.set(x + loopRadius, spec.depth + legHeight / 2, z);
+        dummy.updateMatrix();
+        legBRef.current?.setMatrixAt(instance, dummy.matrix);
+        instance += 1;
+      });
+    });
+    [loopRef, legARef, legBRef].forEach((ref) => {
+      if (ref.current) ref.current.instanceMatrix.needsUpdate = true;
+    });
+  }, [stations, pairXs, spec.depth, legHeight, loopRadius, dummy]);
+  if (!stations.length) return null;
+  const payload = { id: "epoxy-stirrups", type: beam.twin_type === "box_beam" ? "Epoxy rebar hoop" : "Epoxy stirrup loop", beamMark: beam.mark, spec: { count: stations.length * 2, start_ft: start, end_ft: end, spacing_in: stirrup.spacing_in || 24 } };
+  const instanceCount = stations.length * pairXs.length;
+  return (
+    <group onClick={(event) => clickHardware(event, payload, onHardwareSelect)}>
+      <instancedMesh ref={loopRef} args={[null, null, instanceCount]} frustumCulled={false}>
+        <torusGeometry args={[loopRadius, 0.026, 8, 18, Math.PI]} />
+        <meshStandardMaterial color="#7CFC00" roughness={0.82} metalness={0.04} />
+      </instancedMesh>
+      <instancedMesh ref={legARef} args={[null, null, instanceCount]} frustumCulled={false}>
+        <boxGeometry args={[0.042, legHeight, 0.042]} />
+        <meshStandardMaterial color="#7CFC00" roughness={0.82} metalness={0.04} />
+      </instancedMesh>
+      <instancedMesh ref={legBRef} args={[null, null, instanceCount]} frustumCulled={false}>
+        <boxGeometry args={[0.042, legHeight, 0.042]} />
+        <meshStandardMaterial color="#7CFC00" roughness={0.82} metalness={0.04} />
+      </instancedMesh>
+    </group>
+  );
 }
 
 function strandRows(blueprint) {
@@ -493,6 +558,13 @@ function StrandPaths({ beam, spec, onHardwareSelect }) {
               <sphereGeometry args={[0.048, 10, 10]} />
               <meshStandardMaterial color="#F3D26A" roughness={0.34} metalness={0.42} />
             </mesh>
+            <Line
+              points={z === 0
+                ? [[0, 0, 0], [0, 0, -0.55], [0, 0.68, -0.55]]
+                : [[0, 0, 0], [0, 0, 0.55], [0, 0.68, 0.55]]}
+              color="#B9C2CF"
+              lineWidth={2}
+            />
           </group>
         ))}
       </group>
@@ -586,149 +658,118 @@ function DimensionLine({ start, end, label, labelPosition, color = "#73BCFF", ti
   );
 }
 
+function stationValue(item) {
+  const raw = item?.x_ft ?? item?.station_ft ?? item?.station_from_marked_end;
+  const value = finiteNumber(raw);
+  return value != null && value >= 0 ? value : null;
+}
+
+function runningDimensionStations(spec) {
+  const add = (rows, source, kind, labeler) => {
+    (source || []).forEach((item, index) => {
+      const station = stationValue(item);
+      if (station == null) return;
+      rows.push({ key: `${kind}-${index}`, kind, station, label: labeler(item, station, index) });
+    });
+  };
+  const rows = [];
+  add(rows, spec.blueprint.lift_loops, "Lift", (_item, station) => `LIFT ${formatStation(station)}`);
+  add(rows, spec.blueprint.inserts, "Insert", (_item, station) => `INSERT ${formatStation(station)}`);
+  add(rows, spec.blueprint.tubes, "Tube", (_item, station) => `TUBE ${formatStation(station)}`);
+  add(rows, spec.blueprint.tie_rod_openings, "Tie", (_item, station) => `TIE ${formatStation(station)}`);
+  add(rows, spec.blueprint.drain_holes, "Drain", (_item, station) => `DRAIN ${formatStation(station)}`);
+  add(rows, spec.blueprint.hold_downs, "Hold", (_item, station) => `HOLD ${formatStation(station)}`);
+  add(rows, spec.blueprint.grout_grooves, "Groove", (_item, station) => `GROOVE ${formatStation(station)}`);
+  (spec.blueprint.bituminous_ends || []).forEach((item, index) => {
+    const lengthFt = inchesToFeet(item.length_in || 0);
+    if (!lengthFt) return;
+    const start = item.end === "end" ? Math.max(spec.length - lengthFt, 0) : 0;
+    const end = item.end === "end" ? spec.length : lengthFt;
+    rows.push({ key: `bit-start-${index}`, kind: "Bitumen", station: start, label: `BIT START ${formatStation(start)}` });
+    rows.push({ key: `bit-end-${index}`, kind: "Bitumen", station: end, label: `BIT END ${formatStation(end)}` });
+  });
+  const sorted = rows
+    .filter((item) => item.station >= 0 && item.station <= spec.length)
+    .sort((a, b) => a.station - b.station || a.kind.localeCompare(b.kind));
+  return sorted.reduce((grouped, item) => {
+    const previous = grouped[grouped.length - 1];
+    if (previous && Math.abs(previous.station - item.station) < 0.05) {
+      previous.kinds = [...new Set([...previous.kinds, item.kind])];
+      previous.label = previous.kinds.map((kind) => kind.toUpperCase()).join(" / ");
+      previous.key = `${previous.key}-${item.key}`;
+    } else {
+      grouped.push({ ...item, kinds: [item.kind], label: item.kind.toUpperCase() });
+    }
+    return grouped;
+  }, []);
+}
+
 function EngineeringDimensions({ beam, spec }) {
-  const section = spec.blueprint.cross_section || {};
-  const dimensions = spec.blueprint.dimensions || {};
-  const lengthFt = valueOrNull(dimensions.overall_length_ft, beam.length_ft, spec.length);
-  const depthIn = valueOrNull(dimensions.overall_depth_in, section.overall_depth_in, section.outer_depth_in, beam.product_type?.depth_in, spec.depth * 12);
-  const topWidthIn = valueOrNull(section.top_flange_width_in, section.outer_width_in, beam.product_type?.width_in, spec.topWidth * 12);
-  const topThickIn = valueOrNull(section.top_flange_thickness_in, section.top_flange_thick_in);
-  const bottomWidthIn = valueOrNull(section.bottom_flange_width_in, section.outer_width_in, beam.product_type?.width_in, spec.width * 12);
-  const bottomThickIn = valueOrNull(section.bottom_flange_thickness_in, section.bot_flange_thick_in);
-  const webIn = valueOrNull(section.web_thickness_in, section.wall_thickness_in);
-  const voidWidthIn = valueOrNull(section.void_width_in);
-  const voidDepthIn = valueOrNull(section.void_depth_in);
-  const wallIn = valueOrNull(section.wall_thickness_in);
-  const bottomRunFt = inchesToFeet(valueOrNull(section.bottom_transition_in, 4) || 0);
-  const bottomRiseFt = inchesToFeet(valueOrNull(section.bottom_transition_rise_in, 4.5) || 0);
-  const topRunFt = inchesToFeet(valueOrNull(section.top_transition_in, 5) || 0);
-  const topDropFt = inchesToFeet(valueOrNull(section.top_transition_drop_in, 4.5) || 0);
-  const bottomAngle = beam.twin_type !== "box_beam" ? angleDegrees(bottomRunFt, bottomRiseFt) : null;
-  const topAngle = beam.twin_type !== "box_beam" ? angleDegrees(topRunFt, topDropFt) : angleDegrees(inchesToFeet(valueOrNull(section.top_chamfer_in, 2.5) || 0), inchesToFeet(valueOrNull(section.top_chamfer_in, 2.5) || 0));
-  const xLeft = -spec.width / 2;
-  const xRight = spec.width / 2;
-  const zNear = -0.04;
-  const zFar = spec.length + 0.04;
+  const lengthFt = valueOrNull(spec.blueprint.dimensions?.overall_length_ft, beam.length_ft, spec.length);
+  const stations = runningDimensionStations(spec);
+  const x = -spec.width * 1.18;
+  const yTop = spec.depth + 0.68;
+  const yChain = spec.depth + 0.34;
+  const yDelta = spec.depth + 0.08;
   const color = "#73BCFF";
+  const stationColor = "#D8ECFF";
+  let previous = 0;
   return (
     <group>
       {lengthFt && (
         <DimensionLine
-          start={[xLeft - 0.82, spec.depth + 0.55, 0]}
-          end={[xLeft - 0.82, spec.depth + 0.55, spec.length]}
+          start={[x - 0.42, yTop, 0]}
+          end={[x - 0.42, yTop, spec.length]}
           label={`OVERALL LENGTH ${formatFeet(lengthFt)}`}
-          tickAxis="x"
-          tick={0.18}
           color={color}
-        />
-      )}
-      {depthIn && (
-        <DimensionLine
-          start={[xRight + 0.55, 0, zNear]}
-          end={[xRight + 0.55, spec.depth, zNear]}
-          label={`DEPTH ${formatInches(depthIn)}`}
           tickAxis="x"
-          color={color}
+          tick={0.22}
         />
       )}
-      {bottomWidthIn && (
-        <DimensionLine
-          start={[-inchesToFeet(bottomWidthIn) / 2, -0.35, zNear]}
-          end={[inchesToFeet(bottomWidthIn) / 2, -0.35, zNear]}
-          label={beam.twin_type === "box_beam" ? `OUTER WIDTH ${formatInches(bottomWidthIn)}` : `BOTTOM FLANGE WIDTH ${formatInches(bottomWidthIn)}`}
-          tickAxis="y"
-          color={color}
-        />
-      )}
-      {topWidthIn && beam.twin_type !== "box_beam" && (
-        <DimensionLine
-          start={[-inchesToFeet(topWidthIn) / 2, spec.depth + 0.3, zNear]}
-          end={[inchesToFeet(topWidthIn) / 2, spec.depth + 0.3, zNear]}
-          label={`TOP FLANGE WIDTH ${formatInches(topWidthIn)}`}
-          tickAxis="y"
-          color="#9AD0FF"
-        />
-      )}
-      {topThickIn && (
-        <DimensionLine
-          start={[xRight + 0.26, spec.depth - inchesToFeet(topThickIn), zFar]}
-          end={[xRight + 0.26, spec.depth, zFar]}
-          label={beam.twin_type === "box_beam" ? `TOP SLAB ${formatInches(topThickIn)}` : `TOP THK ${formatInches(topThickIn)}`}
-          tickAxis="x"
-          color="#9AD0FF"
-          tick={0.12}
-        />
-      )}
-      {bottomThickIn && (
-        <DimensionLine
-          start={[xLeft - 0.32, 0, zFar]}
-          end={[xLeft - 0.32, inchesToFeet(bottomThickIn), zFar]}
-          label={`BOTTOM THK ${formatInches(bottomThickIn)}`}
-          tickAxis="x"
-          color="#A8D6FF"
-          tick={0.12}
-        />
-      )}
-      {webIn && beam.twin_type !== "box_beam" && (
-        <DimensionLine
-          start={[-inchesToFeet(webIn) / 2, spec.depth * 0.52, zFar]}
-          end={[inchesToFeet(webIn) / 2, spec.depth * 0.52, zFar]}
-          label={`WEB ${formatInches(webIn)}`}
-          tickAxis="y"
-          color="#C5D0DE"
-          tick={0.1}
-        />
-      )}
-      {wallIn && beam.twin_type === "box_beam" && (
-        <DimensionLine
-          start={[xRight - inchesToFeet(wallIn), spec.depth * 0.45, zFar]}
-          end={[xRight, spec.depth * 0.45, zFar]}
-          label={`WALL ${formatInches(wallIn)}`}
-          tickAxis="y"
-          color="#C5D0DE"
-          tick={0.1}
-        />
-      )}
-      {voidWidthIn && beam.twin_type === "box_beam" && (
-        <DimensionLine
-          start={[-inchesToFeet(voidWidthIn) / 2, spec.depth * 0.58, zFar]}
-          end={[inchesToFeet(voidWidthIn) / 2, spec.depth * 0.58, zFar]}
-          label={`VOID WIDTH ${formatInches(voidWidthIn)}`}
-          tickAxis="y"
-          color="#C5D0DE"
-          tick={0.1}
-        />
-      )}
-      {voidDepthIn && beam.twin_type === "box_beam" && (
-        <DimensionLine
-          start={[0, inchesToFeet(wallIn || 4), zFar + 0.18]}
-          end={[0, inchesToFeet(wallIn || 4) + inchesToFeet(voidDepthIn), zFar + 0.18]}
-          label={`VOID DEPTH ${formatInches(voidDepthIn)}`}
-          tickAxis="x"
-          color="#C5D0DE"
-          tick={0.1}
-        />
-      )}
-      {topAngle && <DimensionLabel position={[xLeft - 0.48, spec.depth - 0.2, zNear]} label={`TOP CHAMFER ${topAngle}°`} color="#FFD166" />}
-      {bottomAngle && <DimensionLabel position={[xRight + 0.46, inchesToFeet(bottomThickIn || 8) + 0.2, zNear]} label={`BOTTOM HAUNCH ${bottomAngle}°`} color="#FFD166" />}
-      <Line points={[[xLeft, 0, zNear], [xRight, 0, zNear], [xRight, spec.depth, zNear], [xLeft, spec.depth, zNear], [xLeft, 0, zNear]]} color="#73BCFF" lineWidth={0.8} />
+      <Line points={[[x, yChain, 0], [x, yChain, spec.length]]} color={color} lineWidth={1} />
+      <DimensionLabel position={[x, yChain + 0.36, 0]} label="MARKED END / STA 0+00" color="#8FC5FF" />
+      <DimensionLabel position={[x, yChain + 0.36, spec.length]} label={`END ${formatFeet(spec.length)}`} color="#8B949E" />
+      {stations.map((item, index) => {
+        const delta = item.station - previous;
+        const mid = previous + delta / 2;
+        previous = item.station;
+        const rowLift = (index % 4) * 0.24;
+        return (
+          <group key={item.key}>
+            <Line points={[[x - 0.18, yChain - 0.12, item.station], [x + 0.18, yChain + 0.12, item.station]]} color={stationColor} lineWidth={1} />
+            <Line points={[[x, yChain, item.station], [0, spec.depth + 0.03, item.station]]} color="#425064" lineWidth={0.55} />
+            <DimensionLabel position={[x - 0.08, yChain + 0.72 + rowLift, item.station]} label={`${item.label} RUN ${formatFeet(item.station)}`} color={stationColor} />
+            {delta > 0.05 && (
+              <DimensionLabel position={[x + 0.2, yDelta - (index % 2) * 0.22, mid]} label={`+${formatFeet(delta)} PREV`} color="#9AA6B5" />
+            )}
+          </group>
+        );
+      })}
     </group>
   );
 }
 
 function hardwareCalloutItems(beam, spec) {
-  const station = (item) => finiteNumber(item?.x_ft ?? item?.station_ft) ?? 0;
   const items = [];
-  (spec.blueprint.lift_loops || []).forEach((item, index) => items.push({ key: `lift-${index}`, category: "Lift loop", color: "#DCE6F2", anchor: [0, spec.depth + 0.35, station(item)], station: station(item), label: `LIFT ${formatStation(station(item))}` }));
+  const pushStationed = (source, kind, color, anchorBuilder, labelBuilder) => {
+    (source || []).forEach((item, index) => {
+      const station = stationValue(item);
+      if (station == null) return;
+      items.push({ key: `${kind}-${index}`, category: kind, color, anchor: anchorBuilder(item, station), station, label: labelBuilder(item, station) });
+    });
+  };
+  pushStationed(spec.blueprint.lift_loops, "Lift loop", "#DCE6F2", (_item, station) => [0, spec.depth + 0.35, station], (_item, station) => `LIFT ${formatStation(station)}`);
   (spec.blueprint.inserts || []).forEach((item, index) => {
+    const station = stationValue(item);
+    if (station == null) return;
     const side = item.side === "right" ? 1 : -1;
-    items.push({ key: `insert-${index}`, category: "Insert", color: "#F4B652", anchor: [side * spec.width / 2, spec.depth * 0.7, station(item)], station: station(item), label: `INSERT ${formatStation(station(item))}` });
+    items.push({ key: `insert-${index}`, category: "Insert", color: "#F4B652", anchor: [side * spec.width / 2, spec.depth * 0.7, station], station, label: `INSERT ${formatStation(station)}` });
   });
-  (spec.blueprint.tubes || []).forEach((item, index) => items.push({ key: `tube-${index}`, category: "Tube", color: "#B1BCCB", anchor: [0, spec.depth * 0.56, station(item)], station: station(item), label: `TUBE ${formatStation(station(item))}` }));
-  (spec.blueprint.tie_rod_openings || []).forEach((item, index) => items.push({ key: `tie-${index}`, category: "Tie-rod", color: "#AEB8C6", anchor: [0, spec.depth * 0.42, station(item)], station: station(item), label: `TIE ${formatStation(station(item))}` }));
-  (spec.blueprint.drain_holes || []).forEach((item, index) => items.push({ key: `drain-${index}`, category: "Drain", color: "#9AA6B5", anchor: [0, 0.18, station(item)], station: station(item), label: `DRAIN ${formatStation(station(item))}` }));
-  (spec.blueprint.hold_downs || []).forEach((item, index) => items.push({ key: `hold-${index}`, category: "Hold-down", color: "#DFA26A", anchor: [0, spec.depth + 0.35, station(item)], station: station(item), label: `HOLD-DOWN ${formatStation(station(item))}` }));
-  (spec.blueprint.grout_grooves || []).forEach((item, index) => items.push({ key: `groove-${index}`, category: "Groove", color: "#C5D0DE", anchor: [0, spec.depth + 0.1, station(item)], station: station(item), label: `GROOVE ${formatStation(station(item))}` }));
+  pushStationed(spec.blueprint.tubes, "Tube", "#B1BCCB", (_item, station) => [0, spec.depth * 0.56, station], (_item, station) => `TUBE ${formatStation(station)}`);
+  pushStationed(spec.blueprint.tie_rod_openings, "Tie-rod", "#AEB8C6", (_item, station) => [0, spec.depth * 0.42, station], (_item, station) => `TIE ${formatStation(station)}`);
+  pushStationed(spec.blueprint.drain_holes, "Drain", "#9AA6B5", (_item, station) => [0, 0.18, station], (_item, station) => `DRAIN ${formatStation(station)}`);
+  pushStationed(spec.blueprint.hold_downs, "Hold-down", "#DFA26A", (_item, station) => [0, spec.depth + 0.35, station], (_item, station) => `HOLD-DOWN ${formatStation(station)}`);
+  pushStationed(spec.blueprint.grout_grooves, "Groove", "#C5D0DE", (_item, station) => [0, spec.depth + 0.1, station], (_item, station) => `GROOVE ${formatStation(station)}`);
   (spec.blueprint.bituminous_ends || []).forEach((item, index) => {
     const z = item.end === "end" ? spec.length - inchesToFeet(item.length_in || 18) / 2 : inchesToFeet(item.length_in || 18) / 2;
     items.push({ key: `bit-${index}`, category: "Bituminous", color: "#E5E7EB", anchor: [0, spec.depth * 0.18, z], station: z, label: `BITUMEN ${item.end?.toUpperCase() || "END"} ${formatInches(item.length_in || 18)}` });

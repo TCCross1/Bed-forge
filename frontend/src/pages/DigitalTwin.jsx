@@ -56,8 +56,8 @@ export default function DigitalTwin() {
   const [layers, setLayers] = useState({
     dimensions: true,
     hardware: false,
-    strands: false,
-    stirrups: false,
+    strands: true,
+    stirrups: true,
     anomalies: true,
   });
   const [mode, setMode] = useState("beam");
