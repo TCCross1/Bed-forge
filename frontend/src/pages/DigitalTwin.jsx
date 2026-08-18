@@ -20,6 +20,28 @@ function stationList(items = []) {
   return items.length ? items.map((item) => `${Number(item.x_ft || 0).toFixed(1)}'`).join(" · ") : "—";
 }
 
+const LAYER_OPTIONS = [
+  ["dimensions", "Dimensions"],
+  ["hardware", "Hardware"],
+  ["strands", "Strands"],
+  ["stirrups", "Stirrups"],
+  ["anomalies", "Anomalies"],
+];
+
+function LayerChip({ active, label, onClick }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`min-h-9 px-3 rounded-sm border text-[11px] font-mono uppercase tracking-wider transition-colors duration-100 ${
+        active ? "border-primary bg-primary/15 text-primary" : "border-border bg-background text-muted-foreground hover:border-primary/60 hover:text-white"
+      }`}
+    >
+      {label}
+    </button>
+  );
+}
+
 export default function DigitalTwin() {
   const [params] = useSearchParams();
   const [beams, setBeams] = useState([]);
@@ -31,6 +53,13 @@ export default function DigitalTwin() {
   const [selectedHardware, setSelectedHardware] = useState(null);
   const [pickPos, setPickPos] = useState(null);
   const [showCallouts, setShowCallouts] = useState(true);
+  const [layers, setLayers] = useState({
+    dimensions: true,
+    hardware: false,
+    strands: false,
+    stirrups: false,
+    anomalies: true,
+  });
   const [mode, setMode] = useState("beam");
   const [form, setForm] = useState({ type: "crack", severity: "minor", note: "", length_in: 0 });
 
@@ -129,6 +158,14 @@ export default function DigitalTwin() {
     ["Grooves", stationList(blueprint.grout_grooves || [])],
     ["Bituminous", (blueprint.bituminous_ends || []).length ? (blueprint.bituminous_ends || []).map((item) => `${item.end?.toUpperCase() || "END"} ${item.length_in || 0}"`).join(" · ") : "—"],
   ] : [];
+  const activeLayers = useMemo(() => ({
+    ...layers,
+    dimensions: showCallouts && layers.dimensions,
+    hardware: showCallouts && layers.hardware,
+    strands: layers.strands,
+    stirrups: layers.stirrups,
+    anomalies: layers.anomalies,
+  }), [layers, showCallouts]);
 
   return (
     <Layout>
@@ -138,7 +175,7 @@ export default function DigitalTwin() {
         right={
           <div className="flex items-center gap-3">
             <button onClick={() => setShowCallouts((value) => !value)} className={`min-h-11 px-4 rounded-sm border text-xs font-mono uppercase tracking-wider ${showCallouts ? "border-primary text-primary" : "border-border text-muted-foreground"}`}>
-              {showCallouts ? "Hide" : "Show"} Callouts
+              {showCallouts ? "Hide" : "Show"} Labels
             </button>
             <div className="flex border border-border rounded-sm overflow-hidden">
               {[["beam", Box, "Beam"], ["bed", Layers3, "Bed"]].map(([value, Icon, label]) => (
@@ -168,6 +205,17 @@ export default function DigitalTwin() {
               {bedStatus && <span className="font-mono text-xs font-bold tracking-widest px-3 py-1 rounded-sm" style={{ color: bedStatus.color, border: `1px solid ${bedStatus.color}55` }}>{bedStatus.label}</span>}
               {beamState && <span className="font-mono text-xs font-bold tracking-widest px-3 py-1 rounded-sm" style={{ color: beamState.color, border: `1px solid ${beamState.color}55` }}>{beamState.label}</span>}
             </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-[10px] font-mono uppercase tracking-[0.22em] text-muted-foreground">Layers</span>
+              {LAYER_OPTIONS.map(([key, label]) => (
+                <LayerChip
+                  key={key}
+                  label={label}
+                  active={!!activeLayers[key]}
+                  onClick={() => setLayers((current) => ({ ...current, [key]: !current[key] }))}
+                />
+              ))}
+            </div>
           </div>
 
           <div className="flex-1">
@@ -184,6 +232,7 @@ export default function DigitalTwin() {
                 beam={beam}
                 anomalies={beam.anomalies || []}
                 showCallouts={showCallouts}
+                layers={activeLayers}
                 onSurfacePick={(point) => {
                   setPickPos(point);
                   toast.info("Surface point marked for anomaly capture");
@@ -195,6 +244,7 @@ export default function DigitalTwin() {
                 bed={bedTwin}
                 selectedBeamId={selectedId}
                 showCallouts={showCallouts}
+                layers={activeLayers}
                 onBeamSelect={(item) => {
                   setSelectedId(item.id);
                   setMode("beam");

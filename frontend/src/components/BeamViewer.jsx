@@ -520,6 +520,248 @@ function calloutLine(points, color = "#73BCFF") {
   return <Line points={points} color={color} lineWidth={1} />;
 }
 
+function finiteNumber(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function valueOrNull(...values) {
+  for (const value of values) {
+    const number = finiteNumber(value);
+    if (number != null && number > 0) return number;
+  }
+  return null;
+}
+
+function angleDegrees(runFt, riseFt) {
+  if (!runFt || !riseFt) return null;
+  return Math.round((Math.atan2(riseFt, runFt) * 180 / Math.PI) * 10) / 10;
+}
+
+function DimensionLabel({ position, label, color = "#73BCFF" }) {
+  return (
+    <Html position={position} center distanceFactor={18} occlude={false}>
+      <div style={{
+        background: "rgba(6,8,13,0.96)",
+        border: `1px solid ${color}`,
+        color,
+        padding: "2px 6px",
+        fontSize: 9,
+        lineHeight: 1.2,
+        fontFamily: "JetBrains Mono, ui-monospace, SFMono-Regular, monospace",
+        letterSpacing: "0.08em",
+        whiteSpace: "nowrap",
+        boxShadow: "0 8px 24px rgba(0,0,0,0.28)",
+      }}>
+        {label}
+      </div>
+    </Html>
+  );
+}
+
+function DimensionLine({ start, end, label, labelPosition, color = "#73BCFF", tick = 0.18, tickAxis = "y" }) {
+  const tickVector = {
+    x: [tick, 0, 0],
+    y: [0, tick, 0],
+    z: [0, 0, tick],
+  }[tickAxis] || [0, tick, 0];
+  const tickLine = (point, key) => (
+    <Line
+      key={key}
+      points={[
+        [point[0] - tickVector[0], point[1] - tickVector[1], point[2] - tickVector[2]],
+        [point[0] + tickVector[0], point[1] + tickVector[1], point[2] + tickVector[2]],
+      ]}
+      color={color}
+      lineWidth={1}
+    />
+  );
+  return (
+    <group>
+      <Line points={[start, end]} color={color} lineWidth={1} />
+      {tickLine(start, "start")}
+      {tickLine(end, "end")}
+      {label && <DimensionLabel position={labelPosition || [(start[0] + end[0]) / 2, (start[1] + end[1]) / 2, (start[2] + end[2]) / 2]} label={label} color={color} />}
+    </group>
+  );
+}
+
+function EngineeringDimensions({ beam, spec }) {
+  const section = spec.blueprint.cross_section || {};
+  const dimensions = spec.blueprint.dimensions || {};
+  const lengthFt = valueOrNull(dimensions.overall_length_ft, beam.length_ft, spec.length);
+  const depthIn = valueOrNull(dimensions.overall_depth_in, section.overall_depth_in, section.outer_depth_in, beam.product_type?.depth_in, spec.depth * 12);
+  const topWidthIn = valueOrNull(section.top_flange_width_in, section.outer_width_in, beam.product_type?.width_in, spec.topWidth * 12);
+  const topThickIn = valueOrNull(section.top_flange_thickness_in, section.top_flange_thick_in);
+  const bottomWidthIn = valueOrNull(section.bottom_flange_width_in, section.outer_width_in, beam.product_type?.width_in, spec.width * 12);
+  const bottomThickIn = valueOrNull(section.bottom_flange_thickness_in, section.bot_flange_thick_in);
+  const webIn = valueOrNull(section.web_thickness_in, section.wall_thickness_in);
+  const voidWidthIn = valueOrNull(section.void_width_in);
+  const voidDepthIn = valueOrNull(section.void_depth_in);
+  const wallIn = valueOrNull(section.wall_thickness_in);
+  const bottomRunFt = inchesToFeet(valueOrNull(section.bottom_transition_in, 4) || 0);
+  const bottomRiseFt = inchesToFeet(valueOrNull(section.bottom_transition_rise_in, 4.5) || 0);
+  const topRunFt = inchesToFeet(valueOrNull(section.top_transition_in, 5) || 0);
+  const topDropFt = inchesToFeet(valueOrNull(section.top_transition_drop_in, 4.5) || 0);
+  const bottomAngle = beam.twin_type !== "box_beam" ? angleDegrees(bottomRunFt, bottomRiseFt) : null;
+  const topAngle = beam.twin_type !== "box_beam" ? angleDegrees(topRunFt, topDropFt) : angleDegrees(inchesToFeet(valueOrNull(section.top_chamfer_in, 2.5) || 0), inchesToFeet(valueOrNull(section.top_chamfer_in, 2.5) || 0));
+  const xLeft = -spec.width / 2;
+  const xRight = spec.width / 2;
+  const zNear = -0.04;
+  const zFar = spec.length + 0.04;
+  const color = "#73BCFF";
+  return (
+    <group>
+      {lengthFt && (
+        <DimensionLine
+          start={[xLeft - 0.82, spec.depth + 0.55, 0]}
+          end={[xLeft - 0.82, spec.depth + 0.55, spec.length]}
+          label={`OVERALL LENGTH ${formatFeet(lengthFt)}`}
+          tickAxis="x"
+          tick={0.18}
+          color={color}
+        />
+      )}
+      {depthIn && (
+        <DimensionLine
+          start={[xRight + 0.55, 0, zNear]}
+          end={[xRight + 0.55, spec.depth, zNear]}
+          label={`DEPTH ${formatInches(depthIn)}`}
+          tickAxis="x"
+          color={color}
+        />
+      )}
+      {bottomWidthIn && (
+        <DimensionLine
+          start={[-inchesToFeet(bottomWidthIn) / 2, -0.35, zNear]}
+          end={[inchesToFeet(bottomWidthIn) / 2, -0.35, zNear]}
+          label={beam.twin_type === "box_beam" ? `OUTER WIDTH ${formatInches(bottomWidthIn)}` : `BOTTOM FLANGE WIDTH ${formatInches(bottomWidthIn)}`}
+          tickAxis="y"
+          color={color}
+        />
+      )}
+      {topWidthIn && beam.twin_type !== "box_beam" && (
+        <DimensionLine
+          start={[-inchesToFeet(topWidthIn) / 2, spec.depth + 0.3, zNear]}
+          end={[inchesToFeet(topWidthIn) / 2, spec.depth + 0.3, zNear]}
+          label={`TOP FLANGE WIDTH ${formatInches(topWidthIn)}`}
+          tickAxis="y"
+          color="#9AD0FF"
+        />
+      )}
+      {topThickIn && (
+        <DimensionLine
+          start={[xRight + 0.26, spec.depth - inchesToFeet(topThickIn), zFar]}
+          end={[xRight + 0.26, spec.depth, zFar]}
+          label={beam.twin_type === "box_beam" ? `TOP SLAB ${formatInches(topThickIn)}` : `TOP THK ${formatInches(topThickIn)}`}
+          tickAxis="x"
+          color="#9AD0FF"
+          tick={0.12}
+        />
+      )}
+      {bottomThickIn && (
+        <DimensionLine
+          start={[xLeft - 0.32, 0, zFar]}
+          end={[xLeft - 0.32, inchesToFeet(bottomThickIn), zFar]}
+          label={`BOTTOM THK ${formatInches(bottomThickIn)}`}
+          tickAxis="x"
+          color="#A8D6FF"
+          tick={0.12}
+        />
+      )}
+      {webIn && beam.twin_type !== "box_beam" && (
+        <DimensionLine
+          start={[-inchesToFeet(webIn) / 2, spec.depth * 0.52, zFar]}
+          end={[inchesToFeet(webIn) / 2, spec.depth * 0.52, zFar]}
+          label={`WEB ${formatInches(webIn)}`}
+          tickAxis="y"
+          color="#C5D0DE"
+          tick={0.1}
+        />
+      )}
+      {wallIn && beam.twin_type === "box_beam" && (
+        <DimensionLine
+          start={[xRight - inchesToFeet(wallIn), spec.depth * 0.45, zFar]}
+          end={[xRight, spec.depth * 0.45, zFar]}
+          label={`WALL ${formatInches(wallIn)}`}
+          tickAxis="y"
+          color="#C5D0DE"
+          tick={0.1}
+        />
+      )}
+      {voidWidthIn && beam.twin_type === "box_beam" && (
+        <DimensionLine
+          start={[-inchesToFeet(voidWidthIn) / 2, spec.depth * 0.58, zFar]}
+          end={[inchesToFeet(voidWidthIn) / 2, spec.depth * 0.58, zFar]}
+          label={`VOID WIDTH ${formatInches(voidWidthIn)}`}
+          tickAxis="y"
+          color="#C5D0DE"
+          tick={0.1}
+        />
+      )}
+      {voidDepthIn && beam.twin_type === "box_beam" && (
+        <DimensionLine
+          start={[0, inchesToFeet(wallIn || 4), zFar + 0.18]}
+          end={[0, inchesToFeet(wallIn || 4) + inchesToFeet(voidDepthIn), zFar + 0.18]}
+          label={`VOID DEPTH ${formatInches(voidDepthIn)}`}
+          tickAxis="x"
+          color="#C5D0DE"
+          tick={0.1}
+        />
+      )}
+      {topAngle && <DimensionLabel position={[xLeft - 0.48, spec.depth - 0.2, zNear]} label={`TOP CHAMFER ${topAngle}°`} color="#FFD166" />}
+      {bottomAngle && <DimensionLabel position={[xRight + 0.46, inchesToFeet(bottomThickIn || 8) + 0.2, zNear]} label={`BOTTOM HAUNCH ${bottomAngle}°`} color="#FFD166" />}
+      <Line points={[[xLeft, 0, zNear], [xRight, 0, zNear], [xRight, spec.depth, zNear], [xLeft, spec.depth, zNear], [xLeft, 0, zNear]]} color="#73BCFF" lineWidth={0.8} />
+    </group>
+  );
+}
+
+function hardwareCalloutItems(beam, spec) {
+  const station = (item) => finiteNumber(item?.x_ft ?? item?.station_ft) ?? 0;
+  const items = [];
+  (spec.blueprint.lift_loops || []).forEach((item, index) => items.push({ key: `lift-${index}`, category: "Lift loop", color: "#DCE6F2", anchor: [0, spec.depth + 0.35, station(item)], station: station(item), label: `LIFT ${formatStation(station(item))}` }));
+  (spec.blueprint.inserts || []).forEach((item, index) => {
+    const side = item.side === "right" ? 1 : -1;
+    items.push({ key: `insert-${index}`, category: "Insert", color: "#F4B652", anchor: [side * spec.width / 2, spec.depth * 0.7, station(item)], station: station(item), label: `INSERT ${formatStation(station(item))}` });
+  });
+  (spec.blueprint.tubes || []).forEach((item, index) => items.push({ key: `tube-${index}`, category: "Tube", color: "#B1BCCB", anchor: [0, spec.depth * 0.56, station(item)], station: station(item), label: `TUBE ${formatStation(station(item))}` }));
+  (spec.blueprint.tie_rod_openings || []).forEach((item, index) => items.push({ key: `tie-${index}`, category: "Tie-rod", color: "#AEB8C6", anchor: [0, spec.depth * 0.42, station(item)], station: station(item), label: `TIE ${formatStation(station(item))}` }));
+  (spec.blueprint.drain_holes || []).forEach((item, index) => items.push({ key: `drain-${index}`, category: "Drain", color: "#9AA6B5", anchor: [0, 0.18, station(item)], station: station(item), label: `DRAIN ${formatStation(station(item))}` }));
+  (spec.blueprint.hold_downs || []).forEach((item, index) => items.push({ key: `hold-${index}`, category: "Hold-down", color: "#DFA26A", anchor: [0, spec.depth + 0.35, station(item)], station: station(item), label: `HOLD-DOWN ${formatStation(station(item))}` }));
+  (spec.blueprint.grout_grooves || []).forEach((item, index) => items.push({ key: `groove-${index}`, category: "Groove", color: "#C5D0DE", anchor: [0, spec.depth + 0.1, station(item)], station: station(item), label: `GROOVE ${formatStation(station(item))}` }));
+  (spec.blueprint.bituminous_ends || []).forEach((item, index) => {
+    const z = item.end === "end" ? spec.length - inchesToFeet(item.length_in || 18) / 2 : inchesToFeet(item.length_in || 18) / 2;
+    items.push({ key: `bit-${index}`, category: "Bituminous", color: "#E5E7EB", anchor: [0, spec.depth * 0.18, z], station: z, label: `BITUMEN ${item.end?.toUpperCase() || "END"} ${formatInches(item.length_in || 18)}` });
+  });
+  return items.sort((a, b) => a.station - b.station);
+}
+
+function SmartHardwareCallouts({ beam, spec }) {
+  const items = hardwareCalloutItems(beam, spec);
+  if (!items.length) return null;
+  const rows = 4;
+  const minGap = Math.max(spec.length / Math.max(items.length, 1), 3.2);
+  const placed = items.map((item, index) => {
+    const side = index % 2 === 0 ? -1 : 1;
+    const row = Math.floor(index / 2) % rows;
+    const z = Math.min(Math.max(item.station, 1.5), Math.max(spec.length - 1.5, 1.5));
+    const spreadZ = Math.min(Math.max(z + (row - 1.5) * Math.min(minGap * 0.22, 1.8), 0.8), spec.length - 0.8);
+    const x = side * (spec.width * 1.65 + row * 0.35);
+    const y = spec.depth + 0.75 + row * 0.22;
+    return { ...item, tag: [x, y, spreadZ] };
+  });
+  return (
+    <group>
+      {placed.map((item) => (
+        <group key={item.key}>
+          <Line points={[item.anchor, [item.tag[0] * 0.78, item.tag[1] - 0.08, item.tag[2]], item.tag]} color={item.color} lineWidth={0.8} />
+          <DimensionLabel position={item.tag} label={item.label} color={item.color} />
+        </group>
+      ))}
+    </group>
+  );
+}
+
 function DimensionCallouts({ beam, spec }) {
   const section = spec.blueprint.cross_section || {};
   const depthIn = beam.product_type?.depth_in || Math.round(spec.depth * 12 * 10) / 10;
@@ -692,8 +934,16 @@ function Anomalies({ anomalies, spec }) {
   });
 }
 
-function BeamAssembly({ beam, anomalies = [], onSurfacePick, onHardwareSelect, showCallouts = true, highlighted = false, onBeamSelect }) {
+function BeamAssembly({ beam, anomalies = [], onSurfacePick, onHardwareSelect, showCallouts = true, layers = {}, highlighted = false, onBeamSelect }) {
   const spec = useBeamSpec(beam);
+  const activeLayers = {
+    dimensions: showCallouts,
+    hardware: false,
+    strands: false,
+    stirrups: false,
+    anomalies: true,
+    ...layers,
+  };
   const groupRef = useRef(null);
   const surfacePick = (point) => {
     const localPoint = groupRef.current ? groupRef.current.worldToLocal(point.clone()) : point;
@@ -702,20 +952,21 @@ function BeamAssembly({ beam, anomalies = [], onSurfacePick, onHardwareSelect, s
   return (
     <group ref={groupRef} position={[0, -spec.depth / 2, -spec.length / 2]}>
       <Shell spec={spec} beam={beam} highlighted={highlighted} onSurfacePick={surfacePick} onBeamSelect={onBeamSelect} />
-      <SectionRevealLines beam={beam} spec={spec} />
-      <BituminousEnds beam={beam} spec={spec} onHardwareSelect={onHardwareSelect} />
-      <StrandPaths beam={beam} spec={spec} onHardwareSelect={onHardwareSelect} />
-      <Stirrups beam={beam} spec={spec} onHardwareSelect={onHardwareSelect} />
-      <LiftLoops beam={beam} spec={spec} onHardwareSelect={onHardwareSelect} />
-      <SideInserts beam={beam} spec={spec} onHardwareSelect={onHardwareSelect} />
-      <CylindricalOpenings beam={beam} spec={spec} items={spec.blueprint.tubes} type="Tube" color="#4F5968" y={spec.depth * 0.56} onHardwareSelect={onHardwareSelect} />
-      <CylindricalOpenings beam={beam} spec={spec} items={spec.blueprint.tie_rod_openings} type="Tie-rod opening" color="#0F172A" y={spec.depth * 0.42} onHardwareSelect={onHardwareSelect} />
-      <CylindricalOpenings beam={beam} spec={spec} items={spec.blueprint.drain_holes} type="Drain hole" color="#111827" y={0.18} onHardwareSelect={onHardwareSelect} />
-      <HoldDowns beam={beam} spec={spec} onHardwareSelect={onHardwareSelect} />
-      <GroutGrooves beam={beam} spec={spec} onHardwareSelect={onHardwareSelect} />
+      {activeLayers.dimensions && <SectionRevealLines beam={beam} spec={spec} />}
+      {activeLayers.hardware && <BituminousEnds beam={beam} spec={spec} onHardwareSelect={onHardwareSelect} />}
+      {activeLayers.strands && <StrandPaths beam={beam} spec={spec} onHardwareSelect={onHardwareSelect} />}
+      {activeLayers.stirrups && <Stirrups beam={beam} spec={spec} onHardwareSelect={onHardwareSelect} />}
+      {activeLayers.hardware && <LiftLoops beam={beam} spec={spec} onHardwareSelect={onHardwareSelect} />}
+      {activeLayers.hardware && <SideInserts beam={beam} spec={spec} onHardwareSelect={onHardwareSelect} />}
+      {activeLayers.hardware && <CylindricalOpenings beam={beam} spec={spec} items={spec.blueprint.tubes} type="Tube" color="#4F5968" y={spec.depth * 0.56} onHardwareSelect={onHardwareSelect} />}
+      {activeLayers.hardware && <CylindricalOpenings beam={beam} spec={spec} items={spec.blueprint.tie_rod_openings} type="Tie-rod opening" color="#0F172A" y={spec.depth * 0.42} onHardwareSelect={onHardwareSelect} />}
+      {activeLayers.hardware && <CylindricalOpenings beam={beam} spec={spec} items={spec.blueprint.drain_holes} type="Drain hole" color="#111827" y={0.18} onHardwareSelect={onHardwareSelect} />}
+      {activeLayers.hardware && <HoldDowns beam={beam} spec={spec} onHardwareSelect={onHardwareSelect} />}
+      {activeLayers.hardware && <GroutGrooves beam={beam} spec={spec} onHardwareSelect={onHardwareSelect} />}
       <MarkedEnd beam={beam} spec={spec} onHardwareSelect={onHardwareSelect} />
-      {showCallouts && <DimensionCallouts beam={beam} spec={spec} />}
-      <Anomalies anomalies={anomalies} spec={spec} />
+      {activeLayers.dimensions && <EngineeringDimensions beam={beam} spec={spec} />}
+      {activeLayers.hardware && <SmartHardwareCallouts beam={beam} spec={spec} />}
+      {activeLayers.anomalies && <Anomalies anomalies={anomalies} spec={spec} />}
     </group>
   );
 }
@@ -793,29 +1044,186 @@ export function SpecBeam({ spec, compact = false, bodyColor = "#9aa0aa", highlig
   );
 }
 
-export default function BeamTwinViewer({ beam, anomalies = [], onSurfacePick, onHardwareSelect, showCallouts = true }) {
+function CrossSectionInset({ beam }) {
+  const spec = useBeamSpec(beam);
+  const section = spec.blueprint.cross_section || {};
+  const isBox = beam?.twin_type === "box_beam";
+  const depthIn = valueOrNull(section.overall_depth_in, section.outer_depth_in, beam?.product_type?.depth_in, spec.depth * 12);
+  const topWidthIn = valueOrNull(section.top_flange_width_in, section.outer_width_in, beam?.product_type?.width_in, spec.topWidth * 12);
+  const bottomWidthIn = valueOrNull(section.bottom_flange_width_in, section.outer_width_in, beam?.product_type?.width_in, spec.width * 12);
+  const topThickIn = valueOrNull(section.top_flange_thickness_in, section.top_flange_thick_in);
+  const bottomThickIn = valueOrNull(section.bottom_flange_thickness_in, section.bot_flange_thick_in);
+  const webIn = valueOrNull(section.web_thickness_in, section.wall_thickness_in);
+  const voidWidthIn = valueOrNull(section.void_width_in);
+  const voidDepthIn = valueOrNull(section.void_depth_in);
+  const wallIn = valueOrNull(section.wall_thickness_in);
+  const bottomAngle = !isBox ? angleDegrees(inchesToFeet(valueOrNull(section.bottom_transition_in, 4) || 0), inchesToFeet(valueOrNull(section.bottom_transition_rise_in, 4.5) || 0)) : null;
+  const topAngle = !isBox ? angleDegrees(inchesToFeet(valueOrNull(section.top_transition_in, 5) || 0), inchesToFeet(valueOrNull(section.top_transition_drop_in, 4.5) || 0)) : angleDegrees(1, 1);
+  const maxWidth = Math.max(bottomWidthIn || 0, topWidthIn || 0, section.outer_width_in || 0, 1);
+  const maxDepth = Math.max(depthIn || 1, 1);
+  const sx = 150 / maxWidth;
+  const sy = 120 / maxDepth;
+  const cx = 122;
+  const baseY = 154;
+  const x = (inches) => cx + (inches * sx);
+  const y = (inches) => baseY - (inches * sy);
+  const points = isBox
+    ? [
+        [x(-(bottomWidthIn || maxWidth) / 2), y(0)],
+        [x((bottomWidthIn || maxWidth) / 2), y(0)],
+        [x((bottomWidthIn || maxWidth) / 2), y(maxDepth - 2.5)],
+        [x((bottomWidthIn || maxWidth) / 2 - 2.5), y(maxDepth)],
+        [x(-(bottomWidthIn || maxWidth) / 2 + 2.5), y(maxDepth)],
+        [x(-(bottomWidthIn || maxWidth) / 2), y(maxDepth - 2.5)],
+      ]
+    : [
+        [x(-(bottomWidthIn || maxWidth) / 2), y(0)],
+        [x((bottomWidthIn || maxWidth) / 2), y(0)],
+        [x((bottomWidthIn || maxWidth) / 2), y(bottomThickIn || 0)],
+        [x((webIn || maxWidth * 0.25) / 2 + 4), y(bottomThickIn || 0)],
+        [x((webIn || maxWidth * 0.25) / 2), y((bottomThickIn || 0) + 4.5)],
+        [x((webIn || maxWidth * 0.25) / 2), y(maxDepth - (topThickIn || 0) - 4.5)],
+        [x((webIn || maxWidth * 0.25) / 2 + 5), y(maxDepth - (topThickIn || 0))],
+        [x((topWidthIn || maxWidth) / 2), y(maxDepth - (topThickIn || 0))],
+        [x((topWidthIn || maxWidth) / 2), y(maxDepth)],
+        [x(-(topWidthIn || maxWidth) / 2), y(maxDepth)],
+        [x(-(topWidthIn || maxWidth) / 2), y(maxDepth - (topThickIn || 0))],
+        [x(-(webIn || maxWidth * 0.25) / 2 - 5), y(maxDepth - (topThickIn || 0))],
+        [x(-(webIn || maxWidth * 0.25) / 2), y(maxDepth - (topThickIn || 0) - 4.5)],
+        [x(-(webIn || maxWidth * 0.25) / 2), y((bottomThickIn || 0) + 4.5)],
+        [x(-(webIn || maxWidth * 0.25) / 2 - 4), y(bottomThickIn || 0)],
+        [x(-(bottomWidthIn || maxWidth) / 2), y(bottomThickIn || 0)],
+      ];
+  const poly = points.map(([px, py]) => `${px},${py}`).join(" ");
+  const dim = (x1, y1, x2, y2, label, tx, ty) => (
+    <g>
+      <line x1={x1} y1={y1} x2={x2} y2={y2} stroke="#73BCFF" strokeWidth="1" />
+      <line x1={x1} y1={y1 - 4} x2={x1} y2={y1 + 4} stroke="#73BCFF" strokeWidth="1" />
+      <line x1={x2} y1={y2 - 4} x2={x2} y2={y2 + 4} stroke="#73BCFF" strokeWidth="1" />
+      <text x={tx} y={ty} fill="#D8ECFF" fontSize="9" textAnchor="middle">{label}</text>
+    </g>
+  );
+  return (
+    <div style={{ position: "absolute", left: 16, bottom: 16, width: 292, background: "rgba(7,9,14,0.94)", border: "1px solid #263244", padding: 10, pointerEvents: "none" }}>
+      <div style={{ color: "#FFFFFF", fontSize: 11, fontWeight: 700, letterSpacing: "0.16em", marginBottom: 6, fontFamily: "JetBrains Mono, monospace" }}>DIMENSIONED SECTION</div>
+      <svg viewBox="0 0 260 176" width="100%" height="176" role="img" aria-label="Dimensioned beam cross-section">
+        <polygon points={poly} fill="#B7BEC7" stroke="#F4F7FB" strokeWidth="1.2" />
+        {isBox && voidWidthIn && voidDepthIn && (
+          <rect x={x(-voidWidthIn / 2)} y={y((wallIn || 4) + voidDepthIn)} width={voidWidthIn * sx} height={voidDepthIn * sy} fill="#0A0C10" stroke="#8FA1B6" />
+        )}
+        {bottomWidthIn && dim(x(-bottomWidthIn / 2), 166, x(bottomWidthIn / 2), 166, `${formatInches(bottomWidthIn)}`, cx, 174)}
+        {topWidthIn && !isBox && dim(x(-topWidthIn / 2), 15, x(topWidthIn / 2), 15, `${formatInches(topWidthIn)} TOP`, cx, 10)}
+        {depthIn && (
+          <g>
+            <line x1="232" y1={y(0)} x2="232" y2={y(depthIn)} stroke="#73BCFF" strokeWidth="1" />
+            <line x1="228" y1={y(0)} x2="236" y2={y(0)} stroke="#73BCFF" strokeWidth="1" />
+            <line x1="228" y1={y(depthIn)} x2="236" y2={y(depthIn)} stroke="#73BCFF" strokeWidth="1" />
+            <text x="247" y="88" fill="#D8ECFF" fontSize="9" textAnchor="middle" transform="rotate(90 247 88)">{formatInches(depthIn)} DEPTH</text>
+          </g>
+        )}
+        {webIn && !isBox && dim(x(-webIn / 2), 88, x(webIn / 2), 88, `${formatInches(webIn)} WEB`, cx, 82)}
+        {topThickIn && <text x="22" y={y(depthIn - topThickIn / 2)} fill="#D8ECFF" fontSize="9">TOP {formatInches(topThickIn)}</text>}
+        {bottomThickIn && <text x="18" y={y(bottomThickIn / 2)} fill="#D8ECFF" fontSize="9">BOT {formatInches(bottomThickIn)}</text>}
+        {wallIn && isBox && <text x="24" y="92" fill="#D8ECFF" fontSize="9">WALL {formatInches(wallIn)}</text>}
+        {topAngle && <text x="192" y="33" fill="#FFD166" fontSize="9">ANGLE {topAngle}°</text>}
+        {bottomAngle && <text x="184" y="135" fill="#FFD166" fontSize="9">HAUNCH {bottomAngle}°</text>}
+      </svg>
+    </div>
+  );
+}
+
+export default function BeamTwinViewer({ beam, anomalies = [], onSurfacePick, onHardwareSelect, showCallouts = true, layers }) {
   const safeBeam = beam || { twin_type: "i_beam", length_ft: 90, product_type: {}, mark: "Beam" };
   const spec = useBeamSpec(safeBeam);
   const cameraDistance = Math.max(safeBeam.length_ft * 0.34, 22);
+  const activeLayers = {
+    dimensions: showCallouts,
+    hardware: false,
+    strands: false,
+    stirrups: false,
+    anomalies: true,
+    ...layers,
+  };
   return (
-    <div style={{ width: "100%", height: "100%", background: "#0A0C10" }} data-testid="beam-3d-canvas">
+    <div style={{ width: "100%", height: "100%", background: "#0A0C10", position: "relative" }} data-testid="beam-3d-canvas">
       <Scene camera={{ position: [cameraDistance * 0.56, spec.depth * 2.45, cameraDistance], fov: 34 }}>
-        <BeamAssembly beam={safeBeam} anomalies={anomalies} onSurfacePick={onSurfacePick} onHardwareSelect={onHardwareSelect} showCallouts={showCallouts} highlighted />
+        <BeamAssembly beam={safeBeam} anomalies={anomalies} onSurfacePick={onSurfacePick} onHardwareSelect={onHardwareSelect} showCallouts={showCallouts} layers={activeLayers} highlighted />
         <mesh position={[0, -spec.depth / 2 - 0.14, 0]} receiveShadow>
           <boxGeometry args={[Math.max(spec.width * 4.2, 18), 0.16, Math.max(safeBeam.length_ft + 12, 34)]} />
           <meshStandardMaterial color="#20252F" roughness={0.96} metalness={0.04} />
         </mesh>
         <gridHelper args={[Math.max(safeBeam.length_ft * 1.25, 50), Math.max(Math.round(safeBeam.length_ft / 4), 24), "#2B313B", "#161B24"]} position={[0, -spec.depth / 2 - 0.05, 0]} />
       </Scene>
+      {activeLayers.dimensions && <CrossSectionInset beam={safeBeam} />}
     </div>
   );
 }
 
-export function BedTwinViewer({ bed, selectedBeamId, onBeamSelect, onHardwareSelect, showCallouts = false }) {
+function BedDimensionLayer({ bed, beams, bedLength, laneWidth, halfSpread }) {
+  const bedWidth = Math.max(beams.length * laneWidth + 10, 22);
+  const sorted = [...beams].sort((a, b) => (a.position_on_bed || 0) - (b.position_on_bed || 0));
+  return (
+    <group>
+      <DimensionLine
+        start={[-bedWidth / 2 - 1.2, 0.2, -bedLength / 2]}
+        end={[-bedWidth / 2 - 1.2, 0.2, bedLength / 2]}
+        label={`BED LENGTH ${formatFeet(bed?.length_ft || bedLength)}`}
+        color="#73BCFF"
+        tickAxis="x"
+        tick={0.25}
+      />
+      <DimensionLine
+        start={[-bedWidth / 2, 0.26, -bedLength / 2 - 2.4]}
+        end={[bedWidth / 2, 0.26, -bedLength / 2 - 2.4]}
+        label={`LANE WIDTH ${formatFeet(bedWidth, 1)}`}
+        color="#73BCFF"
+        tickAxis="z"
+        tick={0.25}
+      />
+      {sorted.map((beam, index) => {
+        const x = -halfSpread + index * laneWidth;
+        const station = -bedLength / 2;
+        const length = Math.min(beam.length_ft || bedLength, bedLength);
+        return (
+          <group key={`bed-dim-${beam.id}`}>
+            <Line points={[[x, 0.35, station], [x, 0.35, station + length]]} color={beam.id === sorted[index]?.id ? "#8FC5FF" : "#516072"} lineWidth={1} />
+            <DimensionLabel position={[x, 1.15 + (index % 3) * 0.28, -bedLength / 2 - 5 - (index % 2) * 1.8]} color="#C5D0DE" label={`POS ${String(beam.position_on_bed || index + 1).padStart(2, "0")} · STA 0+00 to ${formatFeet(length)}`} />
+            {index > 0 && (
+              <DimensionLine
+                start={[x - laneWidth, 0.42, bedLength / 2 + 2.8 + (index % 2) * 1.1]}
+                end={[x, 0.42, bedLength / 2 + 2.8 + (index % 2) * 1.1]}
+                label={`SPACING ${formatFeet(laneWidth)}`}
+                color="#91A0B2"
+                tickAxis="z"
+                tick={0.18}
+              />
+            )}
+          </group>
+        );
+      })}
+      {[-bedLength / 2, 0, bedLength / 2].map((z, index) => (
+        <group key={`station-${z}`}>
+          <Line points={[[-bedWidth / 2, 0.34, z], [bedWidth / 2, 0.34, z]]} color="#2F9E44" lineWidth={0.8} />
+          <DimensionLabel position={[bedWidth / 2 + 1.4, 0.9, z]} color="#2F9E44" label={index === 0 ? "STA 0+00 / MARKED END" : index === 1 ? `MID ${formatFeet(bedLength / 2)}` : `STA ${formatFeet(bedLength)}`} />
+        </group>
+      ))}
+    </group>
+  );
+}
+
+export function BedTwinViewer({ bed, selectedBeamId, onBeamSelect, onHardwareSelect, showCallouts = false, layers }) {
   const beams = [...(bed?.beams || [])].sort((a, b) => (a.position_on_bed || 0) - (b.position_on_bed || 0));
   const bedLength = Math.max(...beams.map((item) => item.length_ft || 0), bed?.length_ft || 120);
   const laneWidth = 7;
   const halfSpread = ((Math.max(beams.length, 1) - 1) * laneWidth) / 2;
+  const activeLayers = {
+    dimensions: showCallouts,
+    hardware: false,
+    strands: false,
+    stirrups: false,
+    anomalies: true,
+    ...layers,
+  };
   return (
     <div style={{ width: "100%", height: "100%", background: "#0A0C10", position: "relative" }}>
       <Scene camera={{ position: [22, 17, Math.max(bedLength * 0.66, 92)], fov: 33 }}>
@@ -833,8 +1241,9 @@ export function BedTwinViewer({ bed, selectedBeamId, onBeamSelect, onHardwareSel
           <Line key={index} points={[[-halfSpread - laneWidth / 2 + index * laneWidth, -0.08, -bedLength / 2], [-halfSpread - laneWidth / 2 + index * laneWidth, -0.08, bedLength / 2]]} color="#5D6878" lineWidth={1} />
         ))}
         <Line points={[[-halfSpread - laneWidth / 2, -0.02, 0], [halfSpread + laneWidth / 2, -0.02, 0]]} color="#2F9E44" lineWidth={1.2} />
-        <CalloutTag position={[0, 1.55, -bedLength / 2 - 3.8]} color="#8FC5FF" label="HEAD / MARKED END" />
-        <CalloutTag position={[0, 1.55, bedLength / 2 + 3.2]} color="#8B949E" label="TAIL / STRAND END" />
+        {activeLayers.dimensions && <CalloutTag position={[0, 1.55, -bedLength / 2 - 3.8]} color="#8FC5FF" label="HEAD / MARKED END" />}
+        {activeLayers.dimensions && <CalloutTag position={[0, 1.55, bedLength / 2 + 3.2]} color="#8B949E" label="TAIL / STRAND END" />}
+        {activeLayers.dimensions && <BedDimensionLayer bed={bed} beams={beams} bedLength={bedLength} laneWidth={laneWidth} halfSpread={halfSpread} />}
         {beams.map((item, index) => (
           <group key={item.id} position={[-halfSpread + index * laneWidth, 0, 0]}>
             <BeamAssembly
@@ -843,14 +1252,14 @@ export function BedTwinViewer({ bed, selectedBeamId, onBeamSelect, onHardwareSel
               onSurfacePick={null}
               onHardwareSelect={onHardwareSelect}
               showCallouts={showCallouts && item.id === selectedBeamId}
+              layers={{ ...activeLayers, dimensions: activeLayers.dimensions && item.id === selectedBeamId }}
               highlighted={item.id === selectedBeamId}
               onBeamSelect={onBeamSelect}
             />
-            <CalloutTag position={[0, 4.2, 0]} color={item.id === selectedBeamId ? "#8FC5FF" : "#E5EDF5"} label={`${item.mark} · POS ${String(item.position_on_bed).padStart(2, "0")} · ${formatFeet(item.length_ft)}`} />
-            <CalloutTag position={[0, 1.3, -bedLength / 2 - 2.2]} color="#8B949E" label={`LANE ${String(item.position_on_bed).padStart(2, "0")} · ${item.product_type?.name || item.twin_type}`} />
+            {(item.id === selectedBeamId || activeLayers.dimensions) && <CalloutTag position={[0, 4.2 + (index % 3) * 0.28, 0]} color={item.id === selectedBeamId ? "#8FC5FF" : "#E5EDF5"} label={`${item.mark} · POS ${String(item.position_on_bed).padStart(2, "0")} · ${formatFeet(item.length_ft)}`} />}
           </group>
         ))}
-        <CalloutTag position={[0, 1.35, -bedLength / 2 - 7]} color="#2F9E44" label={`BED ${bed?.bed_number} · ${bed?.name} · ${beams.length} BEAMS`} />
+        {activeLayers.dimensions && <CalloutTag position={[0, 1.35, -bedLength / 2 - 7]} color="#2F9E44" label={`BED ${bed?.bed_number} · ${bed?.name} · ${beams.length} BEAMS`} />}
         <gridHelper args={[Math.max(bedLength + 40, 180), 40, "#222631", "#151922"]} position={[0, -1.02, 0]} />
       </Scene>
       <div
