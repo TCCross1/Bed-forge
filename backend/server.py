@@ -1151,73 +1151,40 @@ app.add_middleware(
 @app.on_event("startup")
 async def startup():
     assert_production_safe()
-    await db.users.create_index("email", unique=True)
-    await db.beds.create_index("bed_number")
-    await db.beams.create_index("bed_id")
-    await db.camber_readings.create_index("beam_id")
-    await db.finish_sheets.create_index("beam_id")
-    await db.pre_delivery.create_index("beam_id")
-    await db.beam_specs.create_index("beam_id")
-    await db.beam_specs.create_index("job_number")
-    await db.blueprint_documents.create_index("beam_id")
-    await db.blueprint_documents.create_index("created_at")
-    await db.blueprint_extractions.create_index("document_id")
-    await db.locked_blueprint_revisions.create_index("document_id")
-    await db.blueprint_audit_events.create_index("document_id")
-    await db.licenses.create_index("id")
-    await db.blueprints.create_index("beam_id")
-    await db.spec_measurements.create_index("spec_id")
-    await db.bed_assignments.create_index([("bed_id", 1), ("scheduled_date", 1)])
-    await db.bed_assignments.create_index("beam_id")
-    await db.ar_measurements.create_index("beam_id")
-    await db.ar_measurements.create_index("created_at")
-    await db.ar_measurements.create_index("run_id")
-    await db.ar_tape_runs.create_index("beam_id")
-    await db.ar_tape_runs.create_index("created_at")
-    await db.tape_calibrations.create_index("device_id")
-    await db.tape_calibrations.create_index("calibrated_at")
-    await db.tape_calibrations.create_index([("device_id", 1), ("passed", 1), ("calibrated_at", -1)])
-    await db.sync_events.create_index("created_at")
-    await db.devices.create_index([("user_id", 1), ("platform", 1), ("device_class", 1)])
-    await db.strand_rolls.create_index("heat_number")
-    await db.strand_rolls.create_index("logged_at")
-    await db.strand_roll_assignments.create_index("bed_id")
-    await db.strand_roll_assignments.create_index("roll_id")
-    await db.strand_roll_assignments.create_index("pour_id")
-    await db.cylinder_runs.create_index("run_date")
-    await db.cylinder_runs.create_index("created_at")
-    await db.cylinders.create_index("run_id")
-    await db.cylinders.create_index("job_number")
-    await db.company_settings.create_index("id")
-    await db.audit_log.create_index("created_at")
-    await db.audit_log.create_index("actor_id")
-    await db.audit_log.create_index("action")
-    await db.sessions.create_index("user_id")
-    await db.sessions.create_index("id", unique=True)
-    await db.overrides.create_index([("kind", 1), ("target_id", 1)])
-    await db.login_attempts.create_index("created_at")
-    await db.maturity_samples.create_index("pour_id")
-    await db.maturity_samples.create_index("recorded_at")
-    await db.owner_packages.create_index("pour_id")
-    await db.owner_packages.create_index("created_at")
-    await db.fresh_concrete_tests.create_index("pour_id")
-    await db.fresh_concrete_tests.create_index("job_id")
-    await db.fresh_concrete_tests.create_index("beam_ids")
-    await db.fresh_concrete_tests.create_index("created_at")
-    await db.batch_records.create_index("pour_id")
-    await db.batch_records.create_index("job_id")
-    await db.batch_records.create_index("mix_code")
-    await db.batch_records.create_index("status")
-    await db.batch_records.create_index("batched_at")
-    await db.mix_designs.create_index("mix_code")
-    await db.ncrs.create_index("status")
-    await db.ncrs.create_index("severity")
-    await db.ncrs.create_index("beam_ids")
-    await db.ncrs.create_index("bed_id")
-    await db.ncrs.create_index("job_id")
-    await db.ncrs.create_index("anomaly_id")
-    await db.ncrs.create_index("created_at")
-    await db.ncrs.create_index([("source_type", 1), ("source_id", 1)])
+    async def create_index_safe(collection, *args, **kwargs):
+        try:
+            await collection.create_index(*args, **kwargs)
+        except Exception as exc:
+            logger.warning("index creation skipped collection=%s index=%s reason=%s", collection.name, args[0] if args else "", exc)
+
+    indexes = [
+        (db.users, "email", {"unique": True}), (db.beds, "bed_number", {}), (db.beams, "bed_id", {}),
+        (db.camber_readings, "beam_id", {}), (db.finish_sheets, "beam_id", {}), (db.pre_delivery, "beam_id", {}),
+        (db.beam_specs, "beam_id", {}), (db.beam_specs, "job_number", {}), (db.blueprint_documents, "beam_id", {}),
+        (db.blueprint_documents, "created_at", {}), (db.blueprint_extractions, "document_id", {}), (db.locked_blueprint_revisions, "document_id", {}),
+        (db.blueprint_audit_events, "document_id", {}), (db.licenses, "id", {}), (db.blueprints, "beam_id", {}),
+        (db.spec_measurements, "spec_id", {}), (db.bed_assignments, [("bed_id", 1), ("scheduled_date", 1)], {}), (db.bed_assignments, "beam_id", {}),
+        (db.ar_measurements, "beam_id", {}), (db.ar_measurements, "created_at", {}), (db.ar_measurements, "run_id", {}),
+        (db.ar_tape_runs, "beam_id", {}), (db.ar_tape_runs, "created_at", {}), (db.tape_calibrations, "device_id", {}),
+        (db.tape_calibrations, "calibrated_at", {}), (db.tape_calibrations, [("device_id", 1), ("passed", 1), ("calibrated_at", -1)], {}),
+        (db.sync_events, "created_at", {}), (db.devices, [("user_id", 1), ("platform", 1), ("device_class", 1)], {}),
+        (db.strand_rolls, "heat_number", {}), (db.strand_rolls, "logged_at", {}), (db.strand_roll_assignments, "bed_id", {}),
+        (db.strand_roll_assignments, "roll_id", {}), (db.strand_roll_assignments, "pour_id", {}), (db.cylinder_runs, "run_date", {}),
+        (db.cylinder_runs, "created_at", {}), (db.cylinders, "run_id", {}), (db.cylinders, "job_number", {}),
+        (db.company_settings, "id", {}), (db.audit_log, "created_at", {}), (db.audit_log, "actor_id", {}),
+        (db.audit_log, "action", {}), (db.sessions, "user_id", {}), (db.sessions, "id", {"unique": True}),
+        (db.overrides, [("kind", 1), ("target_id", 1)], {}), (db.login_attempts, "created_at", {}),
+        (db.maturity_samples, "pour_id", {}), (db.maturity_samples, "recorded_at", {}), (db.owner_packages, "pour_id", {}),
+        (db.owner_packages, "created_at", {}), (db.fresh_concrete_tests, "pour_id", {}), (db.fresh_concrete_tests, "job_id", {}),
+        (db.fresh_concrete_tests, "beam_ids", {}), (db.fresh_concrete_tests, "created_at", {}), (db.batch_records, "pour_id", {}),
+        (db.batch_records, "job_id", {}), (db.batch_records, "mix_code", {}), (db.batch_records, "status", {}),
+        (db.batch_records, "batched_at", {}), (db.mix_designs, "mix_code", {}), (db.ncrs, "status", {}),
+        (db.ncrs, "severity", {}), (db.ncrs, "beam_ids", {}), (db.ncrs, "bed_id", {}),
+        (db.ncrs, "job_id", {}), (db.ncrs, "anomaly_id", {}), (db.ncrs, "created_at", {}),
+        (db.ncrs, [("source_type", 1), ("source_id", 1)], {}),
+    ]
+    for collection, index, kwargs in indexes:
+        await create_index_safe(collection, index, **kwargs)
     await seed_admin()
     await seed_company()
     await seed_plant()
@@ -1226,10 +1193,7 @@ async def startup():
     await seed_strand_rolls()
     await seed_mix_designs()
     await seed_beam_qr_tokens()
-    try:
-        await db.beams.create_index("qr_token", unique=True, sparse=True)
-    except Exception:
-        logger.exception("qr_token unique index failed")
+    await create_index_safe(db.beams, "qr_token", unique=True, sparse=True)
     logger.info("BedForge QC startup complete.")
 
 

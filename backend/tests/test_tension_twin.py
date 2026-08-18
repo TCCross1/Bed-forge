@@ -50,10 +50,16 @@ def test_l25390_end_view_does_not_overlap_draped_on_straight():
     draped = [s for s in spec.strands if s.draped]
     assert len(straight) == 12
     assert len(draped) == 8
+    row_counts = {}
+    for s in spec.strands:
+        row_counts[s.row] = row_counts.get(s.row, 0) + 1
+    assert row_counts == {1: 8, 2: 4, 3: 2, 4: 4, 5: 2}
     assert {round(s.soffit_in, 1) for s in straight} == {2.0, 4.0}
-    assert {round(s.x_in, 1) for s in straight} == {-5.0, -3.0, -1.0, 1.0, 3.0, 5.0}
-    assert {round(s.x_in, 1) for s in draped} == {-2.0, 2.0}
-    assert {round(strand_end_y_in(s), 1) for s in draped} == {18.0, 22.0, 26.0, 30.0}
+    assert {round(s.x_in, 1) for s in straight} == {-7.0, -5.0, -3.0, -1.0, 1.0, 3.0, 5.0, 7.0}
+    assert {round(s.x_in, 1) for s in draped} == {-3.0, -1.0, 1.0, 3.0}
+    assert {round(strand_end_y_in(s), 1) for s in draped} == {18.0, 22.0, 26.0}
+    assert spec.strand_spec["area_in2"] == 0.167
+    assert spec.strand_spec["final_pull_lbs"] == 33817
     for s in draped:
         assert strand_end_y_in(s) > strand_hold_y_in(s)
 

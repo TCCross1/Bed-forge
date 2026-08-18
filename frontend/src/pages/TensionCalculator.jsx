@@ -16,6 +16,7 @@ import { toastNcrFromResponse } from "../lib/ncr";
 import { useDevice } from "../context/DeviceContext";
 
 const STRAND_PRESETS = [
+  { size: "0.5in oversize", area: 0.167 },
   { size: "0.5in", area: 0.153 },
   { size: "0.6in", area: 0.217 },
   { size: "0.7in", area: 0.294 },
@@ -90,7 +91,17 @@ export default function TensionCalculator() {
       const { data } = await api.get(`/beams/${id}/tension-twin`);
       setTwin(data);
       if (data.bed?.id) setBedId(data.bed.id);
-      if (data.bed_length_ft) setVals((cur) => ({ ...cur, bed_length_ft: data.bed_length_ft }));
+      const strandMeta = data.spec?.strand_spec || {};
+      const firstStrand = data.strands?.[0] || {};
+      setVals((cur) => ({
+        ...cur,
+        bed_length_ft: data.bed_length_ft || cur.bed_length_ft,
+        jacking_force_kip: strandMeta.final_pull_kip || firstStrand.jacking_force || firstStrand.jacking_kip || cur.jacking_force_kip,
+        strand_area_in2: strandMeta.area_in2 || firstStrand.area_in2 || cur.strand_area_in2,
+        modulus_ksi: firstStrand.modulus_ksi || cur.modulus_ksi,
+      }));
+      if (strandMeta.area_in2 || firstStrand.area_in2) setStrandSize(firstStrand.size || "0.5in oversize");
+      if (data.strands?.length) setNumStrands(data.strands.length);
     } catch (err) {
       console.error("[tension] twin load failed", err);
       setTwin(null);
@@ -341,6 +352,22 @@ export default function TensionCalculator() {
             </span>
           ))}
         </div>
+        {spec?.strand_spec && (
+          <div className={`${cardClass} p-4 grid grid-cols-1 md:grid-cols-4 gap-3`} data-testid="tension-strand-spec">
+            <div className="md:col-span-2">
+              <div className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground">Shop drawing</div>
+              <div className="font-display font-bold uppercase tracking-wider">{spec.strand_spec.shop_drawing_title || spec.source_drawing || "Locked BeamSpec"}</div>
+            </div>
+            <div>
+              <div className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground">Strand</div>
+              <div className="font-mono text-sm">{spec.strand_spec.diameter_label} · {spec.strand_spec.grade_ksi}K · As {spec.strand_spec.area_in2} in²</div>
+            </div>
+            <div>
+              <div className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground">Final pull</div>
+              <div className="font-mono text-sm">{spec.strand_spec.final_pull_lbs?.toLocaleString?.() || spec.strand_spec.final_pull_lbs} lb · {spec.strand_spec.aashto}</div>
+            </div>
+          </div>
+        )}
 
         <div className="grid grid-cols-1 xl:grid-cols-[1fr_340px] gap-4">
           <div className={`${cardClass} overflow-hidden`}>

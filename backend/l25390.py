@@ -18,6 +18,12 @@ CONTRACT_ID = "255390"
 PRODUCT_NAME = "KYTC Precast PC I-Beam Type 2"
 LENGTH_FT = 73.333
 DEPTH_IN = 36.0
+TOP_FLANGE_WIDTH_IN = 12.0
+BOTTOM_FLANGE_WIDTH_IN = 27.0
+WEB_THICK_IN = 6.0
+STRAND_AREA_IN2 = 0.167
+FINAL_PULL_LBS = 33817
+FINAL_PULL_KIP = round(FINAL_PULL_LBS / 1000.0, 3)
 # Casting bed layout — Spans 1 & 3. Stations from Marked End.
 HOLD_DOWN_ME_FT = 29.333  # 29'-4"
 HOLD_DOWN_UE_FT = 44.0    # 44'-0"
@@ -56,50 +62,44 @@ def build_l25390_spec(beam_id=None, job_id=None, pour_id=None, blueprint_id=None
     hd1, hd2 = HOLD_DOWN_ME_FT, HOLD_DOWN_UE_FT
     ll1, ll2 = round(length * 0.20, 2), round(length * 0.80, 2)
 
-    # End-view pattern (looking at Marked End). 2" PCI grid.
-    # Straight: 12 strands in the 18" bottom flange, rows at 2" and 4" soffit.
-    # Draped: 8 strands in the 6" web at ±2" (H-56-S pitch). HIGH at ends,
-    # depressed through hold-downs. Stressed in the draped position.
-    straight_offsets = [-5.0, -3.0, -1.0, 1.0, 3.0, 5.0]
+    # End-view pattern (looking at Marked End) extracted from the "POURS 3 & 4
+    # (SPANS 1 & 3)" shop drawing.  It uses the print's 2" PCI strand grid:
+    # ROW 1 = 8, ROW 2 = 4 straight bottom strands; ROWS 3-5 are the 8 draped
+    # strands called out in the web with 5"-2"-5" centering.
     strands = []
     n = 1
-    for row, soffit in enumerate((2.0, 4.0), start=1):
-        for col, off in enumerate(straight_offsets, start=1):
-            debond = 4.0 if row == 1 and abs(off) >= 5.0 else 0.0
+    straight_rows = (
+        (1, 2.0, [-7.0, -5.0, -3.0, -1.0, 1.0, 3.0, 5.0, 7.0]),
+        (2, 4.0, [-3.0, -1.0, 1.0, 3.0]),
+    )
+    for row, soffit, offsets in straight_rows:
+        for col, off in enumerate(offsets, start=1):
             strands.append(StrandItem(
-                number=n,
-                row=row,
-                column=col,
-                size="0.5in",
-                detensioning="straight",
-                draped=False,
-                area_in2=0.153,
-                jacking_kip=31.0,
-                soffit_in=soffit,
-                offset_in=off,
-                x_in=off,
-                y_in=soffit,
-                debond_me_ft=debond,
-                debond_ue_ft=debond,
-                notes="Bottom flange straight. Outer pair bituminous-debonded 4'-0\" each end." if debond else "Bottom flange straight.",
+                number=n, row=row, column=col, size='0.5in oversize',
+                detensioning="straight", draped=False, area_in2=STRAND_AREA_IN2,
+                jacking_kip=FINAL_PULL_KIP, jacking_force=FINAL_PULL_KIP,
+                soffit_in=soffit, offset_in=off, x_in=off, y_in=soffit,
+                notes=f"POURS 3 & 4 end section ROW {row}: straight strand on 2\" grid.",
                 page=2,
             ))
             n += 1
     draped_rows = (
-        (18.0, 2.0),
-        (22.0, 4.0),
-        (26.0, 6.0),
-        (30.0, 8.0),
+        (3, 18.0, 6.0, [-1.0, 1.0]),
+        (4, 22.0, 4.0, [-3.0, -1.0, 1.0, 3.0]),
+        (5, 26.0, 2.0, [-1.0, 1.0]),
     )
-    for end_y, hold_y in draped_rows:
-        for off in (-2.0, 2.0):
+    for row, end_y, hold_y, offsets in draped_rows:
+        for col, off in enumerate(offsets, start=1):
             strands.append(StrandItem(
                 number=n,
-                size="0.5in",
+                row=row,
+                column=col,
+                size='0.5in oversize',
                 detensioning="draped",
                 draped=True,
-                area_in2=0.153,
-                jacking_kip=31.0,
+                area_in2=STRAND_AREA_IN2,
+                jacking_kip=FINAL_PULL_KIP,
+                jacking_force=FINAL_PULL_KIP,
                 soffit_in=hold_y,
                 hold_down_y_in=hold_y,
                 drape_peak_in=end_y,
@@ -107,7 +107,7 @@ def build_l25390_spec(beam_id=None, job_id=None, pour_id=None, blueprint_id=None
                 offset_in=off,
                 x_in=off,
                 hold_down_stations_ft=[hd1, hd2],
-                notes="Harped / draped. Stressed in draped position. H-56-S hold-downs at 29'-4\" and 44'-0\" ME.",
+                notes=f"POURS 3 & 4 DRAPED STRANDS ROW {row}: end elevation {end_y}\"; depressed to {hold_y}\" at H-56-S hold-downs.",
                 page=2,
             ))
             n += 1
@@ -283,12 +283,12 @@ def build_l25390_spec(beam_id=None, job_id=None, pour_id=None, blueprint_id=None
             twin_type="i_beam",
             length_ft=length,
             depth_in=DEPTH_IN,
-            width_in=18.0,
-            top_flange_width_in=12.0,
+            width_in=BOTTOM_FLANGE_WIDTH_IN,
+            top_flange_width_in=TOP_FLANGE_WIDTH_IN,
             top_flange_thick_in=6.0,
-            bot_flange_width_in=18.0,
+            bot_flange_width_in=BOTTOM_FLANGE_WIDTH_IN,
             bot_flange_thick_in=6.0,
-            web_thick_in=6.0,
+            web_thick_in=WEB_THICK_IN,
             product_name=PRODUCT_NAME,
         ),
         marked_end_id=f"{JOB_NUMBER} / {beam_mark} / ME",
@@ -300,8 +300,10 @@ def build_l25390_spec(beam_id=None, job_id=None, pour_id=None, blueprint_id=None
         notes=[
             f"Larue County KY 210 over Fork of Nolin River — Contract {CONTRACT_ID} (job {JOB_NUMBER}).",
             "Plan item 08632 PRECAST PC I BEAM TYPE 2, 733 LF (10 girders @ 73'-4\", two-stage part-width).",
-            "Strands: 20 – ½\" Ø 270k low-relaxation (AASHTO M203). 12 straight in bottom flange + 8 draped in web.",
-            "End view: straight at 2\"/4\" soffit on a 2\" grid (±1,3,5\"); draped at ±2\" (web) rising to 18/22/26/30\".",
+            "Shop drawing title: POURS 3 & 4 (SPANS 1 & 3).",
+            "Strands: 20 – ½\" Ø 270 ksi low-relax oversize (AASHTO M203 Grade 270), As=0.167 in², final pull 33,817 lb.",
+            "End view: ROW 1 = 8 at 2\" soffit, ROW 2 = 4 at 4\" soffit; draped ROWS 3/4/5 = 2/4/2 at 18\"/22\"/26\".",
+            "Bottom row uses 7 SPA @ 2\" with 2\" edge distances inside the 1'-6\" strand grid; bottom flange overall is 2'-3\".",
             "Draped strands stressed in the draped position. Hold-downs: Dayton/Richmond H-56-S at 29'-4\" and 44'-0\" ME (qty 2 each).",
             "Detensioning sequence per shop drawing — cut outer straight strands after release; draped remain until hold-downs are released.",
             "Outer 4 straight strands bituminous-debonded 4'-0\" each end; cut and recessed after release.",
@@ -314,6 +316,35 @@ def build_l25390_spec(beam_id=None, job_id=None, pour_id=None, blueprint_id=None
             "As-cast sides / soffit",
             "KYTC concrete sealer — exterior girders, exterior face and bottom",
         ],
+        strand_spec={
+            "shop_drawing_title": "POURS 3 & 4 (SPANS 1 & 3)",
+            "source_image": "IMG_6545 shop drawing",
+            "diameter_label": '1/2" Ø',
+            "grade_ksi": 270,
+            "strand_type": "low-relax oversize",
+            "area_in2": STRAND_AREA_IN2,
+            "final_pull_lbs": FINAL_PULL_LBS,
+            "final_pull_kip": FINAL_PULL_KIP,
+            "aashto": "AASHTO M203 Grade 270",
+            "grid_spacing_in": 2.0,
+            "edge_distance_in": 2.0,
+            "bottom_strand_grid_width_in": 18.0,
+            "row_counts": [
+                {"row": 1, "count": 8, "kind": "straight", "y_in": 2.0, "offsets_in": [-7, -5, -3, -1, 1, 3, 5, 7]},
+                {"row": 2, "count": 4, "kind": "straight", "y_in": 4.0, "offsets_in": [-3, -1, 1, 3]},
+                {"row": 3, "count": 2, "kind": "draped", "end_y_in": 18.0, "hold_down_y_in": 6.0, "offsets_in": [-1, 1]},
+                {"row": 4, "count": 4, "kind": "draped", "end_y_in": 22.0, "hold_down_y_in": 4.0, "offsets_in": [-3, -1, 1, 3]},
+                {"row": 5, "count": 2, "kind": "draped", "end_y_in": 26.0, "hold_down_y_in": 2.0, "offsets_in": [-1, 1]},
+            ],
+            "dimensions": {
+                "overall_depth_in": DEPTH_IN,
+                "bottom_flange_width_in": BOTTOM_FLANGE_WIDTH_IN,
+                "bottom_strand_grid_width_in": 18.0,
+                "top_flange_width_in": TOP_FLANGE_WIDTH_IN,
+                "web_thickness_in": WEB_THICK_IN,
+            },
+            "pull_sequence_notes": "Print shows sequence groups ROW A/B/C and ROW D/E with odd/even strand numbers 7 5 3 1 2 4 6 8.",
+        },
         status="extracted",
         extractor="l25390_reference",
         extractor_confidence=0.92,

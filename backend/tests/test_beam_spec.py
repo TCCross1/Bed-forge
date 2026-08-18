@@ -32,7 +32,7 @@ def test_l25390_geometry_and_identity():
     assert spec.geometry.twin_type == "i_beam"
     assert abs(spec.geometry.length_ft - LENGTH_FT) < 0.01
     assert spec.geometry.depth_in == 36.0
-    assert spec.geometry.bot_flange_width_in == 18.0
+    assert spec.geometry.bot_flange_width_in == 27.0
     assert spec.geometry.top_flange_width_in == 12.0
     assert spec.geometry.web_thick_in == 6.0
     assert "ME" in spec.marked_end_id

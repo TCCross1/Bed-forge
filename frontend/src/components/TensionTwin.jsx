@@ -1,6 +1,6 @@
 import React, { Suspense, useMemo } from "react";
 import { Canvas } from "@react-three/fiber";
-import { OrbitControls, OrthographicCamera, PerspectiveCamera } from "@react-three/drei";
+import { Line, OrbitControls, OrthographicCamera, PerspectiveCamera } from "@react-three/drei";
 import { MarkedEndMarker, UnmarkedEndMarker, TwinBadge } from "./MarkedEndMarker";
 import * as THREE from "three";
 import {
@@ -67,7 +67,9 @@ function BeamShell({ geo, length, dimmed }) {
 }
 
 function StrandPath({ strand, length, holdDowns, selected, onSelect, showLabel, endView }) {
-  const color = strandTensionColor(strand);
+  const statusColor = strandTensionColor(strand);
+  const pending = !strand.na && strand.measured_elongation == null && strand.measured_elongation_in == null && strand.within_tolerance == null;
+  const color = pending ? (isDraped(strand) ? "#B266FF" : "#FFD166") : statusColor;
   const x = inchesToFt(strand.x_in ?? strand.offset_in);
   const yEnd = inchesToFt(strandEndYIn(strand));
   const points = useMemo(() => {
@@ -195,6 +197,85 @@ function HoldDownStation({ item, selected, onSelect, showLabel, geo }) {
   );
 }
 
+function fmtIn(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return "";
+  if (Math.abs(n % 12) < 0.01 && n >= 12) return `${Math.round(n / 12)}'-0"`;
+  if (n > 12) return `${Math.floor(n / 12)}'-${Math.round(n % 12)}"`;
+  return `${n.toFixed(n % 1 ? 1 : 0)}"`;
+}
+
+function EndDimension({ a, b, label, color = "#73BCFF", tick = "y", labelOffset = [0, 0, 0] }) {
+  const tickVec = tick === "x" ? [0.08, 0, 0] : [0, 0.08, 0];
+  const mid = [(a[0] + b[0]) / 2 + labelOffset[0], (a[1] + b[1]) / 2 + labelOffset[1], (a[2] + b[2]) / 2 + labelOffset[2]];
+  const tickLine = (p, key) => (
+    <Line key={key} points={[[p[0] - tickVec[0], p[1] - tickVec[1], p[2]], [p[0] + tickVec[0], p[1] + tickVec[1], p[2]]]} color={color} lineWidth={1} />
+  );
+  return (
+    <group>
+      <Line points={[a, b]} color={color} lineWidth={1} />
+      {tickLine(a, "a")}
+      {tickLine(b, "b")}
+      <TwinBadge text={label} color={color} compact position={mid} />
+    </group>
+  );
+}
+
+function EndViewAnnotations({ spec, strands }) {
+  const geo = spec.geometry || {};
+  const meta = spec.strand_spec || {};
+  const dims = meta.dimensions || {};
+  const depth = inchesToFt(dims.overall_depth_in || geo.depth_in || 36);
+  const bottomWidth = inchesToFt(dims.bottom_flange_width_in || geo.bot_flange_width_in || geo.width_in || 18);
+  const topWidth = inchesToFt(dims.top_flange_width_in || geo.top_flange_width_in || geo.width_in || 12);
+  const gridWidth = inchesToFt(dims.bottom_strand_grid_width_in || meta.bottom_strand_grid_width_in || 18);
+  const gridSpacing = meta.grid_spacing_in || 2;
+  const edge = meta.edge_distance_in || 2;
+  const row1 = (strands || []).filter((s) => Number(s.row) === 1).sort((a, b) => Number(a.x_in ?? a.offset_in) - Number(b.x_in ?? b.offset_in));
+  const draped = (strands || []).filter((s) => isDraped(s));
+  const drapedTop = draped.reduce((max, s) => Math.max(max, inchesToFt(strandEndYIn(s))), 0);
+  const z = 0.2;
+  return (
+    <group>
+      <EndDimension
+        a={[-bottomWidth / 2, -0.28, z]}
+        b={[bottomWidth / 2, -0.28, z]}
+        label={`BOTTOM FLANGE ${fmtIn(dims.bottom_flange_width_in || geo.bot_flange_width_in || geo.width_in)}`}
+        tick="y"
+      />
+      <EndDimension
+        a={[-gridWidth / 2, -0.08, z]}
+        b={[gridWidth / 2, -0.08, z]}
+        label={`${Math.max(row1.length - 1, 0)} SPA @ ${fmtIn(gridSpacing)} = ${fmtIn((row1.length - 1) * gridSpacing)}`}
+        color="#FFD166"
+        tick="y"
+      />
+      <TwinBadge text={`${fmtIn(edge)} EDGE`} color="#FFD166" compact position={[-gridWidth / 2 - inchesToFt(edge) / 2, 0.12, z]} />
+      <TwinBadge text={`${fmtIn(edge)} EDGE`} color="#FFD166" compact position={[gridWidth / 2 + inchesToFt(edge) / 2, 0.12, z]} />
+      <EndDimension
+        a={[-bottomWidth / 2 - 0.34, 0, z]}
+        b={[-bottomWidth / 2 - 0.34, depth, z]}
+        label={`DEPTH ${fmtIn(dims.overall_depth_in || geo.depth_in)}`}
+        color="#9AD0FF"
+        tick="x"
+      />
+      <EndDimension
+        a={[-topWidth / 2, depth + 0.18, z]}
+        b={[topWidth / 2, depth + 0.18, z]}
+        label={`TOP ${fmtIn(dims.top_flange_width_in || geo.top_flange_width_in)}`}
+        color="#9AD0FF"
+        tick="y"
+      />
+      {draped.length > 0 && (
+        <>
+          <TwinBadge text="DRAPED STRANDS" color="#B266FF" compact position={[topWidth * 0.72, Math.max(drapedTop, depth * 0.58), z]} />
+          <Line points={[[topWidth * 0.52, Math.max(drapedTop, depth * 0.58) - 0.08, z], [0.08, drapedTop || depth * 0.62, z]]} color="#B266FF" lineWidth={1} />
+        </>
+      )}
+    </group>
+  );
+}
+
 function Scene({ spec, strands, holdDowns, view, selected, onSelect }) {
   const geo = spec.geometry;
   const length = Number(geo.length_ft) || 73;
@@ -215,6 +296,7 @@ function Scene({ spec, strands, holdDowns, view, selected, onSelect }) {
           endView={endView}
         />
       ))}
+      {endView && <EndViewAnnotations spec={spec} strands={strands} />}
       {!endView && holdDowns.map((item) => (
         <HoldDownStation
           key={item.id}

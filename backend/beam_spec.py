@@ -202,6 +202,7 @@ class BeamSpec(BaseModel):
     stirrup_zones: List[StirrupZone] = Field(default_factory=list)
     bill_of_materials: List[BillItem] = Field(default_factory=list)
     notes: List[str] = Field(default_factory=list)
+    strand_spec: Dict[str, Any] = Field(default_factory=dict)
     tolerances: Dict[str, float] = Field(default_factory=lambda: dict(DEFAULT_TOLERANCES_IN))
     special_finishes: List[str] = Field(default_factory=list)
     status: str = "extracted"  # extracted | reviewed | locked

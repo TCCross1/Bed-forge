@@ -234,6 +234,7 @@ async def seed_l25390():
                 "hold_downs": dumped["hold_downs"],
                 "hardware": dumped["hardware"],
                 "notes": dumped["notes"],
+                "strand_spec": dumped.get("strand_spec", {}),
                 "geometry": dumped["geometry"],
                 "review_notes": dumped["review_notes"],
                 "beam_id": beam_id,
@@ -465,4 +466,3 @@ async def seed_beam_qr_tokens():
             logger.info("backfilled beam QR tokens count=%s", len(missing))
     except Exception:
         logger.exception("seed_beam_qr_tokens failed")
-
