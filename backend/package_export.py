@@ -1,228 +1,446 @@
-"""DOT / owner pour packet — branded PDF + Excel workbook."""
 import io
-import logging
 from datetime import datetime, timezone
-from typing import Optional
 
-from openpyxl import Workbook
-from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+from reportlab.graphics.barcode import qr
+from reportlab.graphics.shapes import Drawing, Rect, String
+from reportlab.lib import colors
+from reportlab.lib.enums import TA_CENTER, TA_LEFT
+from reportlab.lib.pagesizes import letter
+from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+from reportlab.lib.units import inch
+from reportlab.pdfgen import canvas as pdfcanvas
+from reportlab.platypus import PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
-logger = logging.getLogger(__name__)
+BRAND = "PRESTRESS SERVICES INDUSTRIES LLC"
+FOOTER = "BedForge"
 
-HEADER_FILL = PatternFill(start_color="12151C", end_color="12151C", fill_type="solid")
-HEADER_FONT = Font(bold=True, color="FFFFFF", size=11, name="Arial")
-TITLE_FONT = Font(bold=True, size=16, name="Arial")
-THIN = Side(style="thin", color="999999")
-BORDER = Border(left=THIN, right=THIN, top=THIN, bottom=THIN)
+styles = getSampleStyleSheet()
+styles.add(ParagraphStyle(name="BrandTitle", fontName="Helvetica-Bold", fontSize=24, leading=28, textColor=colors.HexColor("#111827"), alignment=TA_LEFT))
+styles.add(ParagraphStyle(name="BrandSubTitle", fontName="Helvetica-Bold", fontSize=13, leading=16, textColor=colors.HexColor("#0F172A"), alignment=TA_LEFT))
+styles.add(ParagraphStyle(name="PackageTitle", fontName="Helvetica-Bold", fontSize=18, leading=22, textColor=colors.HexColor("#0F172A"), alignment=TA_LEFT))
+styles.add(ParagraphStyle(name="CoverNote", fontName="Helvetica", fontSize=9, leading=12, textColor=colors.HexColor("#475569"), alignment=TA_LEFT))
+styles.add(ParagraphStyle(name="SectionTitle", fontName="Helvetica-Bold", fontSize=11.5, leading=15, textColor=colors.HexColor("#0F172A"), spaceBefore=7, spaceAfter=5))
+styles.add(ParagraphStyle(name="BodyMono", fontName="Courier", fontSize=8.5, leading=11, textColor=colors.HexColor("#0F172A")))
+styles.add(ParagraphStyle(name="SmallLabel", fontName="Helvetica-Bold", fontSize=8, leading=10, textColor=colors.HexColor("#475569")))
+styles.add(ParagraphStyle(name="QrCaption", fontName="Helvetica-Bold", fontSize=8.5, leading=10, textColor=colors.HexColor("#0F172A"), alignment=TA_CENTER))
 
 
-def _stamp() -> str:
+def safe_join(values):
+    items = [str(item) for item in values if item]
+    return ", ".join(items) if items else "—"
+
+
+def clean_text(value):
+    if value in (None, ""):
+        return "—"
+    return str(value)
+
+
+def doc_stamp():
     return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
 
+def package_title(package_type):
+    return {
+        "pour_complete": "Pour Complete State QC Package",
+        "single_beam": "Single Beam State QC Package",
+        "full_job": "Full Job State QC Package",
+    }.get(package_type, "State QC Package")
+
+
+def package_scope(package_type, job, pour, beams):
+    if package_type == "single_beam":
+        beam = beams[0] if beams else {}
+        return f"Single beam · {beam.get('mark', '—')}"
+    if package_type == "full_job":
+        return f"Full job · {job.get('job_number', '—')}"
+    return f"Pour complete · {pour.get('pour_number', '—')}"
+
+
+def job_qr_payload(package_type, job, pour, pours, beds, beams):
+    bed_text = safe_join(f"Bed {bed.get('bed_number')}" for bed in beds if bed.get("bed_number") is not None)
+    beam_marks = safe_join(beam.get("mark") for beam in beams)
+    pour_text = safe_join(pour.get("pour_number") for pour in pours)
+    return "\n".join([
+        f"Package: {package_title(package_type)}",
+        f"Scope: {package_scope(package_type, job, pour, beams)}",
+        f"Job: {job.get('job_number', '—')} · {job.get('name', '—')}",
+        f"Customer: {job.get('customer', '—')}",
+        f"DOT Spec: {job.get('state_spec', '—')}",
+        f"Pours: {pour_text}",
+        f"Beds: {bed_text}",
+        f"Beams: {beam_marks}",
+    ])
+
+
+def qr_block(payload):
+    widget = qr.QrCodeWidget(payload)
+    size = 1.3 * inch
+    widget.x = 0
+    widget.y = 16
+    widget.barWidth = size
+    widget.barHeight = size
+    drawing = Drawing(size, size + 16)
+    drawing.add(Rect(0, 16, size, size, strokeColor=colors.HexColor("#0F172A"), fillColor=colors.white, strokeWidth=0.8))
+    drawing.add(widget)
+    drawing.add(String(size / 2, 5, "JOB QR", fontName="Helvetica-Bold", fontSize=8.5, textAnchor="middle", fillColor=colors.HexColor("#0F172A")))
+    return drawing
+
+
+def kv_table(rows, widths=(1.75 * inch, 4.85 * inch)):
+    data = [[Paragraph(f"<b>{label}</b>", styles["BodyText"]), Paragraph(clean_text(value), styles["BodyText"])] for label, value in rows]
+    table = Table(data, colWidths=list(widths), hAlign="LEFT")
+    table.setStyle(TableStyle([
+        ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#CBD5E1")),
+        ("INNERGRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#E2E8F0")),
+        ("BACKGROUND", (0, 0), (0, -1), colors.HexColor("#F8FAFC")),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 6),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+        ("TOPPADDING", (0, 0), (-1, -1), 5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+    ]))
+    return table
+
+
+def grid_table(headers, rows, widths=None):
+    data = [headers] + rows
+    table = Table(data, colWidths=widths, repeatRows=1, hAlign="LEFT")
+    style = [
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0F172A")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, -1), 8),
+        ("LEADING", (0, 0), (-1, -1), 10),
+        ("GRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#CBD5E1")),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 5),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 5),
+        ("TOPPADDING", (0, 0), (-1, -1), 4),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+    ]
+    for idx in range(1, len(data)):
+        style.append(("BACKGROUND", (0, idx), (-1, idx), colors.HexColor("#F8FAFC" if idx % 2 else "#FFFFFF")))
+    table.setStyle(TableStyle(style))
+    return table
+
+
+def signoff_table(rows):
+    table = Table(rows, colWidths=[2.0 * inch, 2.45 * inch, 0.95 * inch, 1.1 * inch], hAlign="LEFT")
+    table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#E2E8F0")),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, -1), 8),
+        ("LEADING", (0, 0), (-1, -1), 10),
+        ("GRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#94A3B8")),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 5),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 5),
+        ("TOPPADDING", (0, 0), (-1, -1), 8),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 12),
+    ]))
+    return table
+
+
+def add_section(story, number, title, element):
+    story.append(Paragraph(f"{number}. {title}", styles["SectionTitle"]))
+    story.append(element)
+    story.append(Spacer(1, 0.16 * inch))
+
+
+def cover_sections(batch_records):
+    sections = [
+        ["1", "Beams", "Beam schedule, bed positions, QC status, and traceability"],
+        ["2", "Batch / environment", "Ticket, mix, weather, concrete temperature, and batch detail"],
+        ["3", "QIR", "Inspection sections, results, inspector, and notes"],
+        ["4", "Tension", "Bed tension and elongation acceptance"],
+        ["5", "Strength / camber", "Release strength and 3-point camber"],
+        ["6", "Finish", "Finish review and anomaly summary"],
+        ["7", "Pre-delivery sign-off", "QC Tech, Production Supervisor, and Quality Manager approvals"],
+        ["8", "Strand traceability", "Beam-to-roll and release tag traceability"],
+        ["9", "NCR summary", "Linked NCR status and photo references"],
+    ]
+    if any(record.get("ingredients") for record in batch_records):
+        sections[1][2] = "Ticket, mix, weather, concrete temperature, and ingredient checks"
+    return sections
+
+
+def draw_cover_banner(package_type, job, pour, pours, beds, beams):
+    qr_draw = qr_block(job_qr_payload(package_type, job, pour, pours, beds, beams))
+    brand_block = [
+        Paragraph(BRAND, styles["BrandTitle"]),
+        Spacer(1, 0.04 * inch),
+        Paragraph("Approved model report format", styles["BrandSubTitle"]),
+        Spacer(1, 0.06 * inch),
+        Paragraph(package_title(package_type), styles["PackageTitle"]),
+        Spacer(1, 0.04 * inch),
+        Paragraph("Plant / DOT-ready production record package", styles["CoverNote"]),
+    ]
+    table = Table([[brand_block, qr_draw]], colWidths=[5.0 * inch, 1.45 * inch], hAlign="LEFT")
+    table.setStyle(TableStyle([
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("BOX", (0, 0), (-1, -1), 0.6, colors.HexColor("#CBD5E1")),
+        ("BACKGROUND", (0, 0), (0, 0), colors.HexColor("#F8FAFC")),
+        ("LEFTPADDING", (0, 0), (-1, -1), 10),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 10),
+        ("TOPPADDING", (0, 0), (-1, -1), 10),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 10),
+    ]))
+    return table
+
+
+class PackageCanvas(pdfcanvas.Canvas):
+    def __init__(self, *args, left_margin=0.55 * inch, right_margin=0.55 * inch, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.left_margin = left_margin
+        self.right_margin = right_margin
+        self._saved_page_states = []
+
+    def showPage(self):
+        self._saved_page_states.append(dict(self.__dict__))
+        self._startPage()
+
+    def save(self):
+        total_pages = len(self._saved_page_states)
+        for page_number, state in enumerate(self._saved_page_states, start=1):
+            self.__dict__.update(state)
+            self.draw_chrome(page_number, total_pages)
+            super().showPage()
+        super().save()
+
+    def draw_chrome(self, page_number, total_pages):
+        width, height = self._pagesize
+        self.saveState()
+        self.setStrokeColor(colors.HexColor("#CBD5E1"))
+        if page_number > 1:
+            self.line(self.left_margin, height - 0.48 * inch, width - self.right_margin, height - 0.48 * inch)
+            self.setFont("Helvetica-Bold", 11)
+            self.setFillColor(colors.HexColor("#0F172A"))
+            self.drawString(self.left_margin, height - 0.34 * inch, BRAND)
+            self.setFont("Helvetica", 7.5)
+            self.drawRightString(width - self.right_margin, height - 0.34 * inch, "State QC production package")
+        self.line(self.left_margin, 0.48 * inch, width - self.right_margin, 0.48 * inch)
+        self.setFont("Helvetica", 7.5)
+        self.setFillColor(colors.HexColor("#475569"))
+        self.drawString(self.left_margin, 0.28 * inch, f"Generated {doc_stamp()}")
+        self.drawRightString(width - self.right_margin, 0.28 * inch, f"Page {page_number} of {total_pages}")
+        if page_number == total_pages:
+            self.setFont("Helvetica", 6.5)
+            self.drawCentredString(width / 2, 0.14 * inch, FOOTER)
+        self.restoreState()
+
+
+def build_package_pdf(context: dict) -> bytes:
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buf,
+        pagesize=letter,
+        leftMargin=0.55 * inch,
+        rightMargin=0.55 * inch,
+        topMargin=0.76 * inch,
+        bottomMargin=0.62 * inch,
+        pageCompression=0,
+    )
+    story = []
+
+    package_type = context.get("package_type", "pour_complete")
+    job = context.get("job", {})
+    pour = context.get("pour", {})
+    pours = context.get("pours", [])
+    if not pours and pour:
+        pours = [pour]
+    beds = context.get("beds", [])
+    beams = context.get("beams", [])
+    inspections = context.get("inspections", [])
+    tension_reports = context.get("tension_reports", [])
+    camber_readings = context.get("camber_readings", [])
+    batch_records = context.get("batch_records", [])
+    if not batch_records and context.get("batch_record"):
+        batch_records = [context["batch_record"]]
+    ncrs = context.get("ncrs", [])
+    anomalies = context.get("anomalies", [])
+
+    inspectors = sorted({item.get("inspector") for item in inspections if item.get("inspector")})
+    bed_labels = [f"Bed {bed.get('bed_number')}" for bed in beds if bed.get("bed_number") is not None]
+    beam_ids = {beam.get("id") for beam in beams}
+
+    story.append(draw_cover_banner(package_type, job, pour, pours, beds, beams))
+    story.append(Spacer(1, 0.16 * inch))
+    story.append(kv_table([
+        ("Scope", package_scope(package_type, job, pour, beams)),
+        ("Job", f"{job.get('job_number', '—')} · {job.get('name', '—')}"),
+        ("Customer", job.get("customer", "—")),
+        ("DOT / Spec", job.get("state_spec", "—")),
+        ("Pour" if len(pours) == 1 else "Pours", safe_join(item.get("pour_number") for item in pours)),
+        ("Beds", safe_join(bed_labels)),
+        ("Beam count", len(beams)),
+        ("Beam marks", safe_join(beam.get("mark") for beam in beams)),
+        ("QC personnel", safe_join(inspectors)),
+        ("Generated UTC", doc_stamp()),
+    ]))
+    story.append(Spacer(1, 0.16 * inch))
+
+    add_section(
+        story,
+        "COVER",
+        "Package Contents",
+        grid_table(["Ref", "Section", "Purpose"], cover_sections(batch_records), widths=[0.55 * inch, 1.95 * inch, 4.6 * inch]),
+    )
+    add_section(
+        story,
+        "COVER",
+        "Routing Sign-Off",
+        signoff_table([
+            ["Role", "Name / Signature", "Date", "Status"],
+            ["QC Tech", "____________________________", "____________", "Ready to release"],
+            ["Production Supervisor", "____________________________", "____________", "Plant review"],
+            ["Quality Manager", "____________________________", "____________", "Final approval"],
+        ]),
+    )
+
+    story.append(PageBreak())
+
+    beam_rows = [
+        [
+            beam.get("mark", "—"),
+            beam.get("product_type", {}).get("name", beam.get("twin_type", "—")),
+            next((bed.get("bed_number") for bed in beds if bed.get("id") == beam.get("bed_id")), "—"),
+            beam.get("position_on_bed", "—"),
+            beam.get("length_ft", "—"),
+            (
+                f"LOCKED R{beam.get('blueprint_source', {}).get('revision_id', '')[:8]}"
+                if beam.get("blueprint_source", {}).get("status") == "locked"
+                else beam.get("blueprint_source", {}).get("status", "legacy_seed").upper()
+            ),
+            beam.get("qc_state", "—"),
+            safe_join(beam.get("traceability", {}).get("strand_rolls", [])),
+        ]
+        for beam in beams
+    ]
+    add_section(story, 1, "Beams", grid_table(["Beam", "Product", "Bed", "Pos", "Length (ft)", "Blueprint", "QC", "Strand Rolls"], beam_rows or [["—", "—", "—", "—", "—", "—", "—", "—"]], widths=[0.75 * inch, 1.85 * inch, 0.45 * inch, 0.45 * inch, 0.75 * inch, 1.15 * inch, 0.65 * inch, 1.65 * inch]))
+
+    pours_by_id = {item.get("id"): item for item in pours}
+    batch_rows = [
+        [
+            pours_by_id.get(record.get("pour_id"), {}).get("pour_number", "—"),
+            record.get("ticket_number", "—"),
+            record.get("mix_design", pours_by_id.get(record.get("pour_id"), {}).get("concrete_mix", "—")),
+            record.get("ambient_temp_f", "—"),
+            record.get("concrete_temp_f", "—"),
+            record.get("humidity_pct", "—"),
+            record.get("wind_mph", "—"),
+            record.get("weather", "—"),
+        ]
+        for record in batch_records
+    ]
+    add_section(story, 2, "Batch / Environment", grid_table(["Pour", "Ticket", "Mix", "Ambient °F", "Concrete °F", "Humidity %", "Wind MPH", "Weather"], batch_rows or [["—"] * 8], widths=[0.6 * inch, 0.8 * inch, 1.35 * inch, 0.7 * inch, 0.8 * inch, 0.7 * inch, 0.65 * inch, 1.0 * inch]))
+
+    ingredient_rows = [
+        [
+            pours_by_id.get(record.get("pour_id"), {}).get("pour_number", "—"),
+            record.get("ticket_number", "—"),
+            item.get("name", "—"),
+            item.get("target_lb", item.get("target", "—")),
+            item.get("actual_lb", item.get("actual", "—")),
+        ]
+        for record in batch_records
+        for item in record.get("ingredients", [])
+    ]
+    if ingredient_rows:
+        add_section(story, "2A", "Batch Ingredient Check", grid_table(["Pour", "Ticket", "Ingredient", "Target (lb)", "Actual (lb)"], ingredient_rows, widths=[0.75 * inch, 0.9 * inch, 2.8 * inch, 1.0 * inch, 1.0 * inch]))
+
+    qir_rows = [[next((beam.get("mark") for beam in beams if beam.get("id") == item.get("beam_id")), item.get("beam_id", "—")), item.get("section", "—"), item.get("status", "—"), item.get("inspector", "—"), item.get("notes", "—")] for item in inspections]
+    add_section(story, 3, "QIR", grid_table(["Beam", "Section", "Status", "Inspector", "Notes"], qir_rows or [["—", "—", "—", "—", "—"]], widths=[1.0 * inch, 1.2 * inch, 0.85 * inch, 1.2 * inch, 2.7 * inch]))
+
+    tension_rows = [[item.get("bed_number", "—"), item.get("strand_size", "—"), item.get("theoretical_elongation_in", "—"), item.get("measured_elongation_in", "—"), item.get("variance_pct", "—"), "PASS" if item.get("within_tolerance") else "FAIL"] for item in tension_reports]
+    add_section(story, 4, "Tension", grid_table(["Bed", "Strand", "Theo. In", "Measured In", "Variance %", "Result"], tension_rows or [["—", "—", "—", "—", "—", "—"]], widths=[0.75 * inch, 1.0 * inch, 1.0 * inch, 1.15 * inch, 1.0 * inch, 0.85 * inch]))
+
+    camber_rows = []
+    for item in camber_readings:
+        mid = item.get("measured_camber_in", 0)
+        camber_rows.append([
+            item.get("beam_mark", item.get("beam_id", "—")),
+            round(mid * 0.4, 2),
+            round(mid, 2),
+            round(mid * 0.45, 2),
+            item.get("release_strength_psi", "—"),
+            item.get("required_strength_psi", "—"),
+        ])
+    add_section(story, 5, "Strength / Camber", grid_table(["Beam", "End A", "Mid", "End B", "Release PSI", "Req. PSI"], camber_rows or [["—", "—", "—", "—", "—", "—"]], widths=[1.1 * inch, 0.9 * inch, 0.85 * inch, 0.9 * inch, 1.15 * inch, 1.0 * inch]))
+
+    finish_rows = [[next((beam.get("mark") for beam in beams if beam.get("id") == item.get("beam_id")), item.get("beam_id", "—")), item.get("status", "—"), item.get("notes", "—")] for item in inspections if item.get("section") in ("concrete", "finish")]
+    add_section(story, 6, "Finish", grid_table(["Beam", "Status", "Notes"], finish_rows or [["—", "—", "—"]], widths=[1.2 * inch, 0.9 * inch, 4.5 * inch]))
+
+    anomaly_rows = [[next((beam.get("mark") for beam in beams if beam.get("id") == item.get("beam_id")), item.get("beam_id", "—")), item.get("type", "—"), item.get("severity", "—"), item.get("length_in", "—"), item.get("note", "—")] for item in anomalies if item.get("beam_id") in beam_ids]
+    add_section(story, "6A", "Finish Anomaly Summary", grid_table(["Beam", "Type", "Severity", "Length (in)", "Note"], anomaly_rows or [["—", "—", "—", "—", "—"]], widths=[1.1 * inch, 1.0 * inch, 0.9 * inch, 0.9 * inch, 2.9 * inch]))
+
+    release_rows = [["QC Tech", "____________________________", "____________", safe_join(sorted({item.get('inspector') for item in inspections if item.get('section') == 'pre_delivery' and item.get('inspector')})) or "Assigned at release"], ["Production Supervisor", "____________________________", "____________", "Plant release confirmation"], ["Quality Manager", "____________________________", "____________", "Final shipment authorization"]]
+    add_section(story, 7, "Pre-Delivery Sign-Off", signoff_table([["Role", "Name / Signature", "Date", "Notes"]] + release_rows))
+
+    trace_rows = [[beam.get("mark", "—"), safe_join(beam.get("traceability", {}).get("strand_rolls", [])), beam.get("traceability", {}).get("release_tag", "—")] for beam in beams]
+    add_section(story, 8, "Strand Traceability", grid_table(["Beam", "Strand Rolls", "Release Tag"], trace_rows or [["—", "—", "—"]], widths=[1.0 * inch, 4.4 * inch, 1.2 * inch]))
+
+    ncr_rows = [[item.get("code", "—"), item.get("status", "—"), item.get("title", "—"), safe_join(item.get("linked_photo_urls", []))] for item in ncrs]
+    add_section(story, 9, "NCR Summary", grid_table(["NCR", "Status", "Title", "Photos"], ncr_rows or [["—", "—", "—", "—"]], widths=[1.0 * inch, 1.0 * inch, 2.2 * inch, 2.8 * inch]))
+
+    doc.build(
+        story,
+        canvasmaker=lambda *args, **kwargs: PackageCanvas(*args, left_margin=doc.leftMargin, right_margin=doc.rightMargin, **kwargs),
+    )
+    buf.seek(0)
+    return buf.read()
+
+
 def build_package_xlsx(ctx: dict) -> bytes:
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Border, Side, Alignment
+
     wb = Workbook()
+    header_font = Font(bold=True, color="FFFFFF", name="Arial")
+    title_font = Font(bold=True, size=16, name="Arial")
+    fill = PatternFill("solid", fgColor="0F1218")
+    border = Border(left=Side(style="thin", color="D0D7DE"), right=Side(style="thin", color="D0D7DE"), top=Side(style="thin", color="D0D7DE"), bottom=Side(style="thin", color="D0D7DE"))
     cover = wb.active
     cover.title = "Cover"
-    company = (ctx.get("company") or {}).get("company_name") or "PRESTRESS SERVICES INDUSTRIES LLC"
+    company = (ctx.get("company") or {}).get("company_name") or BRAND
     pour = ctx.get("pour") or {}
     job = ctx.get("job") or {}
+    beams = ctx.get("beams") or []
     cover["A1"] = company
-    cover["A1"].font = TITLE_FONT
+    cover["A1"].font = title_font
     cover["A2"] = "DOT / OWNER QUALITY PACKAGE"
-    cover["A2"].font = Font(bold=True, size=13, name="Arial")
-    cover["A4"] = "Job"
-    cover["B4"] = job.get("job_number") or ""
-    cover["A5"] = "Customer"
-    cover["B5"] = job.get("customer") or ""
-    cover["A6"] = "Pour"
-    cover["B6"] = pour.get("pour_number") or ""
-    cover["A7"] = "Pour date"
-    cover["B7"] = pour.get("pour_date") or ""
-    cover["A8"] = "Beams"
-    cover["B8"] = ", ".join(ctx.get("beam_marks") or [])
-    cover["A9"] = "Generated"
-    cover["B9"] = _stamp()
+    rows = [
+        ("Job", job.get("job_number") or ""),
+        ("Customer", job.get("customer") or ""),
+        ("Pour", pour.get("pour_number") or ""),
+        ("Pour date", pour.get("pour_date") or ""),
+        ("Beams", safe_join(beam.get("mark") for beam in beams) if beams else safe_join(ctx.get("beam_marks") or [])),
+        ("Generated", doc_stamp()),
+    ]
+    for idx, (label, value) in enumerate(rows, 4):
+        cover.cell(idx, 1, label)
+        cover.cell(idx, 2, value)
 
     def sheet(name, headers, rows):
         ws = wb.create_sheet(name[:31])
         for i, h in enumerate(headers, 1):
             c = ws.cell(row=1, column=i, value=h)
-            c.font = HEADER_FONT
-            c.fill = HEADER_FILL
+            c.font = header_font
+            c.fill = fill
             c.alignment = Alignment(horizontal="center")
-            c.border = BORDER
+            c.border = border
         for r, row in enumerate(rows, 2):
             for i, val in enumerate(row, 1):
-                cell = ws.cell(row=r, column=i, value=val)
-                cell.border = BORDER
+                ws.cell(row=r, column=i, value=val).border = border
         for col in "ABCDEFGHIJK":
             ws.column_dimensions[col].width = 18
 
-    sheet("QIR", ["Beam", "Section", "Status", "Inspector", "Date"], [
-        [i.get("beam_mark"), i.get("section"), i.get("status"), i.get("inspector"), str(i.get("created_at") or "")[:10]]
-        for i in ctx.get("inspections") or []
-    ])
-    sheet("Tension", ["Bed", "Jack", "Elongation", "Within", "By"], [
-        [t.get("bed_number"), t.get("jack_id") or t.get("jack"), t.get("measured_elongation_in") or t.get("elongation_in"),
-         "YES" if t.get("within_tolerance") else "NO", t.get("created_by") or t.get("inspector") or ""]
-        for t in ctx.get("tension_reports") or []
-    ])
-    sheet("Strength_Camber", ["Beam", "Required psi", "Release psi", "Midspan in", "Date"], [
-        [c.get("beam_mark"), c.get("required_strength_psi"), c.get("release_strength_psi"), c.get("midspan_in"), str(c.get("created_at") or "")[:10]]
-        for c in ctx.get("camber_readings") or []
-    ])
-    sheet("Cylinders", ["Job", "Copy", "Crush psi", "Required", "Release OK", "Date"], [
-        [c.get("job_number"), c.get("cylinder_copy"), c.get("crush_psi"), c.get("required_psi"),
-         "YES" if c.get("release_ok") else ("NO" if c.get("crush_psi") else ""), c.get("crush_date") or ""]
-        for c in ctx.get("cylinders") or []
-    ])
-    sheet("Finish", ["Beam", "Status", "Inspector", "Date"], [
-        [f.get("beam_mark"), f.get("status"), f.get("inspector") or f.get("created_by"), str(f.get("created_at") or "")[:10]]
-        for f in ctx.get("finish_sheets") or []
-    ])
-    sheet("Pre_Delivery", ["Beam", "Truck", "Destination", "Released", "Date"], [
-        [p.get("beam_mark"), p.get("truck_number"), p.get("destination"), "YES" if p.get("released") else "NO", str(p.get("created_at") or "")[:10]]
-        for p in ctx.get("pre_delivery") or []
-    ])
-    sheet("Strand_Heat", ["Heat", "Reel", "Grade", "Status"], [
-        [r.get("heat_number"), r.get("reel_number"), r.get("strand_grade"), r.get("status")]
-        for r in ctx.get("strand_rolls") or []
-    ])
-    sheet("Drawings", ["File", "Beam", "Pages"], [
-        [d.get("filename") or d.get("original_name"), d.get("beam_mark"), d.get("page_count")]
-        for d in ctx.get("drawings") or []
-    ])
+    sheet("QIR", ["Beam", "Section", "Status", "Inspector", "Date"], [[i.get("beam_mark") or i.get("beam_id"), i.get("section"), i.get("status"), i.get("inspector"), str(i.get("created_at") or "")[:10]] for i in ctx.get("inspections") or []])
+    sheet("Tension", ["Bed", "Jack", "Elongation", "Within", "By"], [[t.get("bed_number"), t.get("jack_id") or t.get("jack"), t.get("measured_elongation_in") or t.get("elongation_in"), "YES" if t.get("within_tolerance") else "NO", t.get("created_by") or t.get("inspector") or ""] for t in ctx.get("tension_reports") or []])
+    sheet("Strength_Camber", ["Beam", "Required psi", "Release psi", "Measured", "Date"], [[c.get("beam_mark") or c.get("beam_id"), c.get("required_strength_psi"), c.get("release_strength_psi"), c.get("measured_camber_in") or c.get("midspan_in"), str(c.get("created_at") or c.get("reading_date") or "")[:10]] for c in ctx.get("camber_readings") or []])
+    sheet("Batch", ["Ticket", "Mix", "Ambient", "Concrete", "Wind", "Date"], [[b.get("ticket_number"), b.get("mix_design") or b.get("mix_code"), (b.get("environment") or {}).get("ambient_f") or b.get("ambient_temp_f"), (b.get("environment") or {}).get("mix_temp_f") or b.get("concrete_temp_f"), (b.get("environment") or {}).get("wind_mph") or b.get("wind_mph"), str(b.get("created_at") or b.get("batched_at") or "")[:10]] for b in ctx.get("batch_records") or ([ctx.get("batch_record")] if ctx.get("batch_record") else [])])
+    sheet("NCR", ["Code", "Title", "Status", "Severity", "Owner"], [[n.get("code"), n.get("title") or n.get("description"), n.get("status"), n.get("severity"), n.get("owner") or n.get("assigned_to")] for n in ctx.get("ncrs") or []])
     buf = io.BytesIO()
     wb.save(buf)
-    buf.seek(0)
-    return buf.read()
-
-
-def build_package_pdf(ctx: dict, logo_path: Optional[str] = None) -> bytes:
-    try:
-        from reportlab.lib.pagesizes import letter
-        from reportlab.lib.units import inch
-        from reportlab.pdfgen import canvas
-        from reportlab.lib.utils import ImageReader
-    except ImportError as exc:
-        logger.exception("reportlab missing — cannot build owner package")
-        raise RuntimeError("PDF engine is not installed") from exc
-
-    company = ctx.get("company") or {}
-    header = company.get("tag_header") or company.get("company_name") or "PRESTRESS SERVICES INDUSTRIES LLC"
-    job = ctx.get("job") or {}
-    pour = ctx.get("pour") or {}
-    buf = io.BytesIO()
-    page_w, page_h = letter
-    c = canvas.Canvas(buf, pagesize=letter)
-
-    def footer(page_no):
-        c.setFont("Helvetica", 8)
-        c.setFillColorRGB(0.45, 0.48, 0.55)
-        c.drawString(0.7 * inch, 0.45 * inch, f"{header}  ·  DOT / Owner package  ·  {page_no}")
-        c.drawRightString(page_w - 0.7 * inch, 0.45 * inch, _stamp())
-
-    def new_page(title):
-        c.showPage()
-        banner(title)
-
-    def banner(title):
-        c.setFillColorRGB(0.04, 0.05, 0.06)
-        c.rect(0, page_h - 1.15 * inch, page_w, 1.15 * inch, fill=1, stroke=0)
-        c.setFillColorRGB(0.16, 0.47, 1.0)
-        c.rect(0, page_h - 1.18 * inch, page_w, 0.04 * inch, fill=1, stroke=0)
-        if logo_path:
-            try:
-                img = ImageReader(logo_path)
-                c.drawImage(img, 0.6 * inch, page_h - 1.02 * inch, width=1.1 * inch, height=0.72 * inch, mask="auto", preserveAspectRatio=True, anchor="sw")
-            except Exception:
-                logger.exception("package logo draw failed")
-        c.setFillColorRGB(0.79, 0.64, 0.15)
-        c.setFont("Helvetica-Bold", 9)
-        c.drawString(1.9 * inch if logo_path else 0.7 * inch, page_h - 0.42 * inch, header.upper())
-        c.setFillColorRGB(1, 1, 1)
-        c.setFont("Helvetica-Bold", 16)
-        c.drawString(1.9 * inch if logo_path else 0.7 * inch, page_h - 0.72 * inch, title)
-        c.setFont("Helvetica", 9)
-        c.setFillColorRGB(0.72, 0.75, 0.82)
-        c.drawString(1.9 * inch if logo_path else 0.7 * inch, page_h - 0.95 * inch,
-                     f"Job {job.get('job_number') or '—'}  ·  Pour {pour.get('pour_number') or '—'}  ·  {pour.get('pour_date') or ''}")
-
-    def lines(y, rows, size=10):
-        c.setFont("Helvetica", size)
-        c.setFillColorRGB(0.84, 0.85, 0.89)
-        for row in rows:
-            if y < 0.9 * inch:
-                footer(c.getPageNumber())
-                new_page(c._doc.title if False else "DOT / Owner package (cont.)")
-                y = page_h - 1.5 * inch
-            c.drawString(0.7 * inch, y, str(row)[:110])
-            y -= 14
-        return y
-
-    banner("DOT / OWNER QUALITY PACKAGE")
-    y = page_h - 1.55 * inch
-    y = lines(y, [
-        f"Customer: {job.get('customer') or '—'}",
-        f"Job name: {job.get('name') or '—'}",
-        f"Pour mix: {pour.get('concrete_mix') or '—'}",
-        f"Beams: {', '.join(ctx.get('beam_marks') or []) or '—'}",
-        f"Contents: QIR, Tension, Strength & Camber, Cylinders, Finish, Pre-Delivery, Strand heat, Drawings, Photos",
-        "",
-        "This packet is the plant record for the owner / DOT. Drawings listed are the locked shop set.",
-    ])
-    footer(c.getPageNumber())
-
-    def section(title, rows):
-        c.showPage()
-        banner(title)
-        yy = page_h - 1.5 * inch
-        if not rows:
-            c.setFillColorRGB(0.55, 0.58, 0.65)
-            c.setFont("Helvetica-Oblique", 10)
-            c.drawString(0.7 * inch, yy, "No records in this section for the pour.")
-            footer(c.getPageNumber())
-            return
-        yy = lines(yy, rows, size=9)
-        footer(c.getPageNumber())
-
-    section("1. Quality Inspection Report (QIR)", [
-        f"{i.get('beam_mark') or '—'}  ·  {i.get('section') or ''}  ·  {i.get('status') or ''}  ·  {i.get('inspector') or ''}  ·  {str(i.get('created_at') or '')[:16]}"
-        for i in ctx.get("inspections") or []
-    ])
-    section("2. Tension Report", [
-        f"Bed {t.get('bed_number') or '—'}  ·  elong {t.get('measured_elongation_in') or t.get('elongation_in') or '—'} in  ·  {'IN TOL' if t.get('within_tolerance') else 'CHECK'}  ·  {str(t.get('created_at') or '')[:16]}"
-        for t in ctx.get("tension_reports") or []
-    ])
-    section("3. Strength & Camber", [
-        f"{c.get('beam_mark') or '—'}  ·  req {c.get('required_strength_psi') or '—'} psi  ·  release {c.get('release_strength_psi') or '—'} psi  ·  mid {c.get('midspan_in') or '—'} in"
-        for c in ctx.get("camber_readings") or []
-    ] + [
-        f"CYL {cyl.get('job_number') or ''} copy {cyl.get('cylinder_copy') or ''}  ·  crush {cyl.get('crush_psi') or 'pending'} psi  ·  req {cyl.get('required_psi') or ''}  ·  {'PASS' if cyl.get('release_ok') else ('FAIL' if cyl.get('crush_psi') else 'OPEN')}"
-        for cyl in ctx.get("cylinders") or []
-    ])
-    section("4. Finish Sheet", [
-        f"{f.get('beam_mark') or '—'}  ·  {f.get('status') or ''}  ·  {str(f.get('created_at') or '')[:16]}"
-        for f in ctx.get("finish_sheets") or []
-    ])
-    section("5. Pre-Delivery / Release", [
-        f"{p.get('beam_mark') or '—'}  ·  truck {p.get('truck_number') or '—'}  ·  {p.get('destination') or '—'}  ·  {'RELEASED' if p.get('released') else 'HOLD'}"
-        for p in ctx.get("pre_delivery") or []
-    ])
-    section("6. Strand roll / heat log", [
-        f"HEAT {r.get('heat_number') or '—'}  ·  REEL {r.get('reel_number') or '—'}  ·  {r.get('strand_grade') or ''}  ·  {r.get('status') or ''}"
-        for r in ctx.get("strand_rolls") or []
-    ])
-    section("7. Drawings", [
-        f"{d.get('filename') or d.get('original_name') or 'drawing'}  ·  beam {d.get('beam_mark') or '—'}  ·  {d.get('page_count') or ''} p"
-        for d in ctx.get("drawings") or []
-    ])
-    section("8. Photos / field captures", [
-        f"{p.get('kind') or 'photo'}  ·  {p.get('label') or p.get('filename') or ''}  ·  {p.get('beam_mark') or ''}"
-        for p in ctx.get("photos") or []
-    ] or ["No photos attached. Mill tags and anomalies remain in the beam dossier."])
-
-    c.save()
     buf.seek(0)
     return buf.read()

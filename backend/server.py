@@ -6,7 +6,8 @@ load_dotenv(ROOT_DIR / ".env")
 
 import os
 import logging
-from datetime import datetime, timezone
+from collections import Counter
+from datetime import datetime, timezone, timedelta
 from fastapi import FastAPI, APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, StreamingResponse
 from starlette.middleware.cors import CORSMiddleware
@@ -20,6 +21,7 @@ from models import (
     Inspection, InspectionCreate, TensionReport, TensionReportCreate, TensionCalcInput,
     CamberReading, CamberReadingCreate, Anomaly, AnomalyCreate,
     FinishSheet, FinishSheetCreate, PreDelivery, PreDeliveryCreate,
+    LicenseActivateInput,
 )
 from auth import router as auth_router, get_current_user, seed_admin
 from audit import write_audit, override_active
@@ -28,6 +30,7 @@ from security_core import assert_production_safe, is_production, security_header
 from tension import run_tension_calc, calc_theoretical_elongation, evaluate_tension
 from seed import seed_plant, seed_l25390, seed_bed_assignments, seed_strand_rolls, seed_company, seed_beam_qr_tokens, seed_mix_designs
 from blueprint_routes import router as blueprint_router
+from blueprint_intelligence_routes import router as blueprint_intelligence_router
 from bed_routes import router as bed_router
 from tension_routes import router as tension_router
 from ar_routes import router as ar_router, emit_sync_event
@@ -44,7 +47,9 @@ from batch_routes import router as batch_router
 from ncr_routes import router as ncr_router, open_ncr_from_anomaly
 from ncr import attach_prompt, build_prompt, is_escalated
 from maturity import evaluate_release_gate
+from licensing import activate_license_state, ensure_feature_enabled, load_license_state, require_feature
 import excel_export
+import package_export
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
@@ -56,6 +61,261 @@ api = APIRouter(prefix="/api")
 @api.get("/")
 async def root():
     return {"message": "BedForge QC API", "status": "ok"}
+
+
+
+def _as_float(value, default=0.0):
+    try:
+        if value in (None, ""):
+            return default
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _station_item(item: dict, kind: str = "hardware") -> dict:
+    pos = item.get("position") or {}
+    return {
+        "id": item.get("id") or item.get("name") or kind,
+        "kind": item.get("kind") or kind,
+        "name": item.get("name") or item.get("type_code") or kind.replace("_", " ").title(),
+        "x_ft": _as_float(pos.get("station_ft") if isinstance(pos, dict) else item.get("station_ft")),
+        "offset_in": _as_float(pos.get("offset_in") if isinstance(pos, dict) else item.get("offset_in")),
+        "height_in": _as_float(pos.get("height_from_soffit_in") if isinstance(pos, dict) else item.get("height_from_soffit_in")),
+        "quantity": int(item.get("quantity") or item.get("quantity_at_station") or 1),
+        "notes": item.get("notes") or "",
+    }
+
+
+def blueprint_from_legacy_spec(beam: dict, product_type: dict | None = None, spec: dict | None = None) -> dict:
+    product_type = product_type or {}
+    spec = spec or {}
+    geometry = spec.get("geometry") or {}
+    twin_type = geometry.get("twin_type") or beam.get("twin_type") or product_type.get("category") or "i_beam"
+    length_ft = _as_float(geometry.get("length_ft"), _as_float(beam.get("length_ft"), _as_float(product_type.get("default_length_ft"), 100)))
+    depth = _as_float(geometry.get("depth_in"), _as_float(product_type.get("depth_in"), 36))
+    width = _as_float(geometry.get("width_in"), _as_float(product_type.get("width_in"), 18))
+    cross_section = {
+        "overall_depth_in": depth,
+        "outer_depth_in": depth,
+        "outer_width_in": width,
+        "top_flange_width_in": _as_float(geometry.get("top_flange_width_in"), width),
+        "top_flange_thickness_in": _as_float(geometry.get("top_flange_thick_in"), 6),
+        "bottom_flange_width_in": _as_float(geometry.get("bot_flange_width_in"), width),
+        "bottom_flange_thickness_in": _as_float(geometry.get("bot_flange_thick_in"), 6),
+        "web_thickness_in": _as_float(geometry.get("web_thick_in"), 6),
+        "wall_thickness_in": _as_float(geometry.get("wall_thickness_in"), 6),
+        "void_width_in": _as_float(geometry.get("void_width_in"), max(width - 8, 0)),
+        "void_depth_in": _as_float(geometry.get("void_depth_in"), max(depth - 8, 0)),
+    }
+    strands = spec.get("strands") or []
+    rows = []
+    for strand in strands:
+        row = int(strand.get("row") or 0)
+        while len(rows) <= row:
+            rows.append({"row": len(rows), "count": 0, "height_in": 0, "offsets_in": []})
+        rows[row]["count"] += 1
+        rows[row]["height_in"] = _as_float(strand.get("soffit_in") or strand.get("y_in"), rows[row]["height_in"] or 2)
+        rows[row]["offsets_in"].append(_as_float(strand.get("offset_in") or strand.get("x_in"), 0))
+    if not rows:
+        rows = [{"row": 0, "count": 8, "height_in": 2.5, "offsets_in": [-7, -5, -3, -1, 1, 3, 5, 7]}]
+    hardware = [_station_item(item) for item in spec.get("hardware") or []]
+    by_kind = {}
+    for item in hardware:
+        by_kind.setdefault(item.get("kind", "hardware"), []).append(item)
+    hold_downs = [
+        {
+            "id": item.get("id"),
+            "x_ft": _as_float(item.get("station_from_marked_end")),
+            "height_in": _as_float(item.get("height"), 2.5),
+            "offset_in": _as_float(item.get("offset_in")),
+            "type": item.get("type_spec") or "hold-down",
+            "status": item.get("status") or "pending",
+        }
+        for item in spec.get("hold_downs") or []
+    ]
+    stirrup_zones = spec.get("stirrup_zones") or []
+    first_zone = stirrup_zones[0] if stirrup_zones else {}
+    return {
+        "length": length_ft,
+        "product_family": twin_type,
+        "cross_section": cross_section,
+        "marked_end": {"label": spec.get("marked_end_id") or "MARKED END", "x_ft": 0},
+        "unmarked_end": {"label": spec.get("unmarked_end_id") or "UNMARKED END", "x_ft": length_ft},
+        "strand_pattern": {"rows": rows},
+        "stirrups": {
+            "zones": stirrup_zones,
+            "start_ft": _as_float(first_zone.get("from_ft"), 0),
+            "end_ft": _as_float(first_zone.get("to_ft"), length_ft),
+            "spacing_in": _as_float(first_zone.get("spacing_in"), 24),
+            "bar_size": first_zone.get("bar_size") or "#4",
+        },
+        "hold_downs": hold_downs,
+        "lift_loops": by_kind.get("lift_loop", []),
+        "inserts": by_kind.get("insert", []) + by_kind.get("inserts", []),
+        "tubes": by_kind.get("tube", []) + by_kind.get("void_tube", []),
+        "tie_rod_openings": by_kind.get("tie_rod", []),
+        "drain_holes": by_kind.get("drain", []) + by_kind.get("drain_hole", []),
+        "grout_grooves": by_kind.get("grout_groove", []),
+        "bituminous_ends": by_kind.get("bituminous", []),
+        "hardware": hardware,
+        "tolerances": spec.get("tolerances") or {},
+    }
+
+
+async def enrich_beam_for_twin(beam: dict, include_details: bool = False) -> dict:
+    data = dict(beam or {})
+    product_type = None
+    if data.get("product_type_id"):
+        product_type = await db.product_types.find_one({"id": data["product_type_id"]}, {"_id": 0})
+    spec = None
+    if data.get("spec_id"):
+        spec = await db.beam_specs.find_one({"id": data["spec_id"]}, {"_id": 0})
+    if not spec and data.get("id"):
+        latest = await db.beam_specs.find({"beam_id": data["id"]}, {"_id": 0}).sort("created_at", -1).to_list(1)
+        spec = latest[0] if latest else None
+    locked_revision = None
+    if data.get("locked_blueprint_revision_id"):
+        locked_revision = await db.locked_blueprint_revisions.find_one({"id": data["locked_blueprint_revision_id"]}, {"_id": 0})
+    elif product_type and product_type.get("default_locked_blueprint_revision_id"):
+        locked_revision = await db.locked_blueprint_revisions.find_one({"id": product_type["default_locked_blueprint_revision_id"]}, {"_id": 0})
+    product_type = dict(product_type or {})
+    if locked_revision:
+        product_type["blueprint"] = locked_revision.get("normalized_blueprint", {})
+        product_type["default_locked_blueprint_revision_id"] = locked_revision.get("id")
+        product_type["name"] = product_type.get("name") or locked_revision.get("beam_mark") or data.get("mark")
+        data["length_ft"] = locked_revision.get("normalized_blueprint", {}).get("length", data.get("length_ft"))
+        data["twin_type"] = locked_revision.get("product_family", data.get("twin_type"))
+        data["blueprint_source"] = {"status": "locked", "document_id": locked_revision.get("document_id"), "revision_id": locked_revision.get("id"), "beam_mark": locked_revision.get("beam_mark"), "locked_at": locked_revision.get("locked_at"), "critical_fields_complete": True}
+    elif data.get("blueprint_document_id"):
+        document = await db.blueprint_documents.find_one({"id": data["blueprint_document_id"]}, {"_id": 0})
+        extraction = await db.blueprint_extractions.find_one({"id": document.get("latest_extraction_id")}, {"_id": 0}) if document and document.get("latest_extraction_id") else None
+        product_type["blueprint"] = product_type.get("blueprint") or blueprint_from_legacy_spec(data, product_type, spec)
+        data["blueprint_source"] = {"status": "draft", "document_id": data.get("blueprint_document_id"), "revision_id": None, "beam_mark": extraction and extraction.get("fields", {}).get("beam_mark", {}).get("value"), "locked_at": None, "critical_fields_complete": False}
+    else:
+        product_type["blueprint"] = product_type.get("blueprint") or blueprint_from_legacy_spec(data, product_type, spec)
+        data["blueprint_source"] = {"status": "legacy_seed", "document_id": None, "revision_id": None, "beam_mark": data.get("mark"), "locked_at": None, "critical_fields_complete": False}
+    if not product_type.get("name") and spec:
+        product_type["name"] = spec.get("product_name") or spec.get("geometry", {}).get("product_name") or data.get("mark")
+    if product_type:
+        data["product_type"] = product_type
+    if spec:
+        data["spec"] = spec
+    if include_details and data.get("id"):
+        beam_id = data["id"]
+        data["anomalies"] = await db.anomalies.find({"beam_id": beam_id}, {"_id": 0}).to_list(500)
+        data["inspections"] = await db.inspections.find({"beam_id": beam_id}, {"_id": 0}).to_list(500)
+        data["camber_readings"] = await db.camber_readings.find({"beam_id": beam_id}, {"_id": 0}).to_list(500)
+    return data
+
+
+def parse_iso_dt(value: str | None) -> datetime | None:
+    if not value or not isinstance(value, str):
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def within_same_day(value: str | None, now: datetime) -> bool:
+    dt = parse_iso_dt(value)
+    return bool(dt and dt.astimezone(timezone.utc).date() == now.astimezone(timezone.utc).date())
+
+
+def command_board_shift(now: datetime) -> str:
+    hour = now.astimezone(timezone.utc).hour
+    if 6 <= hour < 14:
+        return "Day"
+    if 14 <= hour < 22:
+        return "Swing"
+    return "Night"
+
+
+def estimate_release_time(bed: dict, batch_record: dict | None, now: datetime) -> str:
+    if bed.get("status") in ("complete",):
+        return "Ready now"
+    offsets = {"idle": None, "setup": timedelta(hours=12), "tensioning": timedelta(hours=8), "casting": timedelta(hours=6), "curing": timedelta(hours=2), "stripping": timedelta(hours=1)}
+    offset = offsets.get(bed.get("status"))
+    if offset is None:
+        return "Awaiting schedule"
+    anchor = parse_iso_dt((batch_record or {}).get("created_at") or (batch_record or {}).get("batched_at")) or now
+    return (anchor + offset).astimezone(timezone.utc).strftime("%H:%M UTC")
+
+
+def command_lane_state(bed: dict, beams: list[dict], has_open_ncr: bool) -> dict:
+    if has_open_ncr or any(beam.get("qc_state") in ("hold", "failed") for beam in beams):
+        return {"key": "hold_ncr", "label": "HOLD / NCR", "accent": "#FF3366"}
+    if bed.get("status") in ("casting", "curing"):
+        return {"key": "pour_cure", "label": "POUR / CURE", "accent": "#2979FF"}
+    if bed.get("status") in ("stripping", "complete") or any(beam.get("qc_state") in ("passed", "shipped") for beam in beams):
+        return {"key": "ready_release", "label": "READY / RELEASE", "accent": "#00E676"}
+    return {"key": "layout_strand", "label": "LAYOUT / STRAND", "accent": "#FFD600"}
+
+
+async def build_package_context(package_type: str, pour_id: str = None, beam_id: str = None, job_id: str = None) -> dict:
+    raw_beams = await db.beams.find({}, {"_id": 0}).to_list(1000)
+    beams = [await enrich_beam_for_twin(beam, include_details=True) for beam in raw_beams]
+    jobs = {item["id"]: item for item in await db.jobs.find({}, {"_id": 0}).to_list(500)}
+    pours = {item["id"]: item for item in await db.pours.find({}, {"_id": 0}).to_list(500)}
+    beds = {item["id"]: item for item in await db.beds.find({}, {"_id": 0}).to_list(100)}
+    inspections = await db.inspections.find({}, {"_id": 0}).to_list(5000)
+    anomalies = await db.anomalies.find({}, {"_id": 0}).to_list(5000)
+    camber_readings = await db.camber_readings.find({}, {"_id": 0}).to_list(5000)
+    tension_reports = await db.tension_reports.find({}, {"_id": 0}).to_list(5000)
+    batch_records = await db.batch_records.find({}, {"_id": 0}).to_list(500)
+    ncrs = await db.ncrs.find({}, {"_id": 0}).to_list(500)
+    if package_type == "single_beam":
+        if not beam_id and beams:
+            beam_id = beams[0]["id"]
+        selected_beams = [beam for beam in beams if beam["id"] == beam_id]
+    elif package_type == "full_job":
+        if not job_id and beams:
+            job_id = beams[0].get("job_id")
+        selected_beams = [beam for beam in beams if beam.get("job_id") == job_id]
+    else:
+        if not pour_id and beams:
+            pour_id = beams[0].get("pour_id")
+        selected_beams = [beam for beam in beams if beam.get("pour_id") == pour_id]
+    if not selected_beams:
+        raise HTTPException(status_code=404, detail="No beams found for package request")
+    selected_job_id = job_id or selected_beams[0].get("job_id")
+    if package_type == "full_job":
+        selected_pour_ids = sorted(item["id"] for item in pours.values() if item.get("job_id") == selected_job_id)
+    else:
+        selected_pour_ids = sorted({beam.get("pour_id") for beam in selected_beams if beam.get("pour_id")})
+    selected_pour_id = pour_id or (selected_pour_ids[0] if len(selected_pour_ids) == 1 else None)
+    selected_bed_ids = sorted({beam["bed_id"] for beam in selected_beams if beam.get("bed_id")})
+    for reading in camber_readings:
+        reading["beam_mark"] = next((beam["mark"] for beam in selected_beams if beam["id"] == reading.get("beam_id")), reading.get("beam_id"))
+    for report in tension_reports:
+        report["bed_number"] = beds.get(report.get("bed_id"), {}).get("bed_number")
+    selected_beam_ids = {beam["id"] for beam in selected_beams}
+    return {
+        "package_type": package_type,
+        "job": jobs.get(selected_job_id, {}),
+        "pour": pours.get(selected_pour_id, {}),
+        "pours": [pours[item_id] for item_id in selected_pour_ids if item_id in pours],
+        "beds": [beds[bed_id] for bed_id in selected_bed_ids if bed_id in beds],
+        "beams": selected_beams,
+        "inspections": [item for item in inspections if item.get("beam_id") in selected_beam_ids],
+        "anomalies": [item for item in anomalies if item.get("beam_id") in selected_beam_ids],
+        "camber_readings": [item for item in camber_readings if item.get("beam_id") in selected_beam_ids],
+        "tension_reports": [item for item in tension_reports if not selected_bed_ids or item.get("bed_id") in selected_bed_ids],
+        "batch_record": next((item for item in batch_records if item.get("pour_id") == selected_pour_id), None),
+        "batch_records": [item for item in batch_records if item.get("pour_id") in selected_pour_ids],
+        "ncrs": [item for item in ncrs if item.get("beam_id") in selected_beam_ids or any(b in selected_beam_ids for b in item.get("beam_ids", [])) or item.get("pour_id") in selected_pour_ids],
+    }
+
+
+def _ncr_public_github(doc: dict) -> dict:
+    out = dict(doc or {})
+    out["code"] = out.get("code") or f"NCR-{out.get('created_at', '')[:4] or '26'}-{str(out.get('id', ''))[:6].upper()}"
+    out["title"] = out.get("title") or out.get("description") or out.get("sub_type") or "Non-conformance"
+    out["owner"] = out.get("owner") or out.get("assigned_to") or out.get("assigned_role") or ""
+    if out.get("status") == "investigating":
+        out["status"] = "investigation"
+    return out
 
 
 # ---------------- Product Types ----------------
@@ -133,6 +393,25 @@ async def list_beds(user=Depends(get_current_user)):
     except Exception:
         logger.exception("list_beds failed")
         raise HTTPException(status_code=500, detail="Failed to list beds")
+
+
+@api.get("/beds/{bed_id}/twin")
+async def get_bed_twin(bed_id: str, user=Depends(require_feature("digital_twin"))):
+    try:
+        bed = await db.beds.find_one({"id": bed_id}, {"_id": 0})
+        if not bed:
+            raise HTTPException(status_code=404, detail="Bed not found")
+        beams = await db.beams.find({"bed_id": bed_id}, {"_id": 0}).to_list(1000)
+        beams = sorted(beams, key=lambda item: item.get("position_on_bed", 0))
+        bed["beams"] = [await enrich_beam_for_twin(beam, include_details=True) for beam in beams]
+        if bed.get("current_pour_id"):
+            bed["pour"] = await db.pours.find_one({"id": bed["current_pour_id"]}, {"_id": 0})
+        return bed
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("get_bed_twin failed id=%s", bed_id)
+        raise HTTPException(status_code=500, detail="Failed to load bed twin")
 
 
 @api.patch("/beds/{bed_id}")
@@ -243,7 +522,8 @@ async def dashboard(user=Depends(get_current_user)):
 @api.get("/beams")
 async def list_beams(user=Depends(get_current_user)):
     try:
-        return await db.beams.find({}, {"_id": 0}).to_list(1000)
+        beams = await db.beams.find({}, {"_id": 0}).to_list(1000)
+        return [await enrich_beam_for_twin(beam) for beam in beams]
     except Exception:
         logger.exception("list_beams failed")
         raise HTTPException(status_code=500, detail="Failed to list beams")
@@ -267,7 +547,10 @@ async def get_beam(beam_id: str, user=Depends(get_current_user)):
         beam = await db.beams.find_one({"id": beam_id}, {"_id": 0})
         if not beam:
             raise HTTPException(status_code=404, detail="Beam not found")
-        return await assemble_dossier(beam, full=True)
+        dossier = await assemble_dossier(beam, full=True)
+        enriched = await enrich_beam_for_twin(beam, include_details=True)
+        dossier.update({k: v for k, v in enriched.items() if k not in dossier or k in ("product_type", "spec", "blueprint_source", "anomalies", "inspections", "camber_readings")})
+        return dossier
     except HTTPException:
         raise
     except Exception:
@@ -604,6 +887,167 @@ async def create_anomaly(payload: AnomalyCreate, request: Request, user=Depends(
         raise HTTPException(status_code=500, detail="Failed to save anomaly")
 
 
+
+@api.get("/command-board")
+async def command_board(user=Depends(require_feature("command_board"))):
+    now = datetime.now(timezone.utc)
+    beds = await db.beds.find({}, {"_id": 0}).sort("bed_number", 1).to_list(50)
+    beams = await db.beams.find({}, {"_id": 0}).to_list(1000)
+    pours = await db.pours.find({}, {"_id": 0}).to_list(500)
+    inspections = await db.inspections.find({}, {"_id": 0}).to_list(5000)
+    ncrs = await db.ncrs.find({}, {"_id": 0}).to_list(500)
+    batch_records = await db.batch_records.find({}, {"_id": 0}).to_list(500)
+    tension_reports = await db.tension_reports.find({}, {"_id": 0}).to_list(5000)
+    camber_readings = await db.camber_readings.find({}, {"_id": 0}).to_list(5000)
+    pours_by_id = {item["id"]: item for item in pours}
+    beams_by_bed = {}
+    for beam in beams:
+        beams_by_bed.setdefault(beam.get("bed_id"), []).append(beam)
+    inspections_by_beam = {}
+    for item in inspections:
+        inspections_by_beam.setdefault(item.get("beam_id"), []).append(item)
+    ncrs_by_beam = {}
+    open_ncrs = []
+    for item in ncrs:
+        if item.get("status") not in ("closed", "rejected"):
+            open_ncrs.append(item)
+            for beam_id in item.get("beam_ids", []) or ([item.get("beam_id")] if item.get("beam_id") else []):
+                ncrs_by_beam.setdefault(beam_id, []).append(item)
+    batch_by_pour = {item.get("pour_id"): item for item in batch_records}
+    releases_today_ids = {item["beam_id"] for item in inspections if item.get("beam_id") and item.get("section") == "pre_delivery" and item.get("status") == "pass" and within_same_day(item.get("created_at"), now)}
+    if not releases_today_ids:
+        releases_today_ids = {beam["id"] for beam in beams if beam.get("qc_state") in ("passed", "shipped") and within_same_day(beam.get("created_at"), now)}
+    release_cycle_hours = []
+    for beam in beams:
+        events = [item for item in inspections_by_beam.get(beam.get("id"), []) if item.get("section") == "pre_delivery" and item.get("status") == "pass"]
+        start = parse_iso_dt(beam.get("created_at"))
+        finish = max((parse_iso_dt(item.get("created_at")) for item in events), default=None)
+        if start and finish:
+            release_cycle_hours.append(round((finish - start).total_seconds() / 3600, 1))
+    latest_strengths = sorted(camber_readings, key=lambda item: parse_iso_dt(item.get("reading_date")) or parse_iso_dt(item.get("created_at")) or now, reverse=True)[:6]
+    strength_trend = [{"label": f"Beam {next((beam.get('mark') for beam in beams if beam.get('id') == item.get('beam_id')), '—')}", "value": item.get("release_strength_psi", 0), "required": item.get("required_strength_psi", 0)} for item in reversed(latest_strengths)]
+    camber_passes = [abs((item.get("measured_camber_in") or 0) - (item.get("design_camber_in") or 0)) <= 0.25 for item in camber_readings]
+    tension_passes = [bool(item.get("within_tolerance")) for item in tension_reports]
+    lanes = []
+    for bed in beds:
+        bed_beams = sorted(beams_by_bed.get(bed.get("id"), []), key=lambda item: item.get("position_on_bed", 0))
+        pour = pours_by_id.get(bed.get("current_pour_id"))
+        batch_record = batch_by_pour.get((pour or {}).get("id"))
+        inspectors = [item.get("inspector") for beam in bed_beams for item in inspections_by_beam.get(beam.get("id"), []) if item.get("inspector")]
+        open_lane_ncrs = [item for beam in bed_beams for item in ncrs_by_beam.get(beam.get("id"), [])]
+        lane_state = command_lane_state(bed, bed_beams, bool(open_lane_ncrs))
+        lanes.append({
+            "id": bed.get("id"), "bed_number": bed.get("bed_number"), "name": bed.get("name"), "status": bed.get("status", "idle"),
+            "lane_state": lane_state, "pour_number": (pour or {}).get("pour_number"),
+            "beam_order": " / ".join(beam.get("mark", "—") for beam in bed_beams) or "No active beam order",
+            "qc_owner": next((item.get("assigned_to") or item.get("owner") for item in open_lane_ncrs if item.get("assigned_to") or item.get("owner")), None) or (Counter(inspectors).most_common(1)[0][0] if inspectors else "Unassigned"),
+            "estimated_release": estimate_release_time(bed, batch_record, now), "ncr_count": len(open_lane_ncrs),
+            "beams": [{"id": beam.get("id"), "mark": beam.get("mark"), "position_on_bed": beam.get("position_on_bed"), "length_ft": beam.get("length_ft"), "status": beam.get("status"), "qc_state": beam.get("qc_state"), "release_tag": (beam.get("traceability") or {}).get("release_tag")} for beam in bed_beams],
+        })
+    severity_counts = {"minor": 0, "moderate": 0, "major": 0}
+    for item in open_ncrs:
+        sev = item.get("severity", "major")
+        if sev in severity_counts:
+            severity_counts[sev] += 1
+    events = [{"timestamp": bed.get("updated_at"), "message": f"Bed {bed.get('bed_number')} status {bed.get('status', 'idle').upper()}"} for bed in beds]
+    events += [{"timestamp": item.get("created_at") or item.get("batched_at"), "message": f"Batch {item.get('ticket_number') or item.get('mix_code') or '—'} captured for pour {pours_by_id.get(item.get('pour_id'), {}).get('pour_number', '—')}"} for item in batch_records]
+    events += [{"timestamp": item.get("updated_at") or item.get("created_at"), "message": f"{_ncr_public_github(item).get('code')} {_ncr_public_github(item).get('status', 'open').replace('_', ' ').upper()} · {_ncr_public_github(item).get('title')}"} for item in open_ncrs]
+    events += [{"timestamp": item.get("created_at"), "message": f"Tension report complete for Bed {next((bed.get('bed_number') for bed in beds if bed.get('id') == item.get('bed_id')), '—')} · {'WITHIN TOL' if item.get('within_tolerance') else 'OUT OF TOL'}"} for item in tension_reports]
+    events += [{"timestamp": item.get("reading_date") or item.get("created_at"), "message": f"Camber / strength logged for {next((beam.get('mark') for beam in beams if beam.get('id') == item.get('beam_id')), item.get('beam_id', '—'))} · {item.get('release_strength_psi', 0)} PSI"} for item in camber_readings]
+    events = sorted([item for item in events if parse_iso_dt(item.get("timestamp"))], key=lambda item: parse_iso_dt(item["timestamp"]), reverse=True)[:12]
+    return {"generated_at": now_iso(), "plant": "BedForge Command Center", "shift": command_board_shift(now), "summary": {"beds_active": len([bed for bed in beds if bed.get("status") not in ("idle", "complete")]), "beams_in_process": len([beam for beam in beams if beam.get("qc_state") not in ("passed", "shipped")]), "releases_today": len(releases_today_ids), "open_ncrs": len(open_ncrs)}, "lanes": lanes, "analytics": {"releases_today": len(releases_today_ids), "layout_to_release_hours": round(sum(release_cycle_hours) / len(release_cycle_hours), 1) if release_cycle_hours else None, "open_ncrs_by_severity": severity_counts, "camber_pass_rate": round((sum(camber_passes) / len(camber_passes)) * 100, 1) if camber_passes else None, "tension_within_tolerance_rate": round((sum(tension_passes) / len(tension_passes)) * 100, 1) if tension_passes else None, "strength_trend": strength_trend}, "events": events}
+
+
+@api.get("/batch-records")
+async def list_batch_records(user=Depends(require_feature("batch_plant"))):
+    records = await db.batch_records.find({}, {"_id": 0}).sort("created_at", -1).to_list(500)
+    out = []
+    for rec in records:
+        env = rec.get("environment") or {}
+        out.append({**rec, "ticket_number": rec.get("ticket_number") or rec.get("truck_id") or rec.get("id", "")[:8], "mix_design": rec.get("mix_design") or rec.get("mix_code") or "", "ambient_temp_f": rec.get("ambient_temp_f") or env.get("ambient_f"), "concrete_temp_f": rec.get("concrete_temp_f") or env.get("mix_temp_f") or rec.get("target_temp_f"), "humidity_pct": rec.get("humidity_pct") or env.get("rh_pct"), "wind_mph": rec.get("wind_mph") or env.get("wind_mph"), "weather": rec.get("weather") or env.get("weather", "")})
+    return out
+
+
+@api.post("/batch-records")
+async def create_batch_record(payload: dict, user=Depends(require_feature("batch_plant"))):
+    data = dict(payload or {})
+    pour = await db.pours.find_one({"id": data.get("pour_id")}, {"_id": 0}) if data.get("pour_id") else None
+    if not data.get("job_id"):
+        data["job_id"] = (pour or {}).get("job_id") or ""
+    if not data.get("job_id") and data.get("beam_ids"):
+        beam = await db.beams.find_one({"id": data["beam_ids"][0]}, {"_id": 0})
+        data["job_id"] = (beam or {}).get("job_id") or ""
+    if not data.get("job_id") or not data.get("pour_id"):
+        raise HTTPException(status_code=400, detail="A real pour/job is required")
+    record = {
+        "id": data.get("id") or __import__("uuid").uuid4().__str__(), "status": "confirmed", "immutable": True, "revision": 1,
+        "job_id": data["job_id"], "pour_id": data["pour_id"], "bed_ids": data.get("bed_ids") or [], "beam_ids": data.get("beam_ids") or [],
+        "ticket_number": data.get("ticket_number", ""), "mix_design": data.get("mix_design", data.get("mix_code", "")), "mix_code": data.get("mix_code") or data.get("mix_design", ""),
+        "ingredients": data.get("ingredients") or [], "admixtures": data.get("admixtures") or [], "cylinders": data.get("cylinders") or [],
+        "environment": {"ambient_f": data.get("ambient_temp_f"), "mix_temp_f": data.get("concrete_temp_f"), "rh_pct": data.get("humidity_pct"), "wind_mph": data.get("wind_mph"), "weather": data.get("weather", "")},
+        "ambient_temp_f": data.get("ambient_temp_f"), "concrete_temp_f": data.get("concrete_temp_f"), "humidity_pct": data.get("humidity_pct"), "wind_mph": data.get("wind_mph"), "weather": data.get("weather", ""),
+        "notes": data.get("notes", ""), "created_by": user.get("name", ""), "created_at": now_iso(), "updated_at": now_iso(), "batched_at": data.get("batched_at") or now_iso(),
+    }
+    await db.batch_records.insert_one(record)
+    return record
+
+
+@api.get("/ncrs")
+async def list_ncrs(user=Depends(require_feature("ncr"))):
+    rows = await db.ncrs.find({}, {"_id": 0}).sort("created_at", -1).to_list(500)
+    return [_ncr_public_github(row) for row in rows]
+
+
+@api.post("/ncrs")
+async def create_ncr(payload: dict, user=Depends(require_feature("ncr"))):
+    data = dict(payload or {})
+    beam_id = data.get("beam_id") or ((data.get("beam_ids") or [None])[0])
+    beam = await db.beams.find_one({"id": beam_id}, {"_id": 0}) if beam_id else None
+    count = await db.ncrs.count_documents({})
+    rec = {"id": __import__("uuid").uuid4().__str__(), "code": f"NCR-{datetime.now(timezone.utc).strftime('%y')}-{count + 1:03d}", "title": data.get("title") or data.get("description") or "Non-conformance", "status": "open", "severity": data.get("severity", "major"), "description": data.get("description") or data.get("title") or "Non-conformance", "containment": data.get("containment") or "Contain and evaluate affected product.", "owner": data.get("owner", ""), "assigned_to": data.get("owner", ""), "beam_id": beam_id, "beam_ids": [beam_id] if beam_id else [], "job_id": data.get("job_id") or (beam or {}).get("job_id") or "", "pour_id": data.get("pour_id") or (beam or {}).get("pour_id") or "", "bed_id": data.get("bed_id") or (beam or {}).get("bed_id") or "", "source_type": data.get("source_type", "manual"), "source_id": data.get("source_id", ""), "created_by": user.get("email", ""), "discovered_by": user.get("name", ""), "created_at": now_iso(), "updated_at": now_iso(), "audit_trail": [{"status": "open", "user": user.get("name", ""), "note": "Created", "at": now_iso()}], "history": [{"status": "open", "by": user.get("email", ""), "action": "create", "at": now_iso()}]}
+    await db.ncrs.insert_one(rec)
+    return _ncr_public_github(rec)
+
+
+@api.patch("/ncrs/{ncr_id}")
+async def update_ncr(ncr_id: str, payload: dict, user=Depends(require_feature("ncr"))):
+    current = await db.ncrs.find_one({"id": ncr_id}, {"_id": 0})
+    if not current:
+        raise HTTPException(status_code=404, detail="NCR not found")
+    updates = {k: v for k, v in (payload or {}).items() if v is not None}
+    if updates.get("status") == "investigation":
+        updates["status"] = "investigation"
+    if "owner" in updates:
+        updates["assigned_to"] = updates["owner"]
+    if "title" in updates:
+        updates["description"] = updates.get("description") or updates["title"]
+    updates["updated_at"] = now_iso()
+    await db.ncrs.update_one({"id": ncr_id}, {"$set": updates})
+    row = await db.ncrs.find_one({"id": ncr_id}, {"_id": 0})
+    return _ncr_public_github(row)
+
+
+@api.get("/license")
+async def get_license(user=Depends(get_current_user)):
+    return await load_license_state()
+
+
+@api.post("/license/activate")
+async def activate_license(payload: LicenseActivateInput, user=Depends(require_feature("licensing", "admin"))):
+    return await activate_license_state(payload)
+
+
+@api.get("/packages/export/pdf")
+async def export_package_pdf(package_type: str = "pour_complete", pour_id: str = None, beam_id: str = None, job_id: str = None, user=Depends(require_feature("package_export"))):
+    if package_type not in ("pour_complete", "single_beam", "full_job"):
+        raise HTTPException(status_code=400, detail="Unknown package type")
+    if package_type == "full_job":
+        await ensure_feature_enabled("advanced_exports")
+    context = await build_package_context(package_type, pour_id=pour_id, beam_id=beam_id, job_id=job_id)
+    data = package_export.build_package_pdf(context)
+    return StreamingResponse(io.BytesIO(data), media_type="application/pdf", headers={"Content-Disposition": f"attachment; filename={package_type}.pdf"})
+
+
 # ---------------- Forms Export ----------------
 @api.get("/health")
 async def health():
@@ -611,7 +1055,7 @@ async def health():
 
 
 @api.get("/forms/export/{form_type}")
-async def export_form(form_type: str, request: Request, beam_id: str = None, user=Depends(get_current_user)):
+async def export_form(form_type: str, request: Request, beam_id: str = None, user=Depends(require_feature("package_export"))):
     if form_type not in excel_export.BUILDERS:
         raise HTTPException(status_code=400, detail="Unknown form type")
 
@@ -674,6 +1118,7 @@ async def export_form(form_type: str, request: Request, beam_id: str = None, use
 
 app.include_router(auth_router)
 app.include_router(api)
+app.include_router(blueprint_intelligence_router)
 app.include_router(blueprint_router)
 app.include_router(bed_router)
 app.include_router(tension_router)
@@ -714,6 +1159,12 @@ async def startup():
     await db.pre_delivery.create_index("beam_id")
     await db.beam_specs.create_index("beam_id")
     await db.beam_specs.create_index("job_number")
+    await db.blueprint_documents.create_index("beam_id")
+    await db.blueprint_documents.create_index("created_at")
+    await db.blueprint_extractions.create_index("document_id")
+    await db.locked_blueprint_revisions.create_index("document_id")
+    await db.blueprint_audit_events.create_index("document_id")
+    await db.licenses.create_index("id")
     await db.blueprints.create_index("beam_id")
     await db.spec_measurements.create_index("spec_id")
     await db.bed_assignments.create_index([("bed_id", 1), ("scheduled_date", 1)])

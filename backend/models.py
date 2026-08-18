@@ -1,7 +1,7 @@
 import uuid
 import secrets
 from datetime import datetime, timezone
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Literal
 from pydantic import BaseModel, Field, EmailStr
 
 
@@ -98,6 +98,8 @@ class ProductType(BaseModel):
     width_in: float
     default_length_ft: float
     description: str = ""
+    blueprint: Dict[str, Any] = Field(default_factory=dict)
+    default_locked_blueprint_revision_id: Optional[str] = None
     created_at: str = Field(default_factory=now_iso)
 
 
@@ -108,6 +110,8 @@ class ProductTypeCreate(BaseModel):
     width_in: float
     default_length_ft: float
     description: str = ""
+    blueprint: Dict[str, Any] = Field(default_factory=dict)
+    default_locked_blueprint_revision_id: Optional[str] = None
 
 
 # ---------- Jobs ----------
@@ -1062,3 +1066,122 @@ class OwnerPackageCreate(BaseModel):
     pour_id: str
     include_excel: bool = True
     note: str = ""
+
+
+# ---------- Licensing ----------
+class LicenseState(BaseModel):
+    id: str = "license"
+    status: str = "trial"  # trial | active | expired
+    tier: str = "trial"  # trial | standard | enterprise
+    license_key: str = ""
+    expires_at: str = ""
+    feature_flags: Dict[str, bool] = Field(default_factory=dict)
+    last_checked_at: str = Field(default_factory=now_iso)
+    updated_at: str = Field(default_factory=now_iso)
+    created_at: str = Field(default_factory=now_iso)
+
+
+class LicenseActivateInput(BaseModel):
+    license_key: str = Field(min_length=12)
+    tier: Literal["standard", "enterprise"] = "standard"
+    expires_at: str
+
+
+# ---------- Blueprint Intelligence ----------
+BLUEPRINT_STATUSES = ["uploaded", "extracted", "needs_review", "locked", "insufficient_quality", "failed"]
+BLUEPRINT_FIELD_STATUSES = ["confirmed", "unconfirmed", "manually_confirmed", "not_applicable"]
+BLUEPRINT_CONFIDENCE = ["high", "medium", "low"]
+
+
+class BlueprintField(BaseModel):
+    value: Any = None
+    confidence: str = "low"
+    source_page: Optional[int] = None
+    status: str = "unconfirmed"
+    extraction_notes: str = ""
+
+
+class BlueprintDocument(BaseModel):
+    id: str = Field(default_factory=new_id)
+    filename: str
+    storage_path: str
+    content_type: str = "application/pdf"
+    file_size_bytes: int = 0
+    page_count: int = 0
+    status: str = "uploaded"
+    job_id: Optional[str] = None
+    beam_id: Optional[str] = None
+    product_type_id: Optional[str] = None
+    product_family_hint: str = ""
+    beam_mark_hint: str = ""
+    project_name_hint: str = ""
+    latest_extraction_id: Optional[str] = None
+    locked_revision_id: Optional[str] = None
+    latest_summary: str = ""
+    created_by: str = ""
+    created_at: str = Field(default_factory=now_iso)
+    updated_at: str = Field(default_factory=now_iso)
+
+
+class BlueprintExtraction(BaseModel):
+    id: str = Field(default_factory=new_id)
+    document_id: str
+    status: str = "needs_review"
+    extractor_version: str = "controlled_regex_v1"
+    summary: str = ""
+    page_text: List[str] = Field(default_factory=list)
+    field_groups: Dict[str, List[str]] = Field(default_factory=dict)
+    fields: Dict[str, BlueprintField] = Field(default_factory=dict)
+    confirmed_count: int = 0
+    unconfirmed_count: int = 0
+    fail_reasons: List[str] = Field(default_factory=list)
+    created_by: str = ""
+    created_at: str = Field(default_factory=now_iso)
+    updated_at: str = Field(default_factory=now_iso)
+
+
+class LockedBlueprintRevision(BaseModel):
+    id: str = Field(default_factory=new_id)
+    document_id: str
+    extraction_id: str
+    revision_number: int = 1
+    status: str = "locked"
+    product_family: str
+    beam_mark: str
+    normalized_blueprint: Dict[str, Any] = Field(default_factory=dict)
+    source_fields: Dict[str, BlueprintField] = Field(default_factory=dict)
+    beam_ids: List[str] = Field(default_factory=list)
+    product_type_id: Optional[str] = None
+    notes: str = ""
+    locked_by: str = ""
+    locked_at: str = Field(default_factory=now_iso)
+    created_at: str = Field(default_factory=now_iso)
+
+
+class BlueprintAuditEvent(BaseModel):
+    id: str = Field(default_factory=new_id)
+    document_id: str
+    event_type: str
+    actor_name: str = ""
+    actor_role: str = ""
+    details: Dict[str, Any] = Field(default_factory=dict)
+    created_at: str = Field(default_factory=now_iso)
+
+
+class BlueprintFieldPatch(BaseModel):
+    value: Any = None
+    confidence: Optional[str] = None
+    source_page: Optional[int] = None
+    status: Optional[str] = None
+    extraction_notes: Optional[str] = None
+
+
+class BlueprintExtractionPatch(BaseModel):
+    fields: Dict[str, BlueprintFieldPatch] = Field(default_factory=dict)
+
+
+class BlueprintLockInput(BaseModel):
+    beam_ids: List[str] = Field(default_factory=list)
+    product_type_id: Optional[str] = None
+    notes: str = ""
+
