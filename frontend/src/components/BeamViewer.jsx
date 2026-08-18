@@ -12,6 +12,7 @@ const brassGold = "#E3C565";
 const asphaltBlack = "#1A1A1A";
 const runningDimensionColor = "#22D3EE";
 const spanDimensionColor = "#FBBF24";
+const elevationDimensionColor = "#050505";
 
 function TwinCanvasFallback({ message = "Digital Twin unavailable on this device." }) {
   return (
@@ -715,6 +716,28 @@ function MeasurementText({ position, label, color = "#D8ECFF", size = 10 }) {
   );
 }
 
+function ElevationMeasurementText({ position, label, size = 9 }) {
+  return (
+    <Html position={position} center distanceFactor={18} occlude={false}>
+      <span style={{
+        color: elevationDimensionColor,
+        background: "rgba(245,247,250,0.94)",
+        border: "1px solid rgba(5,5,5,0.72)",
+        padding: "1px 4px",
+        fontSize: size,
+        fontFamily: "JetBrains Mono, ui-monospace, SFMono-Regular, monospace",
+        fontWeight: 800,
+        letterSpacing: "0.02em",
+        whiteSpace: "nowrap",
+        boxShadow: "0 2px 10px rgba(0,0,0,0.32)",
+        pointerEvents: "none",
+      }}>
+        {label}
+      </span>
+    </Html>
+  );
+}
+
 function stationValue(item) {
   const raw = item?.x_ft ?? item?.station_ft ?? item?.station_from_marked_end;
   const value = finiteNumber(raw);
@@ -761,6 +784,34 @@ function runningDimensionStations(spec) {
   }, []);
 }
 
+function elevationDimensionTargets(spec) {
+  const centerElevation = (item, fallbackY) => {
+    const heightIn = finiteNumber(item?.height_in ?? item?.height_from_soffit_in ?? item?.center_height_in);
+    const y = heightIn != null && heightIn > 0 ? inchesToFeet(heightIn) : fallbackY;
+    return Math.min(Math.max(y, 0.08), Math.max(spec.depth - 0.08, 0.08));
+  };
+  const targets = [];
+  (spec.blueprint.inserts || []).forEach((item, index) => {
+    const station = stationValue(item);
+    if (station == null) return;
+    targets.push({ key: `elev-insert-${index}`, station, y: centerElevation(item, spec.depth * 0.7), kind: "insert" });
+  });
+  (spec.blueprint.tubes || []).forEach((item, index) => {
+    const station = stationValue(item);
+    if (station == null) return;
+    targets.push({ key: `elev-tube-${index}`, station, y: centerElevation(item, spec.depth * 0.56), kind: "tube" });
+  });
+  const unique = [];
+  targets
+    .filter((item) => item.station >= 0 && item.station <= spec.length)
+    .sort((a, b) => a.station - b.station || a.y - b.y)
+    .forEach((item) => {
+      const duplicate = unique.some((existing) => Math.abs(existing.station - item.station) < 0.05 && Math.abs(existing.y - item.y) < 0.05);
+      if (!duplicate) unique.push(item);
+    });
+  return unique;
+}
+
 function EngineeringDimensions({ beam, spec }) {
   const lengthFt = valueOrNull(spec.blueprint.dimensions?.overall_length_ft, beam.length_ft, spec.length);
   const stations = runningDimensionStations(spec);
@@ -773,6 +824,7 @@ function EngineeringDimensions({ beam, spec }) {
   const color = runningDimensionColor;
   const stationColor = runningDimensionColor;
   const spanColor = spanDimensionColor;
+  const elevationTargets = elevationDimensionTargets(spec);
   const firstSideTarget = [
     ...(spec.blueprint.inserts || []).map((item, index) => ({ key: `gap-insert-${index}`, station: stationValue(item), y: spec.depth * 0.7 })),
     ...(spec.blueprint.tubes || []).map((item, index) => ({ key: `gap-tube-${index}`, station: stationValue(item), y: tubeRowY })),
@@ -824,6 +876,23 @@ function EngineeringDimensions({ beam, spec }) {
             <Line points={[[sideX, y - 0.18, pair.start], [sideX, y + 0.18, pair.start]]} color={spanColor} lineWidth={0.7} />
             <Line points={[[sideX, y - 0.18, pair.end], [sideX, y + 0.18, pair.end]]} color={spanColor} lineWidth={0.7} />
             <MeasurementText position={[sideX - 0.1, y - 0.16, mid]} label={formatFeet(pair.delta)} color={spanColor} size={9} />
+          </group>
+        );
+      })}
+      {elevationTargets.map((item, index) => {
+        const x = sideX - 0.48 - (index % 4) * 0.16;
+        const z = item.station + ((index % 2) * 2 - 1) * 0.04;
+        const tick = 0.14;
+        return (
+          <group key={item.key}>
+            <Line points={[[x, 0, z], [x, item.y, z]]} color={elevationDimensionColor} lineWidth={1.1} />
+            <Line points={[[x, item.y, z], [x, spec.depth, z]]} color={elevationDimensionColor} lineWidth={1.1} />
+            {[0, item.y, spec.depth].map((y) => (
+              <Line key={`${item.key}-${y}`} points={[[x - tick, y, z], [x + tick, y, z]]} color={elevationDimensionColor} lineWidth={1.05} />
+            ))}
+            <Line points={[[x + tick, item.y, z], [sideX + 0.02, item.y, item.station]]} color={elevationDimensionColor} lineWidth={0.65} />
+            <ElevationMeasurementText position={[x - 0.13, Math.max(item.y / 2, 0.14), z]} label={formatFeet(item.y)} />
+            <ElevationMeasurementText position={[x - 0.13, item.y + Math.max((spec.depth - item.y) / 2, 0.14), z]} label={formatFeet(spec.depth - item.y)} />
           </group>
         );
       })}
@@ -1385,7 +1454,7 @@ function CrossSectionInset({ beam }) {
 function DimensionColorLegend() {
   const item = (color, label) => (
     <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-      <span style={{ width: 18, height: 2, background: color, boxShadow: `0 0 10px ${color}66` }} />
+      <span style={{ width: 18, height: 2, background: color, border: color === elevationDimensionColor ? "1px solid #F5F7FA" : "none", boxShadow: `0 0 10px ${color}66` }} />
       <span>{label}</span>
     </span>
   );
@@ -1408,6 +1477,7 @@ function DimensionColorLegend() {
     }}>
       {item(runningDimensionColor, "RUNNING")}
       {item(spanDimensionColor, "SPAN")}
+      {item(elevationDimensionColor, "ELEV")}
     </div>
   );
 }
