@@ -26,7 +26,10 @@ import ScanBeam from "./pages/ScanBeam";
 import Tutorial from "./pages/Tutorial";
 import FreshTest from "./pages/FreshTest";
 import BatchPlant from "./pages/BatchPlant";
-import NCRDesk from "./pages/NCR";
+import NCRBoard from "./pages/NCRBoard";
+import BlueprintStudio from "./pages/BlueprintStudio";
+import Licensing from "./pages/Licensing";
+import CommandBoard from "./pages/CommandBoard";
 import CommandCenter from "./pages/CommandCenter";
 import OwnerPackages from "./pages/OwnerPackages";
 import Finance from "./pages/Finance";
@@ -109,10 +112,11 @@ function AppRoutes() {
       <Route path="/planner" element={<Protected><BedPlanner /></Protected>} />
       <Route path="/twin" element={<Protected><DigitalTwin /></Protected>} />
       <Route path="/drawings" element={<Protected><Drawings /></Protected>} />
+      <Route path="/blueprints" element={<Protected><BlueprintStudio /></Protected>} />
       <Route path="/inspection" element={<Protected><NewInspection /></Protected>} />
       <Route path="/fresh" element={<Protected><FreshTest /></Protected>} />
       <Route path="/batch" element={<Protected><BatchPlant /></Protected>} />
-      <Route path="/ncr" element={<Protected><NCRDesk /></Protected>} />
+      <Route path="/ncr" element={<Protected><NCRBoard /></Protected>} />
       <Route path="/tension" element={<Protected><TensionCalculator /></Protected>} />
       <Route path="/camber" element={<Protected><CamberSheet /></Protected>} />
       <Route path="/finish" element={<Protected><FinishSheet /></Protected>} />
@@ -123,7 +127,9 @@ function AppRoutes() {
       <Route path="/qr" element={<Protected><QrLabels /></Protected>} />
       <Route path="/scan" element={<Protected><ScanBeam /></Protected>} />
       <Route path="/measure" element={<Protected><ARMeasure /></Protected>} />
-      <Route path="/command" element={<Protected><CommandCenter /></Protected>} />
+      <Route path="/command-board" element={<Protected><CommandBoard /></Protected>} />
+      <Route path="/command" element={<Navigate to="/command-board" replace />} />
+      <Route path="/licensing" element={<Protected><Licensing /></Protected>} />
       <Route path="/packages" element={<Protected><OwnerPackages /></Protected>} />
       <Route path="/finance" element={<Protected><Finance /></Protected>} />
       <Route path="*" element={<Navigate to="/" replace />} />

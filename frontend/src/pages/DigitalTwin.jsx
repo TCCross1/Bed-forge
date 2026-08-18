@@ -1,478 +1,315 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
-import api, { formatApiErrorDetail } from "../lib/api";
-import Layout, { PageHeader, Field, inputClass, cardClass, ARMeasureLink } from "../components/Layout";
-import BeamViewer from "../components/BeamViewer";
-import { useAuth } from "../context/AuthContext";
-import { useSync } from "../context/SyncContext";
-import { canPlan, qcState } from "../lib/constants";
-import { isoToday } from "../lib/bedLayout";
-import { ELEMENT_COLORS, KIND_LABELS, hardwareColor, latestMeasurements } from "../lib/beamSpec";
+import { useSearchParams } from "react-router-dom";
+import api from "../lib/api";
+import Layout, { PageHeader } from "../components/Layout";
+import BeamTwinViewer, { BedTwinViewer } from "../components/BeamViewer";
+import { bedState, qcState } from "../lib/constants";
 import { toast } from "sonner";
-import { Loader2, MapPin, Ruler, Upload, CalendarDays, ScanLine, QrCode } from "lucide-react";
-import { toastNcrFromResponse } from "../lib/ncr";
+import { Layers3, Loader2, MapPin, Ruler, ScanLine, Box, Construction, Lock, AlertTriangle } from "lucide-react";
+
+function SpecRows({ spec }) {
+  return Object.entries(spec || {}).map(([key, value]) => (
+    <div key={key} className="flex items-center justify-between gap-3 text-xs font-mono">
+      <span className="text-muted-foreground uppercase tracking-wider">{key.replace(/_/g, " ")}</span>
+      <span className="text-white text-right">{typeof value === "object" ? JSON.stringify(value) : String(value)}</span>
+    </div>
+  ));
+}
+
+function stationList(items = []) {
+  return items.length ? items.map((item) => `${Number(item.x_ft || 0).toFixed(1)}'`).join(" · ") : "—";
+}
 
 export default function DigitalTwin() {
-  const { user } = useAuth();
-  const { measurements: liveAr } = useSync();
-  const plan = canPlan(user?.role);
   const [params] = useSearchParams();
   const [beams, setBeams] = useState([]);
   const [beds, setBeds] = useState([]);
   const [selectedId, setSelectedId] = useState(params.get("beam") || "");
   const [beam, setBeam] = useState(null);
+  const [bedTwin, setBedTwin] = useState(null);
+  const [selectedBedId, setSelectedBedId] = useState("");
+  const [selectedHardware, setSelectedHardware] = useState(null);
   const [pickPos, setPickPos] = useState(null);
-  const [saving, setSaving] = useState(false);
+  const [showCallouts, setShowCallouts] = useState(true);
+  const [mode, setMode] = useState("beam");
   const [form, setForm] = useState({ type: "crack", severity: "minor", note: "", length_in: 0 });
-  const [tab, setTab] = useState("hardware");
-  const [selectedHw, setSelectedHw] = useState(null);
-  const [measuredFt, setMeasuredFt] = useState("");
-  const [assignBed, setAssignBed] = useState("");
-  const [assignDate, setAssignDate] = useState(isoToday());
 
   useEffect(() => {
-    let cancelled = false;
-    api.get("/beams")
-      .then((r) => {
-        if (cancelled) return;
-        setBeams(r.data);
-        setSelectedId((current) => current || r.data[0]?.id || "");
-      })
-      .catch((err) => {
-        if (cancelled) return;
-        console.error("[twin] beams load failed", err);
-        toast.error(formatApiErrorDetail(err.response?.data?.detail) || "Failed to load beams");
-      });
-    api.get("/beds")
-      .then((r) => {
-        if (cancelled) return;
-        setBeds(r.data || []);
-        setAssignBed((cur) => cur || r.data?.[0]?.id || "");
-      })
-      .catch((err) => {
-        if (cancelled) return;
-        console.error("[twin] beds load failed", err);
-      });
-    return () => { cancelled = true; };
+    api.get("/beams").then((r) => {
+      setBeams(r.data);
+      setSelectedId((current) => current || r.data[0]?.id || "");
+      setSelectedBedId((current) => current || r.data[0]?.bed_id || "");
+    });
+    api.get("/beds").then((r) => setBeds(r.data));
   }, []);
 
-  const loadBeam = async (id) => {
-    if (!id) return;
-    try {
-      const r = await api.get(`/beams/${id}`);
+  useEffect(() => {
+    if (!selectedId) return;
+    api.get(`/beams/${selectedId}`).then((r) => {
       setBeam(r.data);
-    } catch (err) {
-      console.error("[twin] beam load failed", err);
-      toast.error(formatApiErrorDetail(err.response?.data?.detail) || "Failed to load beam twin");
-    }
-  };
-
-  const latestArId = (liveAr || []).find((m) => m.beam_id === selectedId)?.id;
+      setSelectedBedId(r.data.bed_id);
+    });
+  }, [selectedId]);
 
   useEffect(() => {
-    if (!selectedId) return undefined;
-    let cancelled = false;
-    api.get(`/beams/${selectedId}`)
-      .then((r) => { if (!cancelled) setBeam(r.data); })
-      .catch((err) => {
-        if (cancelled) return;
-        console.error("[twin] beam load failed", err);
-        toast.error(formatApiErrorDetail(err.response?.data?.detail) || "Failed to load beam twin");
-      });
-    return () => { cancelled = true; };
-  }, [selectedId, latestArId]);
-
-  const spec = beam?.spec || null;
-  const measurementMap = useMemo(() => latestMeasurements(beam?.measurements), [beam]);
+    if (!selectedBedId) return;
+    api.get(`/beds/${selectedBedId}/twin`).then((r) => setBedTwin(r.data));
+  }, [selectedBedId, selectedId]);
 
   const saveAnomaly = async () => {
-    if (!pickPos) {
-      toast.error("Tap the 3D beam to place the anomaly first");
+    if (!pickPos || !selectedId) {
+      toast.error("Tap the beam shell to set the anomaly location first");
       return;
     }
-    setSaving(true);
     try {
-      const { data } = await api.post("/anomalies", {
+      await api.post("/anomalies", {
         beam_id: selectedId,
         type: form.type,
         severity: form.severity,
         note: form.note,
         length_in: parseFloat(form.length_in) || 0,
-        position: {
-          x: +(pickPos.z || 0).toFixed(2),
-          y: +pickPos.y.toFixed(2),
-          z: +pickPos.x.toFixed(2),
-        },
+        position: { x: +pickPos.z.toFixed(1), y: +pickPos.y.toFixed(2), z: +pickPos.x.toFixed(2) },
       });
-      toast.success(data?.ncr_id ? "Anomaly pinned — NCR opened" : "Anomaly captured on twin");
-      toastNcrFromResponse(data);
+      toast.success("Anomaly captured on twin");
       setPickPos(null);
       setForm({ type: "crack", severity: "minor", note: "", length_in: 0 });
-      await loadBeam(selectedId);
-    } catch (err) {
-      console.error("[twin] save anomaly failed", err);
-      toast.error(formatApiErrorDetail(err.response?.data?.detail) || "Failed to save anomaly");
-    } finally {
-      setSaving(false);
+      const beamRes = await api.get(`/beams/${selectedId}`);
+      setBeam(beamRes.data);
+      const bedRes = await api.get(`/beds/${beamRes.data.bed_id}/twin`);
+      setBedTwin(bedRes.data);
+    } catch {
+      toast.error("Failed to save anomaly");
     }
   };
 
-  const saveMeasure = async () => {
-    if (!spec?.id || !selectedHw) {
-      toast.error("Select a hardware item on the twin first");
-      return;
-    }
-    const val = parseFloat(measuredFt);
-    if (Number.isNaN(val)) {
-      toast.error("Enter measured station from Marked End (ft)");
-      return;
-    }
-    setSaving(true);
-    try {
-      const { data } = await api.post(`/beam-specs/${spec.id}/measurements`, {
-        element_id: selectedHw.id,
-        measured_station_ft: val,
-      });
-      toast.success(data.within_tolerance ? "WITHIN TOLERANCE" : "OUT OF TOLERANCE");
-      toastNcrFromResponse(data);
-      setMeasuredFt("");
-      await loadBeam(selectedId);
-    } catch (err) {
-      console.error("[twin] measure failed", err);
-      toast.error(formatApiErrorDetail(err.response?.data?.detail) || "Failed to save measurement");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const assignToBed = async () => {
-    if (!plan) {
-      toast.error("Supervisors and production can assign beds");
-      return;
-    }
-    if (!selectedId || !assignBed) {
-      toast.error("Select a beam and a bed");
-      return;
-    }
-    setSaving(true);
-    try {
-      await api.post("/bed-assignments", {
-        bed_id: assignBed,
-        beam_id: selectedId,
-        job_id: beam?.job_id,
-        pour_id: beam?.pour_id,
-        scheduled_date: assignDate,
-        marked_end_toward: "header",
-      });
-      toast.success("Beam assigned to bed");
-    } catch (err) {
-      console.error("[twin] assign failed", err);
-      toast.error(formatApiErrorDetail(err.response?.data?.detail) || "Assignment conflict");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const q = beam ? qcState(beam.qc_state) : null;
+  const selectedBed = useMemo(() => beds.find((item) => item.id === selectedBedId), [beds, selectedBedId]);
+  const beamState = beam ? qcState(beam.qc_state) : null;
+  const bedStatus = selectedBed ? bedState(selectedBed.status) : null;
+  const blueprint = beam?.product_type?.blueprint || {};
+  const blueprintSource = beam?.blueprint_source || { status: "legacy_seed" };
+  const draftTwinBlocked = blueprintSource.status === "draft";
+  const strandCount = (blueprint.strand_pattern?.rows || []).reduce((sum, row) => sum + (row.count || 0), 0);
+  const stirrupCount = (() => {
+    const stirrups = blueprint.stirrups || {};
+    const spacingFt = (stirrups.spacing_in || 24) / 12;
+    const startFt = stirrups.start_ft ?? 0;
+    const endFt = stirrups.end_ft ?? beam?.length_ft ?? 0;
+    if (!spacingFt || endFt <= startFt) return 0;
+    return Math.floor((endFt - startFt) / spacingFt) + 1;
+  })();
+  const featureCounts = [
+    ["Lift loops", blueprint.lift_loops?.length || 0],
+    ["Inserts", blueprint.inserts?.length || 0],
+    ["Tubes", blueprint.tubes?.length || 0],
+    ["Tie-rods", blueprint.tie_rod_openings?.length || 0],
+    ["Drain holes", blueprint.drain_holes?.length || 0],
+    ["Hold-downs", blueprint.hold_downs?.length || 0],
+    ["Stirrups", stirrupCount],
+    ["Strand ends", strandCount * 2],
+    ["Bituminous pockets", blueprint.bituminous_ends?.length || 0],
+  ];
+  const quickDimensions = beam ? [
+    ["OAL", `${beam.length_ft} ft`],
+    ["Depth", `${blueprint.cross_section?.overall_depth_in || blueprint.cross_section?.outer_depth_in || beam.product_type?.depth_in || "—"} in`],
+    ["Width", `${blueprint.cross_section?.top_flange_width_in || blueprint.cross_section?.outer_width_in || beam.product_type?.width_in || "—"} in`],
+    beam.twin_type === "box_beam"
+      ? ["Void", `${blueprint.cross_section?.void_width_in || "—"} × ${blueprint.cross_section?.void_depth_in || "—"} in`]
+      : ["Top flange", `${blueprint.cross_section?.top_flange_width_in || "—"} × ${blueprint.cross_section?.top_flange_thickness_in || "—"} in`],
+    beam.twin_type === "box_beam"
+      ? ["Wall", `${blueprint.cross_section?.wall_thickness_in || "—"} in`]
+      : ["Web / bottom flange", `${blueprint.cross_section?.web_thickness_in || "—"} in / ${blueprint.cross_section?.bottom_flange_width_in || "—"} × ${blueprint.cross_section?.bottom_flange_thickness_in || "—"} in`],
+    ["Stirrups", blueprint.stirrups?.spacing_in ? `@ ${blueprint.stirrups.spacing_in} in from ${blueprint.stirrups.start_ft ?? 0}' to ${blueprint.stirrups.end_ft ?? beam.length_ft}'` : "—"],
+  ] : [];
+  const qcStations = beam ? [
+    ["Lift loops", stationList(blueprint.lift_loops || [])],
+    ["Inserts", stationList(blueprint.inserts || [])],
+    ["Tubes", stationList(blueprint.tubes || [])],
+    ["Drains", stationList(blueprint.drain_holes || [])],
+    ["Hold-downs", stationList(blueprint.hold_downs || [])],
+    ["Grooves", stationList(blueprint.grout_grooves || [])],
+    ["Bituminous", (blueprint.bituminous_ends || []).length ? (blueprint.bituminous_ends || []).map((item) => `${item.end?.toUpperCase() || "END"} ${item.length_in || 0}"`).join(" · ") : "—"],
+  ] : [];
 
   return (
     <Layout>
       <PageHeader
-        title="Digital Twin"
-        subtitle={spec ? `${spec.product_name} · ${spec.geometry?.length_ft}' · ${spec.status}` : "Upload a shop drawing to generate a blueprint-accurate twin"}
+        title="Digital Twin Viewer"
+        subtitle="Production-grade beam and bed twins driven by product blueprint data"
         right={
-          <div className="flex flex-wrap gap-2 justify-end">
-            <ARMeasureLink beamId={selectedId} purpose="tape" />
-            {beam?.qr_token && (
-              <Link
-                to={`/b/${beam.qr_token}`}
-                className="min-h-12 px-4 border border-[#1C2230] rounded-none flex items-center gap-2 text-sm font-semibold uppercase tracking-wider hover:border-primary hover:text-primary"
-                data-testid="twin-dossier-link"
-              >
-                <QrCode className="w-4 h-4" /> Dossier
-              </Link>
-            )}
-            {selectedId && (
-              <Link
-                to={`/qr?beam=${selectedId}`}
-                className="min-h-12 px-4 border border-[#1C2230] rounded-none flex items-center gap-2 text-sm font-semibold uppercase tracking-wider hover:border-primary hover:text-primary"
-                data-testid="twin-qr-reprint"
-              >
-                <QrCode className="w-4 h-4" /> QR
-              </Link>
-            )}
-            <Link
-              to={selectedId ? `/planner?beam=${selectedId}` : "/planner"}
-              className="min-h-12 px-4 border border-[#1C2230] rounded-none flex items-center gap-2 text-sm font-semibold uppercase tracking-wider hover:border-primary hover:text-primary"
-            >
-              <CalendarDays className="w-4 h-4" /> Planner
-            </Link>
-            <Link
-              to="/drawings"
-              className="min-h-12 px-4 border border-[#1C2230] rounded-none flex items-center gap-2 text-sm font-semibold uppercase tracking-wider hover:border-primary hover:text-primary"
-            >
-              <Upload className="w-4 h-4" /> Drawings
-            </Link>
+          <div className="flex items-center gap-3">
+            <button onClick={() => setShowCallouts((value) => !value)} className={`min-h-11 px-4 rounded-sm border text-xs font-mono uppercase tracking-wider ${showCallouts ? "border-primary text-primary" : "border-border text-muted-foreground"}`}>
+              {showCallouts ? "Hide" : "Show"} Callouts
+            </button>
+            <div className="flex border border-border rounded-sm overflow-hidden">
+              {[["beam", Box, "Beam"], ["bed", Layers3, "Bed"]].map(([value, Icon, label]) => (
+                <button key={value} onClick={() => setMode(value)} className={`min-h-11 px-4 flex items-center gap-2 text-xs font-mono uppercase tracking-wider ${mode === value ? "bg-primary text-white" : "bg-background text-muted-foreground"}`}>
+                  <Icon className="w-4 h-4" /> {label}
+                </button>
+              ))}
+            </div>
           </div>
         }
       />
-      <div className="p-4 sm:p-6 lg:p-8 grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6">
-        <div className={`${cardClass} overflow-hidden flex flex-col lg:col-span-2`} style={{ minHeight: 480 }}>
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-4 sm:px-5 py-3 border-b border-[#1C2230]">
-            <select
-              data-testid="twin-beam-select"
-              value={selectedId}
-              onChange={(e) => setSelectedId(e.target.value)}
-              className={`${inputClass} sm:max-w-xs`}
-            >
-              {beams.map((b) => (
-                <option key={b.id} value={b.id}>
-                  {b.mark} · {b.twin_type === "box_beam" ? "Box" : "I-Beam"}
-                </option>
-              ))}
-            </select>
+
+      <div className="p-8 grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="lg:col-span-2 bg-card border border-border rounded-sm overflow-hidden flex flex-col" style={{ minHeight: 640 }}>
+          <div className="px-5 py-3 border-b border-border flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+            <div className="flex flex-wrap items-center gap-3">
+              <select value={selectedBedId} onChange={(e) => setSelectedBedId(e.target.value)} className="bg-background border border-border rounded-sm px-3 min-h-12 font-mono text-sm">
+                {beds.map((item) => <option key={item.id} value={item.id}>BED {item.bed_number} · {item.name}</option>)}
+              </select>
+              <select value={selectedId} onChange={(e) => setSelectedId(e.target.value)} className="bg-background border border-border rounded-sm px-3 min-h-12 font-mono text-sm" data-testid="twin-beam-select">
+                {beams.filter((item) => !selectedBedId || item.bed_id === selectedBedId).map((item) => <option key={item.id} value={item.id}>{item.mark} · {item.twin_type === "box_beam" ? "Box" : "I-Beam"}</option>)}
+              </select>
+            </div>
             <div className="flex items-center gap-2">
-              {spec && (
-                <span className="font-mono text-xs font-bold tracking-widest px-3 py-1 rounded-none" style={{ color: spec.status === "locked" ? "#00E676" : "#FFD600", border: `1px solid ${spec.status === "locked" ? "#00E67655" : "#FFD60055"}` }}>
-                  SPEC {spec.status.toUpperCase()}
-                </span>
-              )}
-              {q && (
-                <span className="font-mono text-xs font-bold tracking-widest px-3 py-1 rounded-none" style={{ color: q.color, border: `1px solid ${q.color}55` }}>
-                  {q.label}
-                </span>
-              )}
+              {blueprintSource.status === "locked" && <span className="font-mono text-xs font-bold tracking-widest px-3 py-1 rounded-sm border border-primary/40 text-primary flex items-center gap-2"><Lock className="w-3.5 h-3.5" /> LOCKED BLUEPRINT</span>}
+              {blueprintSource.status === "draft" && <span className="font-mono text-xs font-bold tracking-widest px-3 py-1 rounded-sm border border-[#FFD60055] text-[#FFD600] flex items-center gap-2"><AlertTriangle className="w-3.5 h-3.5" /> DRAFT EXTRACTION</span>}
+              {bedStatus && <span className="font-mono text-xs font-bold tracking-widest px-3 py-1 rounded-sm" style={{ color: bedStatus.color, border: `1px solid ${bedStatus.color}55` }}>{bedStatus.label}</span>}
+              {beamState && <span className="font-mono text-xs font-bold tracking-widest px-3 py-1 rounded-sm" style={{ color: beamState.color, border: `1px solid ${beamState.color}55` }}>{beamState.label}</span>}
             </div>
           </div>
-          <div className="flex-1 min-h-[360px]">
-            {beam ? (
-              <BeamViewer
-                spec={spec}
-                twinType={beam.twin_type}
-                length={beam.length_ft}
+
+          <div className="flex-1">
+            {draftTwinBlocked ? (
+              <div className="h-full flex items-center justify-center p-10">
+                <div className="max-w-lg border border-[#FFD60055] bg-[#FFD60010] rounded-sm p-6 text-sm">
+                  <div className="flex items-center gap-2 text-[#FFD600] font-display font-bold uppercase tracking-wider"><AlertTriangle className="w-5 h-5" /> Locked blueprint required</div>
+                  <p className="text-muted-foreground mt-3">This beam is linked to a draft blueprint extraction. BedForge blocks production twin rendering until a reviewer verifies and locks the blueprint revision.</p>
+                  <p className="text-muted-foreground mt-2">Once locked, geometry, strand rows, hold-downs, hardware, and inspection expectations will come only from the immutable revision.</p>
+                </div>
+              </div>
+            ) : mode === "beam" && beam ? (
+              <BeamTwinViewer
+                beam={beam}
                 anomalies={beam.anomalies || []}
-                measurements={beam.measurements || []}
-                selectedId={selectedHw?.id}
-                onSelectHardware={(item) => {
-                  setSelectedHw(item);
-                  setTab("measure");
-                  setMeasuredFt(String(item.position?.station_ft ?? ""));
-                  toast.info(`${item.name} · design ${item.position?.station_ft}' from ME`);
+                showCallouts={showCallouts}
+                onSurfacePick={(point) => {
+                  setPickPos(point);
+                  toast.info("Surface point marked for anomaly capture");
                 }}
-                pickPos={pickPos}
-                onPick={(p) => {
-                  setPickPos(p);
-                  toast.info("Point marked — fill details & save");
+                onHardwareSelect={(item) => setSelectedHardware(item)}
+              />
+            ) : mode === "bed" && bedTwin ? (
+              <BedTwinViewer
+                bed={bedTwin}
+                selectedBeamId={selectedId}
+                showCallouts={showCallouts}
+                onBeamSelect={(item) => {
+                  setSelectedId(item.id);
+                  setMode("beam");
                 }}
+                onHardwareSelect={(item) => setSelectedHardware(item)}
               />
             ) : (
-              <div className="flex items-center justify-center h-full text-muted-foreground">
-                <Loader2 className="w-6 h-6 animate-spin" />
-              </div>
+              <div className="h-full flex items-center justify-center text-muted-foreground"><Loader2 className="w-6 h-6 animate-spin" /></div>
             )}
-          </div>
-          <div className="px-4 py-2 border-t border-[#1C2230] flex flex-wrap gap-2">
-            {Object.entries(ELEMENT_COLORS).slice(0, 8).map(([kind, color]) => (
-              <span key={kind} className="text-[10px] font-mono flex items-center gap-1">
-                <span className="w-2 h-2 inline-block" style={{ background: color }} />
-                {KIND_LABELS[kind] || kind}
-              </span>
-            ))}
           </div>
         </div>
 
-        <div className="space-y-4 sm:space-y-6">
-          {(beam?.traceability?.heat_numbers || []).length > 0 && (
-            <div className={`${cardClass} p-5 sm:p-6`} data-testid="strand-traceability">
-              <h3 className="font-display font-bold uppercase tracking-wider text-lg">Strand heat chain</h3>
-              <p className="text-[10px] font-mono text-muted-foreground mt-1">{beam.traceability.chain}</p>
-              <div className="mt-3 font-mono text-sm text-[#00E676]">
-                {(beam.traceability.heat_numbers || []).map((h) => `HEAT ${h}`).join("  ·  ")}
-              </div>
-              <div className="text-[10px] font-mono text-muted-foreground mt-1">
-                {(beam.traceability.reel_numbers || []).map((r) => `REEL ${r}`).join("  ·  ")}
-              </div>
-              <Link to="/rolls" className="inline-block mt-3 text-[10px] font-mono uppercase tracking-widest text-primary">Open strand rolls</Link>
-            </div>
-          )}
-          <div className={`${cardClass} p-5 sm:p-6 space-y-3`} data-testid="assign-to-bed">
-            <h3 className="font-display font-bold uppercase tracking-wider text-lg">Assign to Bed</h3>
-            <Field label="Casting bed">
-              <select data-testid="twin-assign-bed" value={assignBed} onChange={(e) => setAssignBed(e.target.value)} className={inputClass}>
-                {beds.map((b) => (
-                  <option key={b.id} value={b.id}>Bed {b.bed_number} · {b.length_ft} ft</option>
-                ))}
-              </select>
-            </Field>
-            <Field label="Scheduled date">
-              <input data-testid="twin-assign-date" type="date" value={assignDate} onChange={(e) => setAssignDate(e.target.value)} className={inputClass} />
-            </Field>
-            <button
-              data-testid="twin-assign-btn"
-              type="button"
-              onClick={assignToBed}
-              disabled={saving || !plan}
-              className="w-full min-h-12 bg-primary text-white font-display font-bold uppercase tracking-widest rounded-none hover:bg-white hover:text-black disabled:opacity-60"
-            >
-              {saving ? "Assigning…" : "Assign to Bed"}
-            </button>
-            <Link to={`/planner?beam=${selectedId}&bed=${assignBed}&date=${assignDate}`} className="block text-center text-[10px] font-mono uppercase tracking-widest text-muted-foreground hover:text-primary">
-              Open in bed twin planner
-            </Link>
-          </div>
-
-          <div className={`${cardClass} p-2 grid grid-cols-3`}>
-            {["hardware", "measure", "anomaly"].map((t) => (
-              <button
-                key={t}
-                onClick={() => setTab(t)}
-                className={`min-h-12 font-condensed uppercase tracking-wider text-sm ${tab === t ? "bg-primary text-white" : "text-muted-foreground"}`}
-              >
-                {t === "measure" ? "tape" : t}
-              </button>
-            ))}
-          </div>
-
-          {tab === "hardware" && (
-            <div className={`${cardClass} p-5 sm:p-6`}>
-              <h3 className="font-display font-bold uppercase tracking-wider text-lg mb-3">Hardware from spec</h3>
-              {!spec && <div className="text-sm text-muted-foreground font-mono">No BeamSpec. Upload a drawing to generate the twin.</div>}
-              <div className="max-h-[420px] overflow-y-auto space-y-1" data-testid="twin-hardware-list">
-                {(spec?.hardware || []).map((h) => {
-                  const m = measurementMap[h.id];
-                  const color = hardwareColor(h.kind, m);
-                  return (
-                    <button
-                      type="button"
-                      key={h.id}
-                      onClick={() => { setSelectedHw(h); setTab("measure"); setMeasuredFt(String(h.position?.station_ft ?? "")); }}
-                      className="w-full text-left border-b border-[#1C2230] py-2 hover:border-primary"
-                    >
-                      <div className="flex justify-between gap-2">
-                        <span className="font-mono text-xs font-bold" style={{ color }}>{h.name}</span>
-                        <span className="font-mono text-xs text-muted-foreground">{h.position?.station_ft}'</span>
-                      </div>
-                      <div className="text-[10px] text-muted-foreground font-mono">{h.type_code || h.kind} · {h.size}</div>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-
-          {tab === "measure" && (
-            <div className={`${cardClass} p-5 sm:p-6 space-y-4`}>
-              <h3 className="font-display font-bold uppercase tracking-wider text-lg flex items-center gap-2">
-                <Ruler className="w-5 h-5 text-primary" /> Measured vs design
-              </h3>
-              <div className="text-xs font-mono px-3 py-2 border border-[#1C2230] space-y-1" data-testid="measure-target">
-                {selectedHw ? (
-                  <>
-                    <div>{selectedHw.name} · DESIGN {selectedHw.position?.station_ft}' ME · TOL ±{selectedHw.tolerance_in}"</div>
-                    <div className="text-muted-foreground">{selectedHw.type_code || selectedHw.kind} · {selectedHw.size} · soffit {selectedHw.position?.height_from_soffit_in}"</div>
-                    {selectedHw.notes ? <div className="text-muted-foreground">{selectedHw.notes}</div> : null}
-                  </>
-                ) : (
-                  "TAP HARDWARE ON THE TWIN"
-                )}
-              </div>
-              <Field label="Measured station from Marked End (ft)">
-                <input data-testid="measure-station" type="number" step="0.01" value={measuredFt} onChange={(e) => setMeasuredFt(e.target.value)} className={inputClass} />
-              </Field>
-              <button
-                data-testid="measure-save"
-                onClick={saveMeasure}
-                disabled={saving || !spec?.id}
-                className="w-full min-h-14 bg-primary text-white font-display font-bold uppercase tracking-widest rounded-none hover:bg-white hover:text-black disabled:opacity-60"
-              >
-                {saving ? "Saving…" : "Check tolerance"}
-              </button>
-              {selectedHw && measurementMap[selectedHw.id] && (
-                <div className="font-mono text-sm" style={{ color: measurementMap[selectedHw.id].within_tolerance ? "#00E676" : "#FF3366" }}>
-                  Δ {measurementMap[selectedHw.id].delta_in}" · {measurementMap[selectedHw.id].within_tolerance ? "PASS" : "FAIL"}
+        <div className="space-y-6">
+          <div className="bg-card border border-border rounded-sm p-6">
+            <h3 className="font-display font-bold uppercase tracking-wider text-lg mb-4 flex items-center gap-2"><Ruler className="w-5 h-5 text-primary" /> Blueprint Callouts</h3>
+            {beam ? (
+              <div className="space-y-4 text-sm font-mono">
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="border border-border rounded-sm px-3 py-2"><div className="text-xs uppercase tracking-widest text-muted-foreground">Beam</div><div className="mt-1 text-white">{beam.mark}</div></div>
+                  <div className="border border-border rounded-sm px-3 py-2"><div className="text-xs uppercase tracking-widest text-muted-foreground">Product</div><div className="mt-1 text-white">{beam.product_type?.name || "—"}</div></div>
+                  <div className="border border-border rounded-sm px-3 py-2"><div className="text-xs uppercase tracking-widest text-muted-foreground">Length</div><div className="mt-1 text-white">{beam.length_ft} ft</div></div>
+                  <div className="border border-border rounded-sm px-3 py-2"><div className="text-xs uppercase tracking-widest text-muted-foreground">Marked End</div><div className="mt-1 text-white">{blueprint.marked_end?.label || "MARKED END"}</div></div>
+                  <div className="border border-border rounded-sm px-3 py-2 col-span-2"><div className="text-xs uppercase tracking-widest text-muted-foreground">Blueprint source</div><div className="mt-1 text-white">{blueprintSource.status === "locked" ? `Locked revision ${blueprintSource.revision_id?.slice(0, 8)}` : blueprintSource.status.replace(/_/g, " ")}</div></div>
                 </div>
-              )}
-              <div className="border-t border-[#1C2230] pt-3 space-y-3" data-testid="twin-ar-history">
-                <div className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground mb-2 flex items-center gap-2">
-                  <ScanLine className="w-3 h-3" /> Digital tape vs twin
+                <div className="border border-border rounded-sm p-3">
+                  <div className="text-xs uppercase tracking-widest text-muted-foreground mb-3 flex items-center gap-2"><ScanLine className="w-4 h-4" /> Embedded details</div>
+                  <div className="grid grid-cols-2 gap-2">
+                    {featureCounts.map(([label, count]) => (
+                      <div key={label} className="flex items-center justify-between text-xs"><span className="text-muted-foreground">{label}</span><span className="text-white">{count}</span></div>
+                    ))}
+                  </div>
                 </div>
-                {(beam?.tape_runs || []).slice(0, 3).map((run) => (
-                  <div key={run.id} className="border border-[#1C2230] p-3 space-y-1">
-                    <div className="font-mono text-[11px]" style={{ color: (run.compare?.rescan_count || 0) ? "#FF3366" : "#00E676" }}>
-                      {run.shot_count} pts · {run.compare?.pass_count || 0} pass · {run.compare?.rescan_count || 0} rescan · {run.engine}
-                    </div>
-                    {run.compare?.ai?.summary && (
-                      <p className="text-xs text-[#D5D9E2] leading-relaxed">{run.compare.ai.summary}</p>
-                    )}
-                    {(run.compare?.needs_rescan || []).slice(0, 6).map((row) => (
-                      <div key={`${run.id}-${row.station_index}`} className="font-mono text-[10px]" style={{ color: "#FF3366" }}>
-                        Rescan #{row.station_index} · {row.element_name || "station"} · {row.measured_station_ft}' vs {row.design_station_ft}' · {row.flag}
+                <div className="border border-border rounded-sm p-3">
+                  <div className="text-xs uppercase tracking-widest text-muted-foreground mb-3">QC quick dimensions</div>
+                  <div className="space-y-2">
+                    {quickDimensions.map(([label, value]) => (
+                      <div key={label} className="flex items-start justify-between gap-3 text-xs font-mono">
+                        <span className="text-muted-foreground">{label}</span>
+                        <span className="text-right text-white">{value}</span>
                       </div>
                     ))}
                   </div>
-                ))}
-                {!(beam?.tape_runs || []).length && (
-                  <div className="text-xs font-mono text-muted-foreground">No multi-point tape runs on this beam yet. Shoot from Digital Tape — origin on the header, snap on green.</div>
-                )}
-                {(beam?.ar_measurements || []).slice(0, 6).map((m) => (
-                  <div key={m.id} className="border-b border-[#1C2230] py-2 font-mono text-[11px]">
-                    <span style={{ color: m.level ? "#00E676" : "#FF3366" }}>{m.level ? "LEVEL" : "OFF"}</span>
-                    {" · "}{m.distance_ft} ft · Δ{m.delta_height_in}" · {m.engine}
-                    {m.forced ? " · FORCED" : ""}
-                    {m.station_index ? ` · #${m.station_index}` : ""}
-                  </div>
-                ))}
-                {!(beam?.ar_measurements || []).length && (
-                  <div className="text-xs font-mono text-muted-foreground">No AR shots on this beam yet.</div>
-                )}
-              </div>
-            </div>
-          )}
-
-          {tab === "anomaly" && (
-            <div className={`${cardClass} p-5 sm:p-6`}>
-              <h3 className="font-display font-bold uppercase tracking-wider text-lg mb-4 flex items-center gap-2">
-                <MapPin className="w-5 h-5 text-primary" /> Capture Anomaly
-              </h3>
-              <div className="space-y-4">
-                <div
-                  className={`text-xs font-mono px-3 py-2 rounded-none border ${pickPos ? "border-primary text-primary" : "border-[#1C2230] text-muted-foreground"}`}
-                  data-testid="pick-status"
-                >
-                  {pickPos ? `POINT SET · z${(pickPos.z || 0).toFixed(1)}` : "TAP THE BEAM TO SET LOCATION"}
                 </div>
-                <Field label="Type">
-                  <select data-testid="anomaly-type" value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })} className={inputClass}>
-                    {["crack", "spall", "honeycomb", "chip", "stain", "other"].map((t) => <option key={t} value={t}>{t}</option>)}
-                  </select>
-                </Field>
-                <Field label="Severity">
-                  <select data-testid="anomaly-severity" value={form.severity} onChange={(e) => setForm({ ...form, severity: e.target.value })} className={inputClass}>
-                    {["minor", "moderate", "major"].map((t) => <option key={t} value={t}>{t}</option>)}
-                  </select>
-                </Field>
-                <Field label="Length (in)">
-                  <input data-testid="anomaly-length" type="number" value={form.length_in} onChange={(e) => setForm({ ...form, length_in: e.target.value })} className={inputClass} />
-                </Field>
-                <Field label="Note">
-                  <textarea data-testid="anomaly-note" value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} rows={2} className={`${inputClass} py-2`} />
-                </Field>
-                <button data-testid="save-anomaly" onClick={saveAnomaly} disabled={saving} className="w-full min-h-14 bg-primary text-white font-display font-bold uppercase tracking-widest rounded-none hover:bg-white hover:text-black disabled:opacity-60">
-                  {saving ? "Saving…" : "Save To Twin"}
-                </button>
-              </div>
-              <div className="mt-4 space-y-2" data-testid="anomaly-list">
-                {(beam?.anomalies || []).map((a) => {
-                  const color = a.severity === "major" ? "#FF3366" : a.severity === "moderate" ? "#FFD600" : "#2979FF";
-                  return (
-                    <div key={a.id} className="border-b border-[#1C2230] pb-2">
-                      <span className="font-mono text-sm font-bold" style={{ color }}>{a.type.toUpperCase()} · {a.severity}</span>
+                <div className="border border-border rounded-sm p-3">
+                  <div className="text-xs uppercase tracking-widest text-muted-foreground mb-3">QC hardware stations</div>
+                  <div className="space-y-2">
+                    {qcStations.map(([label, value]) => (
+                      <div key={label} className="flex items-start justify-between gap-3 text-xs font-mono">
+                        <span className="text-muted-foreground">{label}</span>
+                        <span className="text-right text-white">{value}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                {selectedBed && (
+                  <div className="border border-border rounded-sm p-3">
+                    <div className="text-xs uppercase tracking-widest text-muted-foreground mb-2">Bed order</div>
+                    <div className="space-y-2">
+                      {beams.filter((item) => item.bed_id === selectedBedId).sort((a, b) => (a.position_on_bed || 0) - (b.position_on_bed || 0)).map((item) => (
+                        <div key={item.id} className={`flex items-center justify-between text-xs font-mono rounded-sm px-2 py-1 border ${item.id === selectedId ? "border-primary text-primary" : "border-border text-muted-foreground"}`}>
+                          <span>POS {String(item.position_on_bed || 0).padStart(2, "0")}</span>
+                          <span className={item.id === selectedId ? "text-white" : "text-white/80"}>{item.mark} · {item.length_ft} ft · {item.product_type?.name || item.twin_type}</span>
+                        </div>
+                      ))}
                     </div>
-                  );
-                })}
+                  </div>
+                )}
               </div>
+            ) : <div className="text-sm text-muted-foreground font-mono">Load a beam to inspect blueprint data.</div>}
+          </div>
+
+          <div className="bg-card border border-border rounded-sm p-6">
+            <h3 className="font-display font-bold uppercase tracking-wider text-lg mb-4 flex items-center gap-2"><Construction className="w-5 h-5 text-primary" /> Hardware Inspector</h3>
+            {selectedHardware ? (
+              <div className="space-y-3">
+                <div className="border border-border rounded-sm px-3 py-2">
+                  <div className="text-xs uppercase tracking-widest text-muted-foreground">Selected</div>
+                  <div className="mt-1 font-mono text-white">{selectedHardware.type} · {selectedHardware.beamMark}</div>
+                </div>
+                <SpecRows spec={selectedHardware.spec} />
+              </div>
+            ) : (
+              <div className="text-sm text-muted-foreground font-mono">Tap any loop, insert, tube, tie-rod, drain, strand, groove, pocket, or hold-down to inspect its spec.</div>
+            )}
+          </div>
+
+          <div className="bg-card border border-border rounded-sm p-6">
+            <h3 className="font-display font-bold uppercase tracking-wider text-lg mb-4 flex items-center gap-2"><MapPin className="w-5 h-5 text-primary" /> Capture Anomaly</h3>
+            <div className="space-y-4">
+              <div className={`text-xs font-mono px-3 py-2 rounded-sm border ${pickPos ? "border-primary text-primary" : "border-border text-muted-foreground"}`} data-testid="pick-status">
+                {pickPos ? `POINT SET · STA ${pickPos.z.toFixed(1)} FT · EL ${pickPos.y.toFixed(2)} FT` : "TAP THE BEAM SHELL TO SET LOCATION"}
+              </div>
+              <div>
+                <label className="text-xs font-mono uppercase tracking-widest text-muted-foreground">Type</label>
+                <select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })} className="mt-1 w-full bg-background border border-border rounded-sm px-3 min-h-12 font-mono text-sm" data-testid="anomaly-type">
+                  {["crack", "spall", "honeycomb", "chip", "stain", "other"].map((item) => <option key={item} value={item}>{item}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="text-xs font-mono uppercase tracking-widest text-muted-foreground">Severity</label>
+                <select value={form.severity} onChange={(e) => setForm({ ...form, severity: e.target.value })} className="mt-1 w-full bg-background border border-border rounded-sm px-3 min-h-12 font-mono text-sm" data-testid="anomaly-severity">
+                  {["minor", "moderate", "major"].map((item) => <option key={item} value={item}>{item}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="text-xs font-mono uppercase tracking-widest text-muted-foreground">Length (in)</label>
+                <input type="number" value={form.length_in} onChange={(e) => setForm({ ...form, length_in: e.target.value })} className="mt-1 w-full bg-background border border-border rounded-sm px-3 min-h-12 font-mono text-sm" data-testid="anomaly-length" />
+              </div>
+              <div>
+                <label className="text-xs font-mono uppercase tracking-widest text-muted-foreground">Note</label>
+                <textarea value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} rows={2} className="mt-1 w-full bg-background border border-border rounded-sm px-3 py-2 font-mono text-sm" data-testid="anomaly-note" />
+              </div>
+              <button onClick={saveAnomaly} className="w-full min-h-14 bg-primary text-white font-display font-bold uppercase tracking-widest rounded-sm hover:bg-white hover:text-black transition-colors duration-100" data-testid="save-anomaly">Save To Twin</button>
             </div>
-          )}
+          </div>
         </div>
       </div>
     </Layout>

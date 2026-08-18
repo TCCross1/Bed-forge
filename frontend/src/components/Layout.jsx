@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { Link, NavLink, useNavigate, useLocation } from "react-router-dom";
 import {
   LayoutGrid,
@@ -25,11 +25,15 @@ import {
   FlaskConical,
   Factory,
   AlertTriangle,
+  KeyRound,
+  MonitorPlay,
+  ScrollText,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { useDevice } from "../context/DeviceContext";
 import { useCompany } from "../context/CompanyContext";
 import { ROLE_LABELS, isExec } from "../lib/constants";
+import api from "../lib/api";
 import OfflineBanner from "./OfflineBanner";
 import ForgeCoach from "./ForgeCoach";
 
@@ -68,14 +72,14 @@ export function BrandLockup({ className = "h-12 w-auto", testid = "brand-lockup"
 
 const PRIMARY_NAV = [
   { to: "/", label: "Board", icon: LayoutGrid, testid: "nav-dashboard" },
-  { to: "/twin", label: "Twin", icon: Box, testid: "nav-twin" },
+  { to: "/twin", label: "Twin", icon: Box, testid: "nav-twin", feature: "digital_twin" },
   { to: "/rolls", label: "Rolls", icon: ScanBarcode, testid: "nav-rolls" },
   { to: "/fresh", label: "Fresh Test", icon: FlaskConical, testid: "nav-fresh", accent: true },
-  { to: "/batch", label: "Batch Plant", icon: Factory, testid: "nav-batch" },
+  { to: "/batch", label: "Batch Plant", icon: Factory, testid: "nav-batch", feature: "batch_plant" },
   { to: "/inspection", label: "Inspect", icon: ClipboardCheck, testid: "nav-inspection" },
   { to: "/tags", label: "Tags", icon: Tags, testid: "nav-tags" },
   { to: "/tension", label: "Tension", icon: Calculator, testid: "nav-tension" },
-  { to: "/forms", label: "Forms", icon: FileSpreadsheet, testid: "nav-forms" },
+  { to: "/forms", label: "Forms", icon: FileSpreadsheet, testid: "nav-forms", feature: "package_export" },
   { to: "/packages", label: "Packages", icon: Package, testid: "nav-packages" },
 ];
 
@@ -83,13 +87,14 @@ const FIELD_NAV = [
   { to: "/", label: "Board", icon: LayoutGrid, testid: "nav-dashboard" },
   { to: "/rolls", label: "Rolls", icon: ScanBarcode, testid: "nav-rolls" },
   { to: "/fresh", label: "Fresh", icon: FlaskConical, testid: "nav-fresh", accent: true },
-  { to: "/twin", label: "Twin", icon: Box, testid: "nav-twin" },
+  { to: "/twin", label: "Twin", icon: Box, testid: "nav-twin", feature: "digital_twin" },
   { to: "/tension", label: "Tension", icon: Calculator, testid: "nav-tension" },
 ];
 
 const SECONDARY_NAV = [
-  { to: "/ncr", label: "NCR", icon: AlertTriangle, testid: "nav-ncr" },
+  { to: "/ncr", label: "NCR Board", icon: AlertTriangle, testid: "nav-ncr", feature: "ncr" },
   { to: "/planner", label: "Planner", icon: CalendarDays, testid: "nav-planner" },
+  { to: "/blueprints", label: "Blueprints", icon: ScrollText, testid: "nav-blueprints", feature: "blueprint_intelligence" },
   { to: "/drawings", label: "Drawings", icon: Upload, testid: "nav-drawings" },
   { to: "/camber", label: "Camber", icon: Ruler, testid: "nav-camber" },
   { to: "/finish", label: "Finish", icon: Sparkles, testid: "nav-finish" },
@@ -101,8 +106,9 @@ const SECONDARY_NAV = [
 ];
 
 const COMMAND_SECONDARY = [
-  { to: "/ncr", label: "NCR", icon: AlertTriangle, testid: "nav-ncr" },
+  { to: "/ncr", label: "NCR Board", icon: AlertTriangle, testid: "nav-ncr", feature: "ncr" },
   { to: "/planner", label: "Planner", icon: CalendarDays, testid: "nav-planner" },
+  { to: "/blueprints", label: "Blueprints", icon: ScrollText, testid: "nav-blueprints", feature: "blueprint_intelligence" },
   { to: "/drawings", label: "Drawings", icon: Upload, testid: "nav-drawings" },
   { to: "/camber", label: "Camber", icon: Ruler, testid: "nav-camber" },
   { to: "/finish", label: "Finish", icon: Sparkles, testid: "nav-finish" },
@@ -123,8 +129,8 @@ function linkClass(isActive, accent) {
   return "flex items-center gap-3 px-4 min-h-12 rounded-none font-medium tracking-wide transition-colors duration-100 text-muted-foreground hover:bg-secondary hover:text-white";
 }
 
-function NavItems({ items, onNavigate, endHome }) {
-  return items.map((item) => {
+function NavItems({ items, onNavigate, endHome, license }) {
+  return items.filter((item) => !item.feature || !license || (license.status !== "expired" && license.feature_flags?.[item.feature])).map((item) => {
     const Icon = item.icon;
     return (
       <NavLink
@@ -164,13 +170,20 @@ export default function Layout({ children }) {
   const navigate = useNavigate();
   const location = useLocation();
   const [moreOpen, setMoreOpen] = useState(false);
+  const [license, setLicense] = useState(null);
+
+  useEffect(() => {
+    if (!user) return;
+    api.get("/license").then((res) => setLicense(res.data)).catch(() => {});
+  }, [user]);
   const command = device.command;
   const field = device.field;
   const secondary = [
     ...(command ? COMMAND_SECONDARY : SECONDARY_NAV),
+    { to: "/licensing", label: "License", icon: KeyRound, testid: "nav-licensing", feature: "licensing" },
     ...(isExec(user?.role) ? [
       { to: "/finance", label: "Dollars", icon: DollarSign, testid: "nav-finance" },
-      { to: "/command", label: "Command", icon: Shield, testid: "nav-command" },
+      { to: "/command-board", label: "Command", icon: MonitorPlay, testid: "nav-command-board", feature: "command_board" },
     ] : []),
   ];
   const fieldMore = [
@@ -180,13 +193,13 @@ export default function Layout({ children }) {
     { to: "/guide", label: "Tutorial", icon: BookOpen, testid: "nav-guide" },
     ...(isExec(user?.role) ? [
       { to: "/finance", label: "Dollars", icon: DollarSign, testid: "nav-finance" },
-      { to: "/command", label: "Command", icon: Shield, testid: "nav-command" },
+      { to: "/command-board", label: "Command", icon: MonitorPlay, testid: "nav-command-board", feature: "command_board" },
     ] : []),
     { to: "/scan", label: "Scan QR", icon: ScanLine, testid: "nav-scan" },
     { to: "/qr", label: "QR Labels", icon: QrCode, testid: "nav-qr" },
     { to: "/inspection", label: "Inspect", icon: ClipboardCheck, testid: "nav-inspection" },
     { to: "/tags", label: "Tags", icon: Tags, testid: "nav-tags" },
-    { to: "/forms", label: "Forms", icon: FileSpreadsheet, testid: "nav-forms" },
+    { to: "/forms", label: "Forms", icon: FileSpreadsheet, testid: "nav-forms", feature: "package_export" },
     { to: "/packages", label: "Packages", icon: Package, testid: "nav-packages" },
     { to: "/measure", label: "Digital Tape", icon: ScanLine, testid: "nav-measure" },
     ...SECONDARY_NAV.filter((i) => !["/measure", "/scan", "/qr", "/guide", "/ncr"].includes(i.to)),
@@ -211,9 +224,9 @@ export default function Layout({ children }) {
 
         <nav className="flex-1 py-4 flex flex-col gap-1 px-3 overflow-y-auto">
           <div className="px-4 pb-2 text-[10px] font-mono uppercase tracking-[0.25em] text-muted-foreground">Command</div>
-          <NavItems items={PRIMARY_NAV} endHome />
+          <NavItems items={PRIMARY_NAV} endHome license={license} />
           <div className="px-4 pt-5 pb-2 text-[10px] font-mono uppercase tracking-[0.25em] text-muted-foreground">Review &amp; release</div>
-          <NavItems items={secondary} />
+          <NavItems items={secondary} license={license} />
         </nav>
 
         <div className="border-t border-[#1C2230] p-4">
@@ -263,7 +276,7 @@ export default function Layout({ children }) {
                 </button>
               </div>
               <div className="grid grid-cols-1 gap-1 mb-3">
-                <NavItems items={fieldMore} onNavigate={() => setMoreOpen(false)} />
+                <NavItems items={fieldMore} onNavigate={() => setMoreOpen(false)} license={license} />
               </div>
               <button
                 type="button"
