@@ -42,6 +42,8 @@ class ProductType(BaseModel):
     width_in: float
     default_length_ft: float
     description: str = ""
+    blueprint: Dict[str, Any] = Field(default_factory=dict)
+    default_locked_blueprint_revision_id: Optional[str] = None
     created_at: str = Field(default_factory=now_iso)
 
 
@@ -52,6 +54,8 @@ class ProductTypeCreate(BaseModel):
     width_in: float
     default_length_ft: float
     description: str = ""
+    blueprint: Dict[str, Any] = Field(default_factory=dict)
+    default_locked_blueprint_revision_id: Optional[str] = None
 
 
 # ---------- Jobs ----------
@@ -126,6 +130,9 @@ class Beam(BaseModel):
     position_on_bed: int = 1
     status: str = "casting"  # production status
     qc_state: str = "pending"
+    traceability: Dict[str, Any] = Field(default_factory=dict)
+    blueprint_document_id: Optional[str] = None
+    locked_blueprint_revision_id: Optional[str] = None
     created_at: str = Field(default_factory=now_iso)
 
 
@@ -138,11 +145,17 @@ class BeamCreate(BaseModel):
     twin_type: str = "i_beam"
     length_ft: float = 100.0
     position_on_bed: int = 1
+    traceability: Dict[str, Any] = Field(default_factory=dict)
+    blueprint_document_id: Optional[str] = None
+    locked_blueprint_revision_id: Optional[str] = None
 
 
 class BeamUpdate(BaseModel):
     status: Optional[str] = None
     qc_state: Optional[str] = None
+    traceability: Optional[Dict[str, Any]] = None
+    blueprint_document_id: Optional[str] = None
+    locked_blueprint_revision_id: Optional[str] = None
 
 
 # ---------- Inspections (QIR sections) ----------
@@ -240,3 +253,214 @@ class AnomalyCreate(BaseModel):
     length_in: float = 0.0
     note: str = ""
     photo_url: str = ""
+
+
+# ---------- Batch Plant ----------
+class BatchRecord(BaseModel):
+    id: str = Field(default_factory=new_id)
+    pour_id: str
+    job_id: Optional[str] = None
+    bed_ids: List[str] = Field(default_factory=list)
+    beam_ids: List[str] = Field(default_factory=list)
+    ticket_number: str
+    mix_design: str
+    ambient_temp_f: float = 70.0
+    concrete_temp_f: float = 72.0
+    humidity_pct: float = 50.0
+    wind_mph: float = 4.0
+    weather: str = "Clear"
+    ingredients: List[Dict[str, Any]] = Field(default_factory=list)
+    admixtures: List[Dict[str, Any]] = Field(default_factory=list)
+    cylinders: List[Dict[str, Any]] = Field(default_factory=list)
+    notes: str = ""
+    created_by: str = ""
+    created_at: str = Field(default_factory=now_iso)
+
+
+class BatchRecordCreate(BaseModel):
+    pour_id: str
+    job_id: Optional[str] = None
+    bed_ids: List[str] = Field(default_factory=list)
+    beam_ids: List[str] = Field(default_factory=list)
+    ticket_number: str
+    mix_design: str
+    ambient_temp_f: float = 70.0
+    concrete_temp_f: float = 72.0
+    humidity_pct: float = 50.0
+    wind_mph: float = 4.0
+    weather: str = "Clear"
+    ingredients: List[Dict[str, Any]] = Field(default_factory=list)
+    admixtures: List[Dict[str, Any]] = Field(default_factory=list)
+    cylinders: List[Dict[str, Any]] = Field(default_factory=list)
+    notes: str = ""
+
+
+# ---------- NCR ----------
+NCR_STATES = ["open", "investigation", "corrective_action", "verification", "closed"]
+
+
+class NCR(BaseModel):
+    id: str = Field(default_factory=new_id)
+    code: str
+    title: str
+    severity: str = "major"
+    status: str = "open"
+    beam_id: Optional[str] = None
+    pour_id: Optional[str] = None
+    batch_record_id: Optional[str] = None
+    anomaly_ids: List[str] = Field(default_factory=list)
+    inspection_id: Optional[str] = None
+    source_measurement: Dict[str, Any] = Field(default_factory=dict)
+    investigation: str = ""
+    corrective_action: str = ""
+    verification: str = ""
+    owner: str = ""
+    linked_photo_urls: List[str] = Field(default_factory=list)
+    audit_trail: List[Dict[str, Any]] = Field(default_factory=list)
+    created_at: str = Field(default_factory=now_iso)
+    updated_at: str = Field(default_factory=now_iso)
+
+
+class NCRCreate(BaseModel):
+    title: str
+    severity: str = "major"
+    beam_id: Optional[str] = None
+    pour_id: Optional[str] = None
+    batch_record_id: Optional[str] = None
+    anomaly_ids: List[str] = Field(default_factory=list)
+    inspection_id: Optional[str] = None
+    source_measurement: Dict[str, Any] = Field(default_factory=dict)
+    investigation: str = ""
+    corrective_action: str = ""
+    verification: str = ""
+    owner: str = ""
+    linked_photo_urls: List[str] = Field(default_factory=list)
+
+
+class NCRUpdate(BaseModel):
+    title: Optional[str] = None
+    severity: Optional[str] = None
+    status: Optional[str] = None
+    investigation: Optional[str] = None
+    corrective_action: Optional[str] = None
+    verification: Optional[str] = None
+    owner: Optional[str] = None
+    linked_photo_urls: Optional[List[str]] = None
+
+
+# ---------- Licensing ----------
+class LicenseState(BaseModel):
+    id: str = "license"
+    status: str = "trial"  # trial | active | expired
+    tier: str = "trial"  # trial | standard | enterprise
+    license_key: str = ""
+    expires_at: str = ""
+    feature_flags: Dict[str, bool] = Field(default_factory=dict)
+    last_checked_at: str = Field(default_factory=now_iso)
+    updated_at: str = Field(default_factory=now_iso)
+    created_at: str = Field(default_factory=now_iso)
+
+
+class LicenseActivateInput(BaseModel):
+    license_key: str
+    tier: str = "standard"
+    expires_at: str
+
+
+# ---------- Blueprint Intelligence ----------
+BLUEPRINT_STATUSES = ["uploaded", "extracted", "needs_review", "locked", "insufficient_quality", "failed"]
+BLUEPRINT_FIELD_STATUSES = ["confirmed", "unconfirmed", "manually_confirmed", "not_applicable"]
+BLUEPRINT_CONFIDENCE = ["high", "medium", "low"]
+
+
+class BlueprintField(BaseModel):
+    value: Any = None
+    confidence: str = "low"
+    source_page: Optional[int] = None
+    status: str = "unconfirmed"
+    extraction_notes: str = ""
+
+
+class BlueprintDocument(BaseModel):
+    id: str = Field(default_factory=new_id)
+    filename: str
+    storage_path: str
+    content_type: str = "application/pdf"
+    file_size_bytes: int = 0
+    page_count: int = 0
+    status: str = "uploaded"
+    job_id: Optional[str] = None
+    beam_id: Optional[str] = None
+    product_type_id: Optional[str] = None
+    product_family_hint: str = ""
+    beam_mark_hint: str = ""
+    project_name_hint: str = ""
+    latest_extraction_id: Optional[str] = None
+    locked_revision_id: Optional[str] = None
+    latest_summary: str = ""
+    created_by: str = ""
+    created_at: str = Field(default_factory=now_iso)
+    updated_at: str = Field(default_factory=now_iso)
+
+
+class BlueprintExtraction(BaseModel):
+    id: str = Field(default_factory=new_id)
+    document_id: str
+    status: str = "needs_review"
+    extractor_version: str = "controlled_regex_v1"
+    summary: str = ""
+    page_text: List[str] = Field(default_factory=list)
+    field_groups: Dict[str, List[str]] = Field(default_factory=dict)
+    fields: Dict[str, BlueprintField] = Field(default_factory=dict)
+    confirmed_count: int = 0
+    unconfirmed_count: int = 0
+    fail_reasons: List[str] = Field(default_factory=list)
+    created_by: str = ""
+    created_at: str = Field(default_factory=now_iso)
+    updated_at: str = Field(default_factory=now_iso)
+
+
+class LockedBlueprintRevision(BaseModel):
+    id: str = Field(default_factory=new_id)
+    document_id: str
+    extraction_id: str
+    revision_number: int = 1
+    status: str = "locked"
+    product_family: str
+    beam_mark: str
+    normalized_blueprint: Dict[str, Any] = Field(default_factory=dict)
+    source_fields: Dict[str, BlueprintField] = Field(default_factory=dict)
+    beam_ids: List[str] = Field(default_factory=list)
+    product_type_id: Optional[str] = None
+    notes: str = ""
+    locked_by: str = ""
+    locked_at: str = Field(default_factory=now_iso)
+    created_at: str = Field(default_factory=now_iso)
+
+
+class BlueprintAuditEvent(BaseModel):
+    id: str = Field(default_factory=new_id)
+    document_id: str
+    event_type: str
+    actor_name: str = ""
+    actor_role: str = ""
+    details: Dict[str, Any] = Field(default_factory=dict)
+    created_at: str = Field(default_factory=now_iso)
+
+
+class BlueprintFieldPatch(BaseModel):
+    value: Any = None
+    confidence: Optional[str] = None
+    source_page: Optional[int] = None
+    status: Optional[str] = None
+    extraction_notes: Optional[str] = None
+
+
+class BlueprintExtractionPatch(BaseModel):
+    fields: Dict[str, BlueprintFieldPatch] = Field(default_factory=dict)
+
+
+class BlueprintLockInput(BaseModel):
+    beam_ids: List[str] = Field(default_factory=list)
+    product_type_id: Optional[str] = None
+    notes: str = ""
