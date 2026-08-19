@@ -4,15 +4,19 @@ import { Html, Line, OrbitControls } from "@react-three/drei";
 import * as THREE from "three";
 
 const inchesToFeet = (value = 0) => value / 12;
-const concreteBase = "#B7BEC7";
-const concreteEdge = "#D8DEE5";
-const steelGray = "#7D8795";
-const steelBright = "#B9C2CF";
+const concreteBase = "#C5CBD4";
+const concreteEdge = "#EEF3F8";
+const steelGray = "#8A93A1";
+const steelBright = "#D4DBE6";
 const brassGold = "#E3C565";
 const asphaltBlack = "#1A1A1A";
 const runningDimensionColor = "#22D3EE";
 const elevationDimensionColor = "#050505";
 const overallDimensionColor = "#CBD5E1";
+const strandStraightColor = "#C9D2DE";
+const strandDrapedColor = "#2DD4BF";
+const holdDownBronze = "#C47A2C";
+const holdDownClamp = "#F0A85C";
 
 function TwinCanvasFallback({ message = "Digital Twin unavailable on this device." }) {
   return (
@@ -135,6 +139,10 @@ function normalizeBlueprint(beam) {
       hold_downs: Array.isArray(source.hold_downs) ? source.hold_downs : [],
       bituminous_ends: Array.isArray(source.bituminous_ends) ? source.bituminous_ends : [],
       strand_pattern: source.strand_pattern || { start_y_in: 5, row_spacing_in: 4.5, rows: [] },
+      strand_system: source.strand_system || beam?.beam_spec?.strand || null,
+      strand_draped: Boolean(source.strand_draped || beam?.beam_spec?.strand?.draped),
+      strand_end_treatment: source.strand_end_treatment || beam?.beam_spec?.strand?.end_treatments?.marked_end || null,
+      strand_pattern_source: source.strand_pattern_source || beam?.beam_spec?.strand?.pattern_source || "unconfirmed",
       stirrups,
       marked_end: source.marked_end || { end: "start", label: "MARKED END", color: "#F4F7FB" },
       grout_grooves: Array.isArray(source.grout_grooves) ? source.grout_grooves : [],
@@ -186,11 +194,15 @@ function normalizeBlueprint(beam) {
     drain_holes: source.drain_holes || [{ x_ft: length * 0.08, diameter_in: 2 }, { x_ft: length * 0.92, diameter_in: 2 }],
     hold_downs: source.hold_downs || [{ x_ft: length * 0.22 }, { x_ft: length * 0.5 }, { x_ft: length * 0.78 }],
     bituminous_ends: source.bituminous_ends || [{ end: "start", length_in: 18 }, { end: "end", length_in: 18 }],
-    strand_pattern: source.strand_pattern || { start_y_in: 5, row_spacing_in: 4.5, rows: [{ count: 4, spacing_in: 4 }, { count: 4, spacing_in: 4 }] },
+    strand_pattern: source.strand_pattern || { start_y_in: 5, row_spacing_in: 4.5, rows: [{ count: 4, spacing_in: 4 }, { count: 4, spacing_in: 4, draped: true }] },
     stirrups: source.stirrups || { start_ft: 2, end_ft: Math.max(length - 2, 4), spacing_in: 24, cover_in: 2.5 },
     marked_end: source.marked_end || { end: "start", label: "MARKED END", color: "#F4F7FB" },
     grout_grooves: source.grout_grooves || base.grout_grooves || [],
     drape_profile: source.drape_profile || base.drape_profile || null,
+    strand_system: source.strand_system || null,
+    strand_draped: Boolean(source.strand_draped || source.drape_profile || base.drape_profile),
+    strand_end_treatment: source.strand_end_treatment || { type: "cut_flush_bituminous", label: "Cut flush + bituminous" },
+    strand_pattern_source: source.strand_pattern_source || "invented",
     dimensions: {
       overall_length_ft: length,
       overall_depth_in: depth,
@@ -315,20 +327,21 @@ function Shell({ spec, beam, highlighted, onSurfacePick, onBeamSelect, pourMode 
         }}
       >
         <meshPhysicalMaterial
-          color={prePour ? "#1A2430" : concreteBase}
-          roughness={prePour ? 0.35 : 0.9}
-          metalness={prePour ? 0.08 : 0.03}
+          color={prePour ? "#15202C" : concreteBase}
+          roughness={prePour ? 0.28 : 0.78}
+          metalness={prePour ? 0.12 : 0.05}
           transparent={prePour}
-          opacity={prePour ? 0.12 : 1}
+          opacity={prePour ? 0.1 : 1}
           depthWrite={!prePour}
-          clearcoat={prePour ? 0 : 0.08}
-          reflectivity={prePour ? 0.05 : 0.14}
-          emissive={highlighted ? "#123762" : "#000000"}
-          emissiveIntensity={highlighted ? 0.18 : 0}
+          clearcoat={prePour ? 0.08 : 0.22}
+          clearcoatRoughness={prePour ? 0.55 : 0.62}
+          reflectivity={prePour ? 0.08 : 0.18}
+          emissive={highlighted ? "#0F3A4A" : "#0B0D10"}
+          emissiveIntensity={highlighted ? 0.16 : 0.04}
         />
       </mesh>
       <lineSegments geometry={edges}>
-        <lineBasicMaterial color={prePour ? "#5EEAD4" : (highlighted ? "#8FC5FF" : concreteEdge)} transparent opacity={prePour ? 0.95 : 0.6} />
+        <lineBasicMaterial color={prePour ? "#5EEAD4" : (highlighted ? "#B8E8F0" : concreteEdge)} transparent opacity={prePour ? 0.98 : 0.78} />
       </lineSegments>
     </group>
   );
@@ -489,34 +502,35 @@ function CylindricalOpenings({ beam, spec, items, type, color, y, onHardwareSele
   });
 }
 
-function HoldDowns({ beam, spec, onHardwareSelect }) {
+function HoldDowns({ beam, spec, onHardwareSelect, stations, parametric = false }) {
   if (beam.twin_type !== "i_beam") return null;
-  const width = Math.max(spec.width * 0.28, 0.42);
-  const height = Math.max(inchesToFeet(8), spec.depth * 0.16);
-  const embeddedY = Math.max(inchesToFeet(5), height / 2 + 0.08);
-  return (spec.blueprint.hold_downs || []).map((item, index) => {
-    const station = stationValue(item);
-    if (station == null) return null;
-    const payload = { id: `hold-down-${index}`, type: "Hold-down", beamMark: beam.mark, spec: item };
+  const resolved = stations || (spec.blueprint.hold_downs || []).map((item) => stationValue(item)).filter((value) => value != null);
+  const layout = strandLayout(spec, beam);
+  const holdY = inchesToFeet(layout.path.hold_down_elevation_in || 5);
+  const width = Math.max(spec.width * 0.34, 0.52);
+  const height = Math.max(inchesToFeet(10), spec.depth * 0.2);
+  return resolved.map((station, index) => {
+    const payload = {
+      id: `hold-down-${parametric ? "p-" : ""}${index}`,
+      type: parametric ? "Hold-down (parametric)" : "Hold-down",
+      beamMark: beam.mark,
+      spec: { x_ft: station, type: layout.holdDownType, parametric, source: layout.path.source },
+    };
     return (
-      <group key={payload.id} position={[0, embeddedY, station]} onClick={(event) => clickHardware(event, payload, onHardwareSelect)}>
-        <mesh position={[0, -embeddedY + 0.025, 0]}>
-          <boxGeometry args={[spec.width * 0.58, 0.05, width * 0.52]} />
-          <meshStandardMaterial color="#B97838" roughness={0.58} metalness={0.34} transparent opacity={0.72} depthWrite={false} />
-        </mesh>
+      <group key={payload.id} position={[0, holdY, station]} onClick={(event) => clickHardware(event, payload, onHardwareSelect)}>
         <mesh>
-          <boxGeometry args={[spec.width * 0.46, height * 0.16, width * 0.72]} />
-          <meshStandardMaterial color="#F0A85C" roughness={0.5} metalness={0.38} transparent opacity={0.42} depthWrite={false} depthTest={false} />
+          <boxGeometry args={[spec.width * 0.48, height * 0.2, width]} />
+          <meshStandardMaterial color={holdDownBronze} roughness={0.34} metalness={0.58} />
         </mesh>
-        {[-width * 0.42, width * 0.42].map((x) => (
-          <mesh key={x} position={[x, 0, 0]}>
-            <boxGeometry args={[0.08, height, width * 0.32]} />
-            <meshStandardMaterial color="#F0A85C" roughness={0.54} metalness={0.28} transparent opacity={0.46} depthWrite={false} depthTest={false} />
+        {[-width * 0.3, width * 0.3].map((x) => (
+          <mesh key={x} position={[x, height * 0.32, 0]}>
+            <boxGeometry args={[0.12, height, width * 0.3]} />
+            <meshStandardMaterial color={holdDownClamp} roughness={0.3} metalness={0.64} />
           </mesh>
         ))}
-        <mesh position={[0, height * 0.24, 0]}>
-          <boxGeometry args={[width * 1.32, 0.1, width * 0.42]} />
-          <meshStandardMaterial color="#F0A85C" roughness={0.54} metalness={0.28} transparent opacity={0.46} depthWrite={false} depthTest={false} />
+        <mesh position={[0, height * 0.46, 0]} rotation={[0, 0, Math.PI / 2]}>
+          <cylinderGeometry args={[0.08, 0.08, spec.width * 0.4, 12]} />
+          <meshStandardMaterial color={brassGold} roughness={0.26} metalness={0.72} />
         </mesh>
       </group>
     );
@@ -641,65 +655,215 @@ function Stirrups({ beam, spec, onHardwareSelect }) {
   );
 }
 
-function strandRows(blueprint) {
-  const pattern = blueprint.strand_pattern || {};
-  const rows = pattern.rows || [];
-  const startY = inchesToFeet(pattern.start_y_in || 5);
-  const rowSpacing = inchesToFeet(pattern.row_spacing_in || 4.5);
-  return rows.flatMap((row, rowIndex) => {
-    const spacing = inchesToFeet(row.spacing_in || 4);
-    const totalWidth = spacing * Math.max((row.count || 0) - 1, 0);
-    return Array.from({ length: row.count || 0 }).map((_, strandIndex) => ({
-      x: -totalWidth / 2 + strandIndex * spacing,
-      y: startY + rowIndex * rowSpacing,
-    }));
-  });
+function strandLayout(spec, beam) {
+  const blueprint = spec.blueprint || {};
+  const system = blueprint.strand_system || beam?.beam_spec?.strand || {};
+  const pattern = system.pattern || blueprint.strand_pattern || {};
+  const rows = Array.isArray(pattern.rows) ? pattern.rows : [];
+  const path = system.path_model || {};
+  const drape = blueprint.drape_profile || {};
+  const draped = Boolean(system.draped || blueprint.strand_draped);
+  const drapedCount = Number(drape.draped_count || 0) || 0;
+  const depthIn = spec.depth * 12;
+  const endElev = Number(path.end_elevation_in || drape.end_elevation_in) || Math.max(10.5, depthIn * 0.42);
+  const holdElev = Number(path.hold_down_elevation_in || drape.hold_down_elevation_in) || 2.5;
+  const stations = (path.hold_down_stations_ft || drape.low_points_ft || [])
+    .map((value) => Number(value))
+    .filter((value) => Number.isFinite(value));
+  const treatment = (system.end_treatments || {}).marked_end || blueprint.strand_end_treatment || { type: "unspecified", label: "Unspecified" };
+  let items = [];
+  if (rows.length) {
+    const startY = pattern.start_y_in || 5;
+    const rowSpacing = pattern.row_spacing_in || 4.5;
+    let remainingDraped = drapedCount;
+    rows.forEach((row, rowIndex) => {
+      const spacing = row.spacing_in || 4;
+      const count = Math.min(row.count || 0, 16);
+      const totalWidth = spacing * Math.max(count - 1, 0);
+      const lastRow = rowIndex === rows.length - 1;
+      const isDrapedRow = Boolean(row.draped) || (draped && (row.draped !== false) && (drapedCount ? remainingDraped >= count && lastRow : lastRow && rows.length > 1));
+      if (drapedCount && isDrapedRow) remainingDraped -= count;
+      Array.from({ length: count }).forEach((_, strandIndex) => {
+        const xIn = -totalWidth / 2 + strandIndex * spacing;
+        const yIn = isDrapedRow ? endElev : (startY + rowIndex * rowSpacing);
+        items.push({
+          x: inchesToFeet(xIn),
+          y: inchesToFeet(yIn),
+          xIn,
+          yIn,
+          holdYIn: isDrapedRow ? holdElev : yIn,
+          draped: Boolean(draped && (isDrapedRow || (rows.length === 1 && drapedCount === 0))),
+        });
+      });
+    });
+    if (draped && drapedCount === 0 && rows.length === 1) {
+      items = items.map((item) => ({ ...item, draped: true, y: inchesToFeet(endElev), yIn: endElev, holdYIn: holdElev }));
+    }
+  } else if (draped || path.source === "parametric_midspan" || path.source === "extracted_stations") {
+    items = [-5, -1.7, 1.7, 5].map((xIn) => ({
+      x: inchesToFeet(xIn),
+      y: inchesToFeet(2.5),
+      xIn,
+      yIn: 2.5,
+      holdYIn: 2.5,
+      draped: false,
+      representative: true,
+    })).concat([-2, 2].map((xIn) => ({
+      x: inchesToFeet(xIn),
+      y: inchesToFeet(endElev),
+      xIn,
+      yIn: endElev,
+      holdYIn: holdElev,
+      draped: true,
+      representative: true,
+    })));
+  }
+  return {
+    items: items.slice(0, 32),
+    draped,
+    stations,
+    path: {
+      ...drape,
+      ...path,
+      hold_down_elevation_in: holdElev,
+      end_elevation_in: endElev,
+      hold_down_stations_ft: stations,
+      source: path.source || drape.source || "none",
+    },
+    patternSource: items.some((item) => item.representative) ? "unconfirmed" : (system.pattern_source || blueprint.strand_pattern_source || (rows.length ? "extracted" : "unconfirmed")),
+    treatment,
+    diameterIn: Number(system.diameter_in) || 0.5,
+    holdDownType: system.hold_down_type || blueprint.hold_down_type,
+    notes: system.notes || path.notes || drape.notes || [],
+  };
 }
 
-function StrandPaths({ beam, spec, onHardwareSelect }) {
-  const strands = strandRows(spec.blueprint);
-  const sag = inchesToFeet(spec.blueprint.drape_profile?.sag_in || 0);
-  const holdPoints = (spec.blueprint.hold_downs || [])
-    .map((item) => stationValue(item))
-    .filter((value) => value != null)
-    .sort((a, b) => a - b);
-  return strands.map((strand, index) => {
-    const points = [new THREE.Vector3(strand.x, strand.y, 0)];
-    if (beam.twin_type === "i_beam" && holdPoints.length) {
-      holdPoints.forEach((xFt, holdIndex) => {
-        const isMiddle = holdIndex > 0 && holdIndex < holdPoints.length - 1;
-        points.push(new THREE.Vector3(strand.x, strand.y - (isMiddle ? sag : sag * 0.6), xFt));
-      });
-    } else {
-      points.push(new THREE.Vector3(strand.x, strand.y, spec.length / 2));
-    }
-    points.push(new THREE.Vector3(strand.x, strand.y, spec.length));
-    const payload = { id: `strand-${index}`, type: "Prestressing strand", beamMark: beam.mark, spec: { index: index + 1, draped: beam.twin_type === "i_beam", row_y_ft: strand.y } };
+function strandPath(item, spec, stations) {
+  const start = [item.x, item.y, 0];
+  const finish = [item.x, item.y, spec.length];
+  if (!item.draped || !stations.length) {
+    return [start, [item.x, item.y, spec.length / 2], finish];
+  }
+  const holdY = inchesToFeet(item.holdYIn);
+  return [start, ...stations.map((station) => [item.x, holdY, station]), finish];
+}
+
+function StrandCable({ path, radius, color }) {
+  const pathKey = (path || []).map((point) => point.join(",")).join("|");
+  const geometry = useMemo(() => {
+    const points = (path || []).map(([x, y, z]) => new THREE.Vector3(x, y, z));
+    if (points.length < 2) return null;
+    const curve = new THREE.CatmullRomCurve3(points, false, "catmullrom", 0.08);
+    return new THREE.TubeGeometry(curve, Math.min(56, Math.max(18, points.length * 10)), radius, 7, false);
+  }, [pathKey, path, radius]);
+  useEffect(() => () => geometry?.dispose?.(), [geometry]);
+  if (!geometry) return null;
+  return (
+    <mesh geometry={geometry} castShadow>
+      <meshStandardMaterial color={color} roughness={0.22} metalness={0.84} />
+    </mesh>
+  );
+}
+
+function StrandEndTreatment({ type, x, y, z, radius, outward }) {
+  if (type === "cut_flush_bituminous") {
     return (
-      <group key={payload.id} onClick={(event) => clickHardware(event, payload, onHardwareSelect)}>
-        <Line points={points} color={brassGold} lineWidth={1.5} />
-        {[0, spec.length].map((z) => (
-          <group key={z} position={[strand.x, strand.y, z]}>
-            <mesh rotation={[Math.PI / 2, 0, 0]}>
-              <cylinderGeometry args={[0.07, 0.07, 0.04, 14]} />
-              <meshStandardMaterial color="#D2D8E0" roughness={0.38} metalness={0.68} />
-            </mesh>
-            <mesh>
-              <sphereGeometry args={[0.048, 10, 10]} />
-              <meshStandardMaterial color="#F3D26A" roughness={0.34} metalness={0.42} />
-            </mesh>
-            <Line
-              points={z === 0
-                ? [[0, 0, 0], [0, 0, -0.55], [0, 0.68, -0.55]]
-                : [[0, 0, 0], [0, 0, 0.55], [0, 0.68, 0.55]]}
-              color="#B9C2CF"
-              lineWidth={2}
-            />
-          </group>
-        ))}
+      <group position={[x, y, z]}>
+        <mesh rotation={[Math.PI / 2, 0, 0]}>
+          <cylinderGeometry args={[radius * 1.7, radius * 1.7, 0.05, 14]} />
+          <meshStandardMaterial color={asphaltBlack} roughness={0.96} metalness={0.02} />
+        </mesh>
+        <mesh rotation={[Math.PI / 2, 0, 0]} position={[0, 0, outward * 0.02]}>
+          <cylinderGeometry args={[radius * 1.2, radius * 1.2, 0.03, 12]} />
+          <meshStandardMaterial color="#2A2A2A" roughness={1} metalness={0} />
+        </mesh>
       </group>
     );
-  });
+  }
+  if (type === "bent_90") {
+    const hook = Math.max(0.32, radius * 8);
+    return (
+      <group position={[x, y, z]}>
+        <mesh position={[0, 0, outward * hook * 0.22]} rotation={[Math.PI / 2, 0, 0]}>
+          <cylinderGeometry args={[radius * 1.08, radius * 1.08, hook * 0.44, 10]} />
+          <meshStandardMaterial color={brassGold} roughness={0.26} metalness={0.8} />
+        </mesh>
+        <mesh position={[0, hook * 0.3, outward * hook * 0.44]}>
+          <cylinderGeometry args={[radius * 1.08, radius * 1.08, hook * 0.6, 10]} />
+          <meshStandardMaterial color={brassGold} roughness={0.26} metalness={0.8} />
+        </mesh>
+      </group>
+    );
+  }
+  return (
+    <group position={[x, y, z]}>
+      <mesh rotation={[Math.PI / 2, 0, 0]}>
+        <cylinderGeometry args={[radius * 1.45, radius * 1.25, 0.1, 12]} />
+          <meshStandardMaterial color={steelGray} roughness={0.28} metalness={0.78} />
+      </mesh>
+    </group>
+  );
+}
+
+function StrandSystem({ beam, spec, onHardwareSelect, pourMode, showPaths }) {
+  const layout = useMemo(() => strandLayout(spec, beam), [spec, beam]);
+  const radius = Math.max(inchesToFeet((layout.diameterIn || 0.5) * 1.7), 0.03);
+  const prePour = pourMode === "pre_pour";
+  const extractedHoldStations = (spec.blueprint.hold_downs || []).map((item) => stationValue(item)).filter((value) => value != null);
+  const parametricStations = prePour
+    ? layout.stations.filter((station) => !extractedHoldStations.some((value) => Math.abs(value - station) < 0.05))
+    : [];
+  if (!layout.items.length) return null;
+  return (
+    <group>
+      {showPaths && layout.items.map((item, index) => {
+        const path = strandPath(item, spec, layout.stations);
+        const payload = {
+          id: `strand-${index}`,
+          type: item.draped ? "Draped prestressing strand" : "Straight prestressing strand",
+          beamMark: beam.mark,
+          spec: { index: index + 1, draped: item.draped, representative: Boolean(item.representative), y_in: item.yIn, path_source: layout.path.source },
+        };
+        return (
+          <group key={payload.id} onClick={(event) => clickHardware(event, payload, onHardwareSelect)}>
+            <StrandCable path={path} radius={radius} color={item.draped ? strandDrapedColor : strandStraightColor} />
+          </group>
+        );
+      })}
+      {layout.items.map((item, index) => (
+        <React.Fragment key={`tip-${index}`}>
+          <StrandEndTreatment type={layout.treatment?.type || "unspecified"} x={item.x} y={item.y} z={0} radius={radius} outward={-1} />
+          <StrandEndTreatment type={layout.treatment?.type || "unspecified"} x={item.x} y={item.y} z={spec.length} radius={radius} outward={1} />
+        </React.Fragment>
+      ))}
+      {parametricStations.length > 0 && (
+        <HoldDowns
+          beam={beam}
+          spec={spec}
+          onHardwareSelect={onHardwareSelect}
+          stations={parametricStations}
+          parametric
+        />
+      )}
+      {prePour && layout.patternSource === "unconfirmed" && (
+        <Html position={[0, spec.depth * 0.55, spec.length * 0.5]} center distanceFactor={22} occlude={false}>
+          <div style={{
+            background: "rgba(10,12,16,0.92)",
+            border: "1px solid #2DD4BF",
+            color: "#5EEAD4",
+            padding: "4px 8px",
+            fontSize: 10,
+            fontFamily: "JetBrains Mono, monospace",
+            letterSpacing: "0.12em",
+            textTransform: "uppercase",
+            whiteSpace: "nowrap",
+          }}>
+            Strand pattern unconfirmed · {layout.path.source === "parametric_midspan" ? "parametric drape" : layout.path.source}
+          </div>
+        </Html>
+      )}
+    </group>
+  );
 }
 
 function MarkedEnd({ beam, spec, onHardwareSelect }) {
@@ -1208,6 +1372,7 @@ function BeamAssembly({ beam, anomalies = [], onSurfacePick, onHardwareSelect, s
     ...layers,
   };
   const groupRef = useRef(null);
+  const prePour = pourMode === "pre_pour";
   const surfacePick = (point) => {
     const localPoint = groupRef.current ? groupRef.current.worldToLocal(point.clone()) : point;
     onSurfacePick?.(localPoint, beam);
@@ -1217,7 +1382,7 @@ function BeamAssembly({ beam, anomalies = [], onSurfacePick, onHardwareSelect, s
       <Shell spec={spec} beam={beam} highlighted={highlighted} onSurfacePick={surfacePick} onBeamSelect={onBeamSelect} pourMode={pourMode} />
       {activeLayers.dimensions && <SectionRevealLines beam={beam} spec={spec} />}
       {activeLayers.hardware && <BituminousEnds beam={beam} spec={spec} onHardwareSelect={onHardwareSelect} />}
-      {activeLayers.strands && <StrandPaths beam={beam} spec={spec} onHardwareSelect={onHardwareSelect} />}
+      <StrandSystem beam={beam} spec={spec} onHardwareSelect={onHardwareSelect} pourMode={pourMode} showPaths={prePour && activeLayers.strands} />
       {activeLayers.stirrups && <Stirrups beam={beam} spec={spec} onHardwareSelect={onHardwareSelect} />}
       {(activeLayers.hardware || activeLayers.stirrups) && <LiftLoops beam={beam} spec={spec} onHardwareSelect={onHardwareSelect} />}
       {activeLayers.hardware && <SideInserts beam={beam} spec={spec} onHardwareSelect={onHardwareSelect} />}
@@ -1248,12 +1413,12 @@ function Scene({ children, camera, target = ORBIT_TARGET }) {
       <Canvas camera={camera} dpr={[1, 1.5]} shadows gl={{ antialias: true, powerPreference: "high-performance" }}>
         <Suspense fallback={<Html center><div style={{ color: "#A7B0BF", fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", fontSize: 12, letterSpacing: "0.16em", textTransform: "uppercase" }}>Loading twin…</div></Html>}>
          <CanvasContextMonitor onContextLost={() => setContextLost(true)} />
-         <color attach="background" args={["#0A0C10"]} />
-        <ambientLight intensity={0.78} />
-        <hemisphereLight intensity={0.56} groundColor="#0e1016" />
-        <directionalLight position={[18, 20, 12]} intensity={1.18} castShadow />
-        <directionalLight position={[-16, 8, -8]} intensity={0.42} />
-        <directionalLight position={[0, 10, -18]} intensity={0.3} />
+         <color attach="background" args={["#07090D"]} />
+        <ambientLight intensity={0.42} />
+        <hemisphereLight intensity={0.4} color="#E8EEF6" groundColor="#16110C" />
+        <directionalLight position={[16, 22, 10]} intensity={1.32} castShadow />
+        <directionalLight position={[-12, 9, -6]} intensity={0.38} color="#9BE7FF" />
+        <directionalLight position={[4, 8, -16]} intensity={0.28} color="#2DD4BF" />
         {children}
          <OrbitControls enablePan enableZoom enableRotate maxPolarAngle={Math.PI * 0.48} makeDefault target={target} />
         </Suspense>
@@ -1342,6 +1507,8 @@ function CrossSectionInset({ beam }) {
   const wallIn = valueOrNull(section.wall_thickness_in);
   const bottomAngle = !isBox ? angleDegrees(inchesToFeet(valueOrNull(section.bottom_transition_in, 4) || 0), inchesToFeet(valueOrNull(section.bottom_transition_rise_in, 4.5) || 0)) : null;
   const topAngle = !isBox ? angleDegrees(inchesToFeet(valueOrNull(section.top_transition_in, 5) || 0), inchesToFeet(valueOrNull(section.top_transition_drop_in, 4.5) || 0)) : angleDegrees(1, 1);
+  const layout = strandLayout(spec, beam);
+  const lengthFt = valueOrNull(spec.blueprint.dimensions?.overall_length_ft, spec.length);
   const maxWidth = Math.max(bottomWidthIn || 0, topWidthIn || 0, section.outer_width_in || 0, 1);
   const maxDepth = Math.max(depthIn || 1, 1);
   const sx = 150 / maxWidth;
@@ -1388,8 +1555,8 @@ function CrossSectionInset({ beam }) {
   );
   const minimized = viewState === "minimized";
   const maximized = viewState === "maximized";
-  const panelWidth = minimized ? 188 : maximized ? 430 : 292;
-  const panelHeight = minimized ? 34 : maximized ? 336 : 228;
+  const panelWidth = minimized ? 196 : maximized ? 448 : 308;
+  const panelHeight = minimized ? 34 : maximized ? 372 : 258;
   const clampPosition = useCallback((next) => {
     if (typeof window === "undefined") return next;
     return {
@@ -1455,9 +1622,9 @@ function CrossSectionInset({ beam }) {
       left: position.x,
       top: position.y,
       width: panelWidth,
-      background: "rgba(7,9,14,0.94)",
-      border: "1px solid #263244",
-      boxShadow: "0 18px 48px rgba(0,0,0,0.38)",
+      background: "linear-gradient(180deg, rgba(10,14,20,0.97) 0%, rgba(7,9,14,0.96) 100%)",
+      border: "1px solid #1F6F73",
+      boxShadow: "0 18px 48px rgba(0,0,0,0.5), 0 0 24px rgba(45,212,191,0.12)",
       pointerEvents: "auto",
       zIndex: 30,
       userSelect: "none",
@@ -1469,7 +1636,7 @@ function CrossSectionInset({ beam }) {
           alignItems: "center",
           justifyContent: "space-between",
           gap: 8,
-          color: "#FFFFFF",
+          color: "#E8C872",
           fontSize: 11,
           fontWeight: 700,
           letterSpacing: "0.16em",
@@ -1477,21 +1644,37 @@ function CrossSectionInset({ beam }) {
           padding: minimized ? "8px 10px" : "8px 10px 6px",
           cursor: "grab",
           touchAction: "none",
+          borderBottom: minimized ? "none" : "1px solid #1C3A40",
         }}
       >
-        <span>DIMENSIONED SECTION</span>
+        <span>MARKED END · TIP</span>
         <span style={{ display: "flex", gap: 5, letterSpacing: 0 }}>
           <button type="button" onPointerDown={(event) => event.stopPropagation()} onClick={cycleSize} aria-label={maximized ? "Restore section inset" : "Maximize section inset"} style={{ background: "#121925", border: "1px solid #344154", color: "#D8ECFF", height: 22, minWidth: 22, cursor: "pointer" }}>{maximized ? "↙" : "↗"}</button>
           <button type="button" onPointerDown={(event) => event.stopPropagation()} onClick={toggleMinimized} aria-label={minimized ? "Restore section inset" : "Minimize section inset"} style={{ background: "#121925", border: "1px solid #344154", color: "#D8ECFF", height: 22, minWidth: 22, cursor: "pointer" }}>{minimized ? "+" : "−"}</button>
         </span>
       </div>
       {!minimized && (
-        <div style={{ padding: "0 10px 10px" }}>
-          <svg viewBox="0 0 260 176" width="100%" height={maximized ? 286 : 176} role="img" aria-label="Dimensioned beam cross-section">
-            <polygon points={poly} fill="#B7BEC7" stroke="#F4F7FB" strokeWidth="1.2" />
+        <div style={{ padding: "8px 10px 10px" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 8, color: "#E2E8F0", fontFamily: "JetBrains Mono, monospace", fontSize: 10, letterSpacing: "0.08em", marginBottom: 6 }}>
+            <span>OAL {lengthFt != null ? formatFeet(lengthFt) : "unconfirmed"}</span>
+            <span>DEPTH {depthIn != null ? formatInches(depthIn) : "unconfirmed"}</span>
+          </div>
+          <svg viewBox="0 0 260 176" width="100%" height={maximized ? 286 : 168} role="img" aria-label="Marked-end strand pattern and section">
+            <polygon points={poly} fill="#C5CBD4" stroke="#F4F7FB" strokeWidth="1.4" />
             {isBox && voidWidthIn && voidDepthIn && (
               <rect x={x(-voidWidthIn / 2)} y={y((wallIn || 4) + voidDepthIn)} width={voidWidthIn * sx} height={voidDepthIn * sy} fill="#0A0C10" stroke="#8FA1B6" />
             )}
+            {layout.items.map((item, index) => (
+              <circle
+                key={`strand-dot-${index}`}
+                cx={x(item.xIn)}
+                cy={y(item.yIn)}
+                r={maximized ? 3.4 : 2.7}
+                fill={item.draped ? strandDrapedColor : brassGold}
+                stroke="#0A0C10"
+                strokeWidth="0.7"
+              />
+            ))}
             {bottomWidthIn && dim(x(-bottomWidthIn / 2), 166, x(bottomWidthIn / 2), 166, `${formatInches(bottomWidthIn)}`, cx, 174)}
             {topWidthIn && !isBox && dim(x(-topWidthIn / 2), 15, x(topWidthIn / 2), 15, `${formatInches(topWidthIn)} TOP`, cx, 10)}
             {depthIn && (
@@ -1509,6 +1692,10 @@ function CrossSectionInset({ beam }) {
             {topAngle && <text x="192" y="33" fill="#FFD166" fontSize="9">ANGLE {topAngle}°</text>}
             {bottomAngle && <text x="184" y="135" fill="#FFD166" fontSize="9">HAUNCH {bottomAngle}°</text>}
           </svg>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 8, marginTop: 6, color: "#94A3B8", fontFamily: "JetBrains Mono, monospace", fontSize: 9, letterSpacing: "0.1em", textTransform: "uppercase" }}>
+            <span style={{ color: layout.patternSource === "unconfirmed" ? "#E8C872" : "#5EEAD4" }}>Pattern {layout.patternSource}</span>
+            <span>{layout.treatment?.label || layout.treatment?.type || "end unspecified"}</span>
+          </div>
         </div>
       )}
     </div>

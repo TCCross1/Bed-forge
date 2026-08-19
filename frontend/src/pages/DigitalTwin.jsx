@@ -179,7 +179,8 @@ export default function DigitalTwin() {
   const blueprintSource = beam?.blueprint_source || { status: "legacy_seed" };
   const draftTwinBlocked = blueprintSource.status === "draft" && !beamSpec;
   const specDnaActive = Boolean(beamSpec);
-  const strandCount = (blueprint.strand_pattern?.rows || []).reduce((sum, row) => sum + (row.count || 0), 0);
+  const strandSystem = beamSpec?.strand || blueprint.strand_system || {};
+  const strandCount = strandSystem.count || (blueprint.strand_pattern?.rows || []).reduce((sum, row) => sum + (row.count || 0), 0);
   const featureCounts = [
     ["Lift loops", blueprint.lift_loops?.length || 0],
     ["Inserts", blueprint.inserts?.length || 0],
@@ -189,7 +190,7 @@ export default function DigitalTwin() {
     ["Hold-downs", blueprint.hold_downs?.length || 0],
     ["Stirrup zones", (beamSpec?.stirrup_zones || []).length],
     ["Strand ends", strandCount * 2],
-    ["Bituminous pockets", blueprint.bituminous_ends?.length || 0],
+    ["Bituminous pockets", Array.isArray(blueprint.bituminous_ends) ? blueprint.bituminous_ends.length : 0],
   ];
   const quickDimensions = beam ? [
     ["OAL", beam.length_ft != null ? `${beam.length_ft} ft` : "unconfirmed"],
@@ -252,6 +253,31 @@ export default function DigitalTwin() {
                   </div>
                 ))}
               </div>
+            </div>
+            <div className="border border-border rounded-sm p-3">
+              <div className="text-xs uppercase tracking-widest text-muted-foreground mb-3">Strand system</div>
+              <div className="space-y-2">
+                {[
+                  ["Draped", strandSystem.draped ? "yes" : "no"],
+                  ["Path", strandSystem.path_model?.source || "none"],
+                  ["Pattern", strandSystem.pattern_source || "unconfirmed"],
+                  ["Hold-down", strandSystem.hold_down_type || "unconfirmed"],
+                  ["End treatment", strandSystem.end_treatments?.marked_end?.label || strandSystem.end_treatments?.marked_end?.type || "unspecified"],
+                  ["Diameter", strandSystem.diameter_in != null ? `${strandSystem.diameter_in} in` : "unconfirmed"],
+                  ["Grade", strandSystem.grade || "unconfirmed"],
+                  ["Final pull", strandSystem.final_pull_lb != null ? `${strandSystem.final_pull_lb} lb` : "unconfirmed"],
+                ].map(([label, value]) => (
+                  <div key={label} className="flex items-start justify-between gap-3 text-xs font-mono">
+                    <span className="text-muted-foreground">{label}</span>
+                    <span className="text-right text-white">{String(value)}</span>
+                  </div>
+                ))}
+              </div>
+              {(strandSystem.path_model?.notes || []).length > 0 && (
+                <div className="mt-3 text-[11px] leading-relaxed text-[#E8C872]">
+                  {(strandSystem.path_model.notes || []).join(" ")}
+                </div>
+              )}
             </div>
             <div className="border border-border rounded-sm p-3">
               <div className="text-xs uppercase tracking-widest text-muted-foreground mb-3">Stations from marked end</div>
