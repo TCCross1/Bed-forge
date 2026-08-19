@@ -237,30 +237,6 @@ const saveReview = async () => {
         }
       />
 
-      {detail && (
-        <div className="sticky z-20 top-0 border-b-2 border-[#C9A227] bg-[#0A0C10] px-4 sm:px-8 py-3">
-          <div className="flex flex-wrap items-center gap-3">
-            <button
-              type="button"
-              onClick={downloadAssessmentPdf}
-              className="min-h-14 px-6 bg-[#00E5C3] text-[#0A0C10] rounded-sm text-base font-black flex items-center gap-2 hover:bg-[#1CFFF0] whitespace-nowrap shadow-[0_0_24px_rgba(0,229,195,0.35)]"
-            >
-              <Download className="w-5 h-5" /> Download Assessment PDF
-            </button>
-            <button onClick={runExtraction} disabled={extracting} className="min-h-14 px-4 border border-border rounded-sm text-sm font-semibold uppercase tracking-wider flex items-center gap-2 hover:border-primary hover:text-primary disabled:opacity-60">
-              {extracting ? <Loader2 className="w-4 h-4 animate-spin" /> : <ScanSearch className="w-4 h-4" />} Extract
-            </button>
-            <button onClick={saveReview} disabled={saving || !detail.latest_extraction} className="min-h-14 px-4 border border-border rounded-sm text-sm font-semibold uppercase tracking-wider hover:border-primary hover:text-primary disabled:opacity-60">
-              {saving ? "Saving…" : "Save Review"}
-            </button>
-            <button onClick={lockBlueprint} disabled={!canLock || locking || !detail.latest_extraction} className="min-h-14 px-4 bg-primary text-white rounded-sm text-sm font-bold uppercase tracking-wider flex items-center gap-2 disabled:opacity-60">
-              {locking ? <Loader2 className="w-4 h-4 animate-spin" /> : <Lock className="w-4 h-4" />} Verify & Lock
-            </button>
-            <div className="text-sm text-muted-foreground font-mono truncate max-w-xl">{detail.filename} · {detail.status}</div>
-          </div>
-        </div>
-      )}
-
       <div className="p-8 grid grid-cols-1 lg:grid-cols-12 gap-6">
         <div className="lg:col-span-4 space-y-6">
           <div className="bg-card border border-border rounded-sm p-6 space-y-4">
@@ -354,23 +330,25 @@ const saveReview = async () => {
                   <Badge tone={toneForStatus(detail.status)}>{detail.status}</Badge>
                   {detail.locked_revision && <Badge tone="green">locked revision {detail.locked_revision.revision_number}</Badge>}
                 </div>
-                <div className="flex flex-wrap gap-3">
+                <div className="flex flex-col items-stretch sm:items-start gap-3">
                   <button
                     type="button"
                     onClick={downloadAssessmentPdf}
-                    className="min-h-14 px-6 bg-[#00E5C3] text-[#0A0C10] rounded-sm text-base font-black flex items-center gap-2 hover:bg-[#1CFFF0] whitespace-nowrap"
+                    className="min-h-14 px-6 py-3 bg-[#D4AF37] text-black font-bold text-base rounded-sm flex items-center justify-center gap-2 hover:bg-[#E8C547] whitespace-nowrap border-2 border-[#F5D76E]"
                   >
                     <Download className="w-5 h-5" /> Download Assessment PDF
                   </button>
-                  <button onClick={runExtraction} disabled={extracting} className="min-h-12 px-4 border border-border rounded-sm text-sm font-semibold uppercase tracking-wider flex items-center gap-2 hover:border-primary hover:text-primary disabled:opacity-60">
-                    {extracting ? <Loader2 className="w-4 h-4 animate-spin" /> : <ScanSearch className="w-4 h-4" />} Extract
-                  </button>
-                  <button onClick={saveReview} disabled={saving || !detail.latest_extraction} className="min-h-12 px-4 border border-border rounded-sm text-sm font-semibold uppercase tracking-wider hover:border-primary hover:text-primary disabled:opacity-60">
-                    {saving ? "Saving…" : "Save Review"}
-                  </button>
-                  <button onClick={lockBlueprint} disabled={!canLock || locking || !detail.latest_extraction} className="min-h-12 px-4 bg-primary text-white rounded-sm text-sm font-bold uppercase tracking-wider flex items-center gap-2 disabled:opacity-60">
-                    {locking ? <Loader2 className="w-4 h-4 animate-spin" /> : <Lock className="w-4 h-4" />} Verify & Lock
-                  </button>
+                  <div className="flex flex-wrap gap-3">
+                    <button onClick={runExtraction} disabled={extracting} className="min-h-12 px-4 border border-border rounded-sm text-sm font-semibold uppercase tracking-wider flex items-center gap-2 hover:border-primary hover:text-primary disabled:opacity-60">
+                      {extracting ? <Loader2 className="w-4 h-4 animate-spin" /> : <ScanSearch className="w-4 h-4" />} Extract
+                    </button>
+                    <button onClick={saveReview} disabled={saving || !detail.latest_extraction} className="min-h-12 px-4 border border-border rounded-sm text-sm font-semibold uppercase tracking-wider hover:border-primary hover:text-primary disabled:opacity-60">
+                      {saving ? "Saving…" : "Save Review"}
+                    </button>
+                    <button onClick={lockBlueprint} disabled={!canLock || locking || !detail.latest_extraction} className="min-h-12 px-4 bg-primary text-white rounded-sm text-sm font-bold uppercase tracking-wider flex items-center gap-2 disabled:opacity-60">
+                      {locking ? <Loader2 className="w-4 h-4 animate-spin" /> : <Lock className="w-4 h-4" />} Verify & Lock
+                    </button>
+                  </div>
                 </div>
                 <div className="text-sm text-muted-foreground space-y-1">
                   <div>{detail.page_count} pages · linked beam {detail.beam_id || "none"} · product type {detail.product_type_id || "none"}</div>
