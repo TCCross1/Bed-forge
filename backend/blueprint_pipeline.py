@@ -1300,6 +1300,7 @@ def _build_strand_system(fields: Dict[str, BlueprintField], blueprint: Dict[str,
         "path_model": {
             "kind": "draped_hold_down" if draped else ("straight" if rows or count else "unconfirmed"),
             "profile": drape.get("profile") or "straight",
+            "routing": "end_hold_down_end" if draped else "straight",
             "source": drape.get("source") or "none",
             "hold_down_stations_ft": drape.get("low_points_ft") or [],
             "end_elevation_in": drape.get("end_elevation_in"),

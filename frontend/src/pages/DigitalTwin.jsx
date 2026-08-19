@@ -102,8 +102,8 @@ export default function DigitalTwin() {
   const [selectedHardware, setSelectedHardware] = useState(null);
   const [pickPos, setPickPos] = useState(null);
   const [showCallouts, setShowCallouts] = useState(true);
-  const [pourMode, setPourMode] = useState("post_pour");
-  const [layers, setLayers] = useState(layersForPour("post_pour"));
+  const [pourMode, setPourMode] = useState("pre_pour");
+  const [layers, setLayers] = useState(layersForPour("pre_pour"));
   const [mode, setMode] = useState("beam");
   const [controlsOpen, setControlsOpen] = useState(false);
   const [form, setForm] = useState({ type: "crack", severity: "minor", note: "", length_in: 0 });
@@ -115,7 +115,11 @@ export default function DigitalTwin() {
       setSelectedBedId((current) => current || r.data[0]?.bed_id || "");
     });
     api.get("/beds").then((r) => setBeds(r.data));
-    api.get("/beam-specs").then((r) => setSpecs(Array.isArray(r.data) ? r.data : [])).catch(() => setSpecs([]));
+    api.get("/beam-specs").then((r) => {
+      const list = Array.isArray(r.data) ? r.data : [];
+      setSpecs(list);
+      setSelectedSpecId((current) => current || (params.get("beam") ? "" : (list[0]?.id || "")));
+    }).catch(() => setSpecs([]));
   }, []);
 
   useEffect(() => {
@@ -369,7 +373,7 @@ export default function DigitalTwin() {
         <div className="lg:col-span-2 w-full bg-card border border-border rounded-sm overflow-hidden flex flex-col min-h-[480px] h-[calc(100vh-12.5rem)] max-h-[calc(100vh-11.5rem)] lg:sticky lg:top-24">
           <div className="px-4 sm:px-5 py-3 border-b border-border flex flex-col gap-3 shrink-0">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2" data-testid="pour-mode-toggle">
-              {[["pre_pour", "Pre-Pour", "Cage / before concrete"], ["post_pour", "Post-Pour", "Finished exterior"]].map(([value, label, hint]) => (
+              {[["pre_pour", "Pre-Pour", "Cables / hold-downs / no concrete"], ["post_pour", "Post-Pour", "Concrete + tip pattern"]].map(([value, label, hint]) => (
                 <button
                   key={value}
                   type="button"

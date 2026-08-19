@@ -326,22 +326,23 @@ function Shell({ spec, beam, highlighted, onSurfacePick, onBeamSelect, pourMode 
           onBeamSelect?.(beam);
         }}
       >
-        <meshPhysicalMaterial
-          color={prePour ? "#15202C" : concreteBase}
-          roughness={prePour ? 0.28 : 0.78}
-          metalness={prePour ? 0.12 : 0.05}
-          transparent={prePour}
-          opacity={prePour ? 0.1 : 1}
-          depthWrite={!prePour}
-          clearcoat={prePour ? 0.08 : 0.22}
-          clearcoatRoughness={prePour ? 0.55 : 0.62}
-          reflectivity={prePour ? 0.08 : 0.18}
-          emissive={highlighted ? "#0F3A4A" : "#0B0D10"}
-          emissiveIntensity={highlighted ? 0.16 : 0.04}
-        />
+        {prePour ? (
+          <meshBasicMaterial color="#5EEAD4" transparent opacity={0} depthWrite={false} side={THREE.DoubleSide} />
+        ) : (
+          <meshPhysicalMaterial
+            color={concreteBase}
+            roughness={0.78}
+            metalness={0.05}
+            clearcoat={0.22}
+            clearcoatRoughness={0.62}
+            reflectivity={0.18}
+            emissive={highlighted ? "#0F3A4A" : "#0B0D10"}
+            emissiveIntensity={highlighted ? 0.16 : 0.04}
+          />
+        )}
       </mesh>
       <lineSegments geometry={edges}>
-        <lineBasicMaterial color={prePour ? "#5EEAD4" : (highlighted ? "#B8E8F0" : concreteEdge)} transparent opacity={prePour ? 0.98 : 0.78} />
+        <lineBasicMaterial color={prePour ? "#5EEAD4" : (highlighted ? "#B8E8F0" : concreteEdge)} transparent opacity={prePour ? 1 : 0.78} />
       </lineSegments>
     </group>
   );
@@ -742,10 +743,20 @@ function strandPath(item, spec, stations) {
   const start = [item.x, item.y, 0];
   const finish = [item.x, item.y, spec.length];
   if (!item.draped || !stations.length) {
-    return [start, [item.x, item.y, spec.length / 2], finish];
+    return [start, finish];
   }
   const holdY = inchesToFeet(item.holdYIn);
-  return [start, ...stations.map((station) => [item.x, holdY, station]), finish];
+  const points = [start];
+  stations.forEach((station, index) => {
+    const previous = index === 0 ? 0 : stations[index - 1];
+    const approach = previous + (station - previous) * 0.72;
+    points.push([item.x, (item.y + holdY) / 2, approach]);
+    points.push([item.x, holdY, station]);
+  });
+  const last = stations[stations.length - 1];
+  points.push([item.x, (item.y + holdY) / 2, last + (spec.length - last) * 0.28]);
+  points.push(finish);
+  return points;
 }
 
 function StrandCable({ path, radius, color }) {
@@ -807,7 +818,7 @@ function StrandEndTreatment({ type, x, y, z, radius, outward }) {
 
 function StrandSystem({ beam, spec, onHardwareSelect, pourMode, showPaths }) {
   const layout = useMemo(() => strandLayout(spec, beam), [spec, beam]);
-  const radius = Math.max(inchesToFeet((layout.diameterIn || 0.5) * 1.7), 0.03);
+  const radius = Math.max(inchesToFeet((layout.diameterIn || 0.5) * 2.4), 0.04);
   const prePour = pourMode === "pre_pour";
   const extractedHoldStations = (spec.blueprint.hold_downs || []).map((item) => stationValue(item)).filter((value) => value != null);
   const parametricStations = prePour
@@ -1077,23 +1088,22 @@ function EngineeringDimensions({ beam, spec, showOverall = true, showStations = 
   const lengthFt = valueOrNull(spec.blueprint.dimensions?.overall_length_ft, beam.length_ft, spec.length);
   const stations = showStations ? runningDimensionStations(spec) : [];
   const sideX = -spec.width / 2 - 0.1;
-  const outsideX = -spec.width / 2 - 0.42;
   const tubeRowY = spec.depth * 0.56;
   const runLineY = Math.max(spec.depth * 0.34, tubeRowY - 0.52);
-  const overallY = -0.55;
+  const overallY = -0.48;
   const elevationTargets = showOverall ? elevationDimensionTargets(spec) : [];
   const finalStation = stations.length ? Math.max(...stations.map((item) => item.station)) : 0;
   return (
     <group>
       {showOverall && lengthFt && (
         <group>
-          <Line points={[[outsideX, overallY, 0], [outsideX, overallY, spec.length]]} color={overallDimensionColor} lineWidth={1.2} />
-          <Line points={[[outsideX - 0.18, overallY, 0], [outsideX + 0.18, overallY, 0]]} color={overallDimensionColor} lineWidth={1} />
-          <Line points={[[outsideX - 0.18, overallY, spec.length], [outsideX + 0.18, overallY, spec.length]]} color={overallDimensionColor} lineWidth={1} />
-          <MeasurementText position={[outsideX - 0.12, overallY - 0.28, spec.length / 2]} label={`OAL ${formatFeet(lengthFt)}`} color={overallDimensionColor} size={13} />
+          <Line points={[[0, overallY, 0], [0, overallY, spec.length]]} color={overallDimensionColor} lineWidth={1.4} />
+          <Line points={[[-0.16, overallY, 0], [0.16, overallY, 0]]} color={overallDimensionColor} lineWidth={1.1} />
+          <Line points={[[-0.16, overallY, spec.length], [0.16, overallY, spec.length]]} color={overallDimensionColor} lineWidth={1.1} />
+          <MeasurementText position={[0, overallY - 0.32, spec.length / 2]} label={`OAL ${formatFeet(lengthFt)}`} color={overallDimensionColor} size={14} />
         </group>
       )}
-      {showStations && (
+      {showStations && stations.length > 0 && (
         <group>
           {finalStation > 0 && (
             <Line points={[[sideX, runLineY, 0], [sideX, runLineY, finalStation]]} color={runningDimensionColor} lineWidth={1.1} />
@@ -1380,8 +1390,8 @@ function BeamAssembly({ beam, anomalies = [], onSurfacePick, onHardwareSelect, s
   return (
     <group ref={groupRef} position={[0, -spec.depth / 2, -spec.length / 2]}>
       <Shell spec={spec} beam={beam} highlighted={highlighted} onSurfacePick={surfacePick} onBeamSelect={onBeamSelect} pourMode={pourMode} />
-      {activeLayers.dimensions && <SectionRevealLines beam={beam} spec={spec} />}
-      {activeLayers.hardware && <BituminousEnds beam={beam} spec={spec} onHardwareSelect={onHardwareSelect} />}
+      {(prePour || activeLayers.dimensions) && <SectionRevealLines beam={beam} spec={spec} />}
+      {!prePour && activeLayers.hardware && <BituminousEnds beam={beam} spec={spec} onHardwareSelect={onHardwareSelect} />}
       <StrandSystem beam={beam} spec={spec} onHardwareSelect={onHardwareSelect} pourMode={pourMode} showPaths={prePour && activeLayers.strands} />
       {activeLayers.stirrups && <Stirrups beam={beam} spec={spec} onHardwareSelect={onHardwareSelect} />}
       {(activeLayers.hardware || activeLayers.stirrups) && <LiftLoops beam={beam} spec={spec} onHardwareSelect={onHardwareSelect} />}
@@ -1395,7 +1405,7 @@ function BeamAssembly({ beam, anomalies = [], onSurfacePick, onHardwareSelect, s
       {(activeLayers.dimensions || activeLayers.stations) && (
         <EngineeringDimensions beam={beam} spec={spec} showOverall={activeLayers.dimensions} showStations={activeLayers.stations} />
       )}
-      {activeLayers.hardware && <SmartHardwareCallouts beam={beam} spec={spec} />}
+      {!prePour && activeLayers.hardware && <SmartHardwareCallouts beam={beam} spec={spec} />}
       {activeLayers.anomalies && <Anomalies anomalies={anomalies} spec={spec} />}
     </group>
   );
@@ -1647,7 +1657,7 @@ function CrossSectionInset({ beam }) {
           borderBottom: minimized ? "none" : "1px solid #1C3A40",
         }}
       >
-        <span>MARKED END · TIP</span>
+        <span>MARKED END · TIP <span style={{ color: "#5EEAD4", marginLeft: 8, letterSpacing: "0.18em" }}>SPEC</span></span>
         <span style={{ display: "flex", gap: 5, letterSpacing: 0 }}>
           <button type="button" onPointerDown={(event) => event.stopPropagation()} onClick={cycleSize} aria-label={maximized ? "Restore section inset" : "Maximize section inset"} style={{ background: "#121925", border: "1px solid #344154", color: "#D8ECFF", height: 22, minWidth: 22, cursor: "pointer" }}>{maximized ? "↙" : "↗"}</button>
           <button type="button" onPointerDown={(event) => event.stopPropagation()} onClick={toggleMinimized} aria-label={minimized ? "Restore section inset" : "Minimize section inset"} style={{ background: "#121925", border: "1px solid #344154", color: "#D8ECFF", height: 22, minWidth: 22, cursor: "pointer" }}>{minimized ? "+" : "−"}</button>
@@ -1655,9 +1665,9 @@ function CrossSectionInset({ beam }) {
       </div>
       {!minimized && (
         <div style={{ padding: "8px 10px 10px" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", gap: 8, color: "#E2E8F0", fontFamily: "JetBrains Mono, monospace", fontSize: 10, letterSpacing: "0.08em", marginBottom: 6 }}>
-            <span>OAL {lengthFt != null ? formatFeet(lengthFt) : "unconfirmed"}</span>
-            <span>DEPTH {depthIn != null ? formatInches(depthIn) : "unconfirmed"}</span>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "baseline", color: "#E2E8F0", fontFamily: "JetBrains Mono, monospace", marginBottom: 8 }}>
+            <span style={{ color: "#E8C872", fontSize: 12, letterSpacing: "0.12em" }}>OAL {lengthFt != null ? formatFeet(lengthFt) : "unconfirmed"}</span>
+            <span style={{ fontSize: 11, letterSpacing: "0.08em" }}>DEPTH {depthIn != null ? formatInches(depthIn) : "unconfirmed"}</span>
           </div>
           <svg viewBox="0 0 260 176" width="100%" height={maximized ? 286 : 168} role="img" aria-label="Marked-end strand pattern and section">
             <polygon points={poly} fill="#C5CBD4" stroke="#F4F7FB" strokeWidth="1.4" />
@@ -1735,7 +1745,7 @@ function DimensionColorLegend() {
 const VIEW_LIFT_MIN = -2;
 const VIEW_LIFT_MAX = 12;
 const VIEW_LIFT_DEFAULT = 6;
-const ORBIT_TARGET = [0, 2.4, 0];
+const ORBIT_TARGET = [0, VIEW_LIFT_DEFAULT, 0];
 
 function invertLift(value) {
   return VIEW_LIFT_MIN + VIEW_LIFT_MAX - Number(value);
@@ -1808,10 +1818,10 @@ export default function BeamTwinViewer({ beam, anomalies = [], onSurfacePick, on
   const safeBeam = beam || { twin_type: "i_beam", length_ft: 90, product_type: {}, mark: "Beam" };
   const spec = useBeamSpec(safeBeam);
   const [viewLift, setViewLift] = useState(VIEW_LIFT_DEFAULT);
-  const cameraDistance = Math.max(safeBeam.length_ft * 0.34, 22);
-  const cameraHeight = Math.max(spec.depth * 1.05, 6.2);
+  const cameraDistance = Math.max(safeBeam.length_ft * 0.38, 24);
+  const cameraHeight = Math.max(spec.depth * 0.55, 3.4);
   const camera = useMemo(
-    () => ({ position: [cameraDistance * 0.52, cameraHeight, cameraDistance * 0.92], fov: 34 }),
+    () => ({ position: [cameraDistance * 0.28, VIEW_LIFT_DEFAULT + cameraHeight, cameraDistance * 0.96], fov: 32 }),
     [cameraDistance, cameraHeight],
   );
   const activeLayers = {

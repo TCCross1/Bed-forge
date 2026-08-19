@@ -69,6 +69,7 @@ def test_l25390_draped_path_is_parametric_not_invented_hardware():
     assert "H-56-S" in str(strand["hold_down_type"])
     assert strand["path_model"]["source"] == "parametric_midspan"
     assert strand["path_model"]["profile"] == "end_high_hold_down_low"
+    assert strand["path_model"]["routing"] == "end_hold_down_end"
     assert strand["path_model"]["hold_down_stations_ft"] == [round(47.25 * 0.5, 3)]
     assert strand["pattern_source"] == "unconfirmed"
     assert strand["end_treatments"]["marked_end"]["type"] == "unspecified"
