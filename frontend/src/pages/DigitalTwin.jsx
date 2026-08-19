@@ -46,19 +46,33 @@ function LayerChip({ active, label, onClick }) {
 }
 
 function TwinSelectors({ selectedSpecId, specs, onSpecChange, selectedBedId, beds, onBedChange, selectedId, beams, onBeamChange }) {
+  const jobs = [];
+  const byJob = new Map();
+  specs.forEach((item) => {
+    const job = String(item.job_number || "JOB").trim() || "JOB";
+    if (!byJob.has(job)) {
+      byJob.set(job, []);
+      jobs.push(job);
+    }
+    byJob.get(job).push(item);
+  });
   return (
     <div className="flex flex-wrap items-center gap-3">
       <select
         value={selectedSpecId}
         onChange={onSpecChange}
-        className="bg-background border border-border rounded-sm px-3 min-h-12 font-mono text-sm min-w-[12rem] flex-1"
+        className="bg-background border border-primary/40 rounded-sm px-3 min-h-14 font-mono text-sm min-w-[12rem] flex-1"
         data-testid="twin-spec-select"
       >
         <option value="">{specs.length ? "Spec DNA — select mark" : "No locked Spec DNA yet"}</option>
-        {specs.map((item) => (
-          <option key={item.id} value={item.id}>
-            {item.job_number || "JOB"} · MK {item.beam_mark} · {item.geometry?.length_ft ? `${Number(item.geometry.length_ft).toFixed(2)} ft` : "length unconfirmed"}
-          </option>
+        {jobs.map((job) => (
+          <optgroup key={job} label={job}>
+            {byJob.get(job).map((item) => (
+              <option key={item.id} value={item.id}>
+                {job} · MK {item.beam_mark} · {item.geometry?.length_ft ? `${Number(item.geometry.length_ft).toFixed(2)} ft` : "length unconfirmed"}
+              </option>
+            ))}
+          </optgroup>
         ))}
       </select>
       <select value={selectedBedId} onChange={onBedChange} className="bg-background border border-border rounded-sm px-3 min-h-12 font-mono text-sm">
@@ -84,7 +98,7 @@ function TwinLayerChips({ activeLayers, onToggle }) {
 
 function layersForPour(mode) {
   if (mode === "pre_pour") {
-    return { dimensions: true, stations: true, hardware: true, strands: true, stirrups: true, anomalies: true };
+    return { dimensions: true, stations: true, hardware: true, strands: true, stirrups: false, anomalies: true };
   }
   return { dimensions: true, stations: true, hardware: true, strands: false, stirrups: false, anomalies: true };
 }
@@ -263,12 +277,14 @@ export default function DigitalTwin() {
               <div className="space-y-2">
                 {[
                   ["Draped", strandSystem.draped ? "yes" : "no"],
-                  ["Path", strandSystem.path_model?.source || "none"],
+                  ["Span path", strandSystem.path_model?.span_path || "none"],
+                  ["Path source", strandSystem.path_model?.source || "none"],
                   ["Pattern", strandSystem.pattern_source || "unconfirmed"],
                   ["Hold-down", strandSystem.hold_down_type || "unconfirmed"],
                   ["End treatment", strandSystem.end_treatments?.marked_end?.label || strandSystem.end_treatments?.marked_end?.type || "unspecified"],
                   ["Diameter", strandSystem.diameter_in != null ? `${strandSystem.diameter_in} in` : "unconfirmed"],
                   ["Grade", strandSystem.grade || "unconfirmed"],
+                  ["Count", strandSystem.count != null ? String(strandSystem.count) : "unconfirmed"],
                   ["Final pull", strandSystem.final_pull_lb != null ? `${strandSystem.final_pull_lb} lb` : "unconfirmed"],
                 ].map(([label, value]) => (
                   <div key={label} className="flex items-start justify-between gap-3 text-xs font-mono">
@@ -378,12 +394,12 @@ export default function DigitalTwin() {
                   key={value}
                   type="button"
                   onClick={() => setPour(value)}
-                  className={`min-h-12 rounded-sm border px-4 text-left transition-colors duration-100 ${
+                  className={`min-h-14 rounded-sm border px-4 text-left transition-colors duration-100 ${
                     pourMode === value ? "border-primary bg-primary/15 shadow-[0_0_24px_rgba(45,212,191,0.18)]" : "border-border bg-background hover:border-primary/50"
                   }`}
                 >
-                  <div className={`font-display font-bold uppercase tracking-wider text-sm ${pourMode === value ? "text-primary" : "text-white"}`}>{label}</div>
-                  <div className="text-[11px] font-mono text-muted-foreground mt-1">{hint}</div>
+                  <div className={`font-display font-bold uppercase tracking-wider text-base ${pourMode === value ? "text-primary" : "text-white"}`}>{label}</div>
+                  <div className="text-xs font-mono text-muted-foreground mt-1">{hint}</div>
                 </button>
               ))}
             </div>

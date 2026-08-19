@@ -508,8 +508,8 @@ function HoldDowns({ beam, spec, onHardwareSelect, stations, parametric = false 
   const resolved = stations || (spec.blueprint.hold_downs || []).map((item) => stationValue(item)).filter((value) => value != null);
   const layout = strandLayout(spec, beam);
   const holdY = inchesToFeet(layout.path.hold_down_elevation_in || 5);
-  const width = Math.max(spec.width * 0.34, 0.52);
-  const height = Math.max(inchesToFeet(10), spec.depth * 0.2);
+  const width = Math.max(spec.width * 0.42, 0.62);
+  const height = Math.max(inchesToFeet(12), spec.depth * 0.24);
   return resolved.map((station, index) => {
     const payload = {
       id: `hold-down-${parametric ? "p-" : ""}${index}`,
@@ -663,14 +663,18 @@ function strandLayout(spec, beam) {
   const rows = Array.isArray(pattern.rows) ? pattern.rows : [];
   const path = system.path_model || {};
   const drape = blueprint.drape_profile || {};
-  const draped = Boolean(system.draped || blueprint.strand_draped);
+  const holdType = String(system.hold_down_type || blueprint.hold_down_type || "");
+  const draped = Boolean(system.draped || blueprint.strand_draped || /H-56-S|H56S/i.test(holdType));
   const drapedCount = Number(drape.draped_count || 0) || 0;
   const depthIn = spec.depth * 12;
   const endElev = Number(path.end_elevation_in || drape.end_elevation_in) || Math.max(10.5, depthIn * 0.42);
   const holdElev = Number(path.hold_down_elevation_in || drape.hold_down_elevation_in) || 2.5;
-  const stations = (path.hold_down_stations_ft || drape.low_points_ft || [])
+  let stations = (path.hold_down_stations_ft || drape.low_points_ft || [])
     .map((value) => Number(value))
     .filter((value) => Number.isFinite(value));
+  if (draped && !stations.length && spec.length) {
+    stations = [Math.round(spec.length * 500) / 1000];
+  }
   const treatment = (system.end_treatments || {}).marked_end || blueprint.strand_end_treatment || { type: "unspecified", label: "Unspecified" };
   let items = [];
   if (rows.length) {
@@ -729,7 +733,7 @@ function strandLayout(spec, beam) {
       hold_down_elevation_in: holdElev,
       end_elevation_in: endElev,
       hold_down_stations_ft: stations,
-      source: path.source || drape.source || "none",
+      source: path.source || drape.source || (draped && stations.length ? "parametric_midspan" : "none"),
     },
     patternSource: items.some((item) => item.representative) ? "unconfirmed" : (system.pattern_source || blueprint.strand_pattern_source || (rows.length ? "extracted" : "unconfirmed")),
     treatment,
@@ -818,7 +822,7 @@ function StrandEndTreatment({ type, x, y, z, radius, outward }) {
 
 function StrandSystem({ beam, spec, onHardwareSelect, pourMode, showPaths }) {
   const layout = useMemo(() => strandLayout(spec, beam), [spec, beam]);
-  const radius = Math.max(inchesToFeet((layout.diameterIn || 0.5) * 2.4), 0.04);
+  const radius = Math.max(inchesToFeet((layout.diameterIn || 0.5) * 3.1), 0.055);
   const prePour = pourMode === "pre_pour";
   const extractedHoldStations = (spec.blueprint.hold_downs || []).map((item) => stationValue(item)).filter((value) => value != null);
   const parametricStations = prePour
@@ -843,8 +847,8 @@ function StrandSystem({ beam, spec, onHardwareSelect, pourMode, showPaths }) {
       })}
       {layout.items.map((item, index) => (
         <React.Fragment key={`tip-${index}`}>
-          <StrandEndTreatment type={layout.treatment?.type || "unspecified"} x={item.x} y={item.y} z={0} radius={radius} outward={-1} />
-          <StrandEndTreatment type={layout.treatment?.type || "unspecified"} x={item.x} y={item.y} z={spec.length} radius={radius} outward={1} />
+          <StrandEndTreatment type={layout.treatment?.type || "unspecified"} x={item.x} y={item.y} z={-0.06} radius={radius} outward={-1} />
+          <StrandEndTreatment type={layout.treatment?.type || "unspecified"} x={item.x} y={item.y} z={spec.length + 0.06} radius={radius} outward={1} />
         </React.Fragment>
       ))}
       {parametricStations.length > 0 && (
@@ -1627,18 +1631,21 @@ function CrossSectionInset({ beam }) {
     setViewState((current) => current === "minimized" ? "normal" : "minimized");
   };
   return (
-    <div style={{
-      position: "fixed",
-      left: position.x,
-      top: position.y,
-      width: panelWidth,
-      background: "linear-gradient(180deg, rgba(10,14,20,0.97) 0%, rgba(7,9,14,0.96) 100%)",
-      border: "1px solid #1F6F73",
-      boxShadow: "0 18px 48px rgba(0,0,0,0.5), 0 0 24px rgba(45,212,191,0.12)",
-      pointerEvents: "auto",
-      zIndex: 30,
-      userSelect: "none",
-    }}>
+    <div
+      data-testid="marked-end-inset"
+      style={{
+        position: "fixed",
+        left: position.x,
+        top: position.y,
+        width: panelWidth,
+        background: "linear-gradient(165deg, rgba(12,18,24,0.98) 0%, rgba(6,8,12,0.97) 55%, rgba(10,12,16,0.98) 100%)",
+        border: "1px solid #2DD4BF55",
+        boxShadow: "0 18px 48px rgba(0,0,0,0.55), 0 0 28px rgba(45,212,191,0.14), inset 0 1px 0 rgba(232,200,114,0.12)",
+        pointerEvents: "auto",
+        zIndex: 30,
+        userSelect: "none",
+      }}
+    >
       <div
         onPointerDown={beginDrag}
         style={{
@@ -1647,43 +1654,59 @@ function CrossSectionInset({ beam }) {
           justifyContent: "space-between",
           gap: 8,
           color: "#E8C872",
-          fontSize: 11,
-          fontWeight: 700,
-          letterSpacing: "0.16em",
+          fontSize: 12,
+          fontWeight: 800,
+          letterSpacing: "0.18em",
           fontFamily: "JetBrains Mono, monospace",
-          padding: minimized ? "8px 10px" : "8px 10px 6px",
+          padding: minimized ? "10px 12px" : "10px 12px 8px",
           cursor: "grab",
           touchAction: "none",
-          borderBottom: minimized ? "none" : "1px solid #1C3A40",
+          borderBottom: minimized ? "none" : "1px solid #1F6F73",
+          background: "linear-gradient(90deg, rgba(45,212,191,0.08), rgba(232,200,114,0.05) 40%, transparent)",
         }}
       >
         <span>MARKED END · TIP <span style={{ color: "#5EEAD4", marginLeft: 8, letterSpacing: "0.18em" }}>SPEC</span></span>
         <span style={{ display: "flex", gap: 5, letterSpacing: 0 }}>
-          <button type="button" onPointerDown={(event) => event.stopPropagation()} onClick={cycleSize} aria-label={maximized ? "Restore section inset" : "Maximize section inset"} style={{ background: "#121925", border: "1px solid #344154", color: "#D8ECFF", height: 22, minWidth: 22, cursor: "pointer" }}>{maximized ? "↙" : "↗"}</button>
-          <button type="button" onPointerDown={(event) => event.stopPropagation()} onClick={toggleMinimized} aria-label={minimized ? "Restore section inset" : "Minimize section inset"} style={{ background: "#121925", border: "1px solid #344154", color: "#D8ECFF", height: 22, minWidth: 22, cursor: "pointer" }}>{minimized ? "+" : "−"}</button>
+          <button type="button" onPointerDown={(event) => event.stopPropagation()} onClick={cycleSize} aria-label={maximized ? "Restore section inset" : "Maximize section inset"} style={{ background: "#0C1218", border: "1px solid #2DD4BF66", color: "#D8ECFF", height: 24, minWidth: 24, cursor: "pointer" }}>{maximized ? "↙" : "↗"}</button>
+          <button type="button" onPointerDown={(event) => event.stopPropagation()} onClick={toggleMinimized} aria-label={minimized ? "Restore section inset" : "Minimize section inset"} style={{ background: "#0C1218", border: "1px solid #2DD4BF66", color: "#D8ECFF", height: 24, minWidth: 24, cursor: "pointer" }}>{minimized ? "+" : "−"}</button>
         </span>
       </div>
       {!minimized && (
-        <div style={{ padding: "8px 10px 10px" }}>
+        <div style={{ padding: "10px 12px 12px" }}>
           <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "baseline", color: "#E2E8F0", fontFamily: "JetBrains Mono, monospace", marginBottom: 8 }}>
-            <span style={{ color: "#E8C872", fontSize: 12, letterSpacing: "0.12em" }}>OAL {lengthFt != null ? formatFeet(lengthFt) : "unconfirmed"}</span>
-            <span style={{ fontSize: 11, letterSpacing: "0.08em" }}>DEPTH {depthIn != null ? formatInches(depthIn) : "unconfirmed"}</span>
+            <span style={{ color: "#E8C872", fontSize: 13, letterSpacing: "0.12em", fontWeight: 800 }}>OAL {lengthFt != null ? formatFeet(lengthFt) : "unconfirmed"}</span>
+            <span style={{ fontSize: 12, letterSpacing: "0.1em" }}>DEPTH {depthIn != null ? formatInches(depthIn) : "unconfirmed"}</span>
           </div>
           <svg viewBox="0 0 260 176" width="100%" height={maximized ? 286 : 168} role="img" aria-label="Marked-end strand pattern and section">
-            <polygon points={poly} fill="#C5CBD4" stroke="#F4F7FB" strokeWidth="1.4" />
+            <defs>
+              <pattern id="tech-grid" width="12" height="12" patternUnits="userSpaceOnUse">
+                <path d="M 12 0 L 0 0 0 12" fill="none" stroke="#1F3A44" strokeWidth="0.6" />
+              </pattern>
+              <linearGradient id="steel-fill" x1="0" y1="1" x2="0" y2="0">
+                <stop offset="0%" stopColor="#3A4554" />
+                <stop offset="55%" stopColor="#1C242E" />
+                <stop offset="100%" stopColor="#5EEAD422" />
+              </linearGradient>
+            </defs>
+            <rect x="0" y="0" width="260" height="176" fill="#07090D" />
+            <rect x="0" y="0" width="260" height="176" fill="url(#tech-grid)" />
+            <rect x="8" y="8" width="244" height="160" fill="none" stroke="#E8C87233" strokeWidth="0.8" />
+            <polygon points={poly} fill="url(#steel-fill)" stroke="#5EEAD4" strokeWidth="1.6" />
             {isBox && voidWidthIn && voidDepthIn && (
-              <rect x={x(-voidWidthIn / 2)} y={y((wallIn || 4) + voidDepthIn)} width={voidWidthIn * sx} height={voidDepthIn * sy} fill="#0A0C10" stroke="#8FA1B6" />
+              <rect x={x(-voidWidthIn / 2)} y={y((wallIn || 4) + voidDepthIn)} width={voidWidthIn * sx} height={voidDepthIn * sy} fill="#05070A" stroke="#8FA1B6" />
             )}
             {layout.items.map((item, index) => (
-              <circle
-                key={`strand-dot-${index}`}
-                cx={x(item.xIn)}
-                cy={y(item.yIn)}
-                r={maximized ? 3.4 : 2.7}
-                fill={item.draped ? strandDrapedColor : brassGold}
-                stroke="#0A0C10"
-                strokeWidth="0.7"
-              />
+              <g key={`strand-dot-${index}`}>
+                <circle cx={x(item.xIn)} cy={y(item.yIn)} r={maximized ? 5.2 : 4.2} fill="none" stroke={item.draped ? "#5EEAD4" : "#E8C872"} strokeWidth="0.7" opacity="0.45" />
+                <circle
+                  cx={x(item.xIn)}
+                  cy={y(item.yIn)}
+                  r={maximized ? 3.6 : 2.9}
+                  fill={item.draped ? strandDrapedColor : brassGold}
+                  stroke="#0A0C10"
+                  strokeWidth="0.7"
+                />
+              </g>
             ))}
             {bottomWidthIn && dim(x(-bottomWidthIn / 2), 166, x(bottomWidthIn / 2), 166, `${formatInches(bottomWidthIn)}`, cx, 174)}
             {topWidthIn && !isBox && dim(x(-topWidthIn / 2), 15, x(topWidthIn / 2), 15, `${formatInches(topWidthIn)} TOP`, cx, 10)}
@@ -1692,18 +1715,20 @@ function CrossSectionInset({ beam }) {
                 <line x1="232" y1={y(0)} x2="232" y2={y(depthIn)} stroke="#73BCFF" strokeWidth="1" />
                 <line x1="228" y1={y(0)} x2="236" y2={y(0)} stroke="#73BCFF" strokeWidth="1" />
                 <line x1="228" y1={y(depthIn)} x2="236" y2={y(depthIn)} stroke="#73BCFF" strokeWidth="1" />
-                <text x="247" y="88" fill="#D8ECFF" fontSize="9" textAnchor="middle" transform="rotate(90 247 88)">{formatInches(depthIn)} DEPTH</text>
+                <text x="247" y="88" fill="#D8ECFF" fontSize="10" textAnchor="middle" transform="rotate(90 247 88)">{formatInches(depthIn)} DEPTH</text>
               </g>
             )}
             {webIn && !isBox && dim(x(-webIn / 2), 88, x(webIn / 2), 88, `${formatInches(webIn)} WEB`, cx, 82)}
-            {topThickIn && <text x="22" y={y(depthIn - topThickIn / 2)} fill="#D8ECFF" fontSize="9">TOP {formatInches(topThickIn)}</text>}
-            {bottomThickIn && <text x="18" y={y(bottomThickIn / 2)} fill="#D8ECFF" fontSize="9">BOT {formatInches(bottomThickIn)}</text>}
-            {wallIn && isBox && <text x="24" y="92" fill="#D8ECFF" fontSize="9">WALL {formatInches(wallIn)}</text>}
-            {topAngle && <text x="192" y="33" fill="#FFD166" fontSize="9">ANGLE {topAngle}°</text>}
-            {bottomAngle && <text x="184" y="135" fill="#FFD166" fontSize="9">HAUNCH {bottomAngle}°</text>}
+            {topThickIn && <text x="22" y={y(depthIn - topThickIn / 2)} fill="#D8ECFF" fontSize="10">TOP {formatInches(topThickIn)}</text>}
+            {bottomThickIn && <text x="18" y={y(bottomThickIn / 2)} fill="#D8ECFF" fontSize="10">BOT {formatInches(bottomThickIn)}</text>}
+            {wallIn && isBox && <text x="24" y="92" fill="#D8ECFF" fontSize="10">WALL {formatInches(wallIn)}</text>}
+            {topAngle && <text x="192" y="33" fill="#FFD166" fontSize="10">ANGLE {topAngle}°</text>}
+            {bottomAngle && <text x="184" y="135" fill="#FFD166" fontSize="10">HAUNCH {bottomAngle}°</text>}
           </svg>
-          <div style={{ display: "flex", justifyContent: "space-between", gap: 8, marginTop: 6, color: "#94A3B8", fontFamily: "JetBrains Mono, monospace", fontSize: 9, letterSpacing: "0.1em", textTransform: "uppercase" }}>
-            <span style={{ color: layout.patternSource === "unconfirmed" ? "#E8C872" : "#5EEAD4" }}>Pattern {layout.patternSource}</span>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 8, marginTop: 8, color: "#94A3B8", fontFamily: "JetBrains Mono, monospace", fontSize: 11, letterSpacing: "0.1em", textTransform: "uppercase" }}>
+            <span style={{ color: layout.patternSource === "unconfirmed" ? "#E8C872" : "#5EEAD4" }}>
+              {layout.items.some((item) => item.draped) ? "Teal = draped" : "Pattern"} · {layout.patternSource}
+            </span>
             <span>{layout.treatment?.label || layout.treatment?.type || "end unspecified"}</span>
           </div>
         </div>
@@ -1814,6 +1839,59 @@ function ViewHeightControl({ value, onChange, align = "right" }) {
   );
 }
 
+function TwinVisualBar({ beam, spec, pourMode }) {
+  const layout = strandLayout(spec, beam);
+  const lengthFt = valueOrNull(spec.blueprint.dimensions?.overall_length_ft, beam.length_ft, spec.length);
+  const job = beam?.beam_spec?.job_number || beam?.beam_spec?.identity?.job_number || "";
+  const mark = beam?.mark || beam?.beam_spec?.beam_mark || "MARK";
+  const prePour = pourMode === "pre_pour";
+  const pathSource = layout.path?.source || "none";
+  const pathLabel = layout.draped
+    ? (pathSource === "extracted_stations" ? "DRAPED · SPEC STATIONS" : pathSource === "parametric_midspan" ? "DRAPED · PARAMETRIC" : "DRAPED")
+    : "STRAIGHT";
+  const cells = [
+    { kicker: prePour ? "PRE-POUR" : "POST-POUR", value: prePour ? "CABLES / HOLD-DOWNS" : "CONCRETE / TIP PATTERN", accent: true },
+    { kicker: job ? `${job} · MK ${mark}` : `MK ${mark}`, value: lengthFt != null ? `OAL ${formatFeet(lengthFt)}` : "OAL UNCONFIRMED" },
+    { kicker: pathLabel, value: layout.holdDownType || (layout.draped ? "HOLD-DOWN UNCONFIRMED" : "NO HOLD-DOWNS") },
+    { kicker: (layout.treatment?.label || "END UNSPECIFIED").toUpperCase(), value: layout.diameterIn ? `${layout.diameterIn}" STRAND` : "DIA UNCONFIRMED" },
+  ];
+  return (
+    <div
+      data-testid="twin-visual-bar"
+      style={{
+        position: "absolute",
+        left: 12,
+        right: 64,
+        top: 12,
+        zIndex: 20,
+        pointerEvents: "none",
+        display: "flex",
+        flexWrap: "wrap",
+        gap: 8,
+      }}
+    >
+      {cells.map((cell) => (
+        <div
+          key={cell.kicker}
+          style={{
+            minHeight: 52,
+            minWidth: 132,
+            padding: "8px 12px",
+            background: "linear-gradient(180deg, rgba(10,14,20,0.94) 0%, rgba(7,9,13,0.9) 100%)",
+            border: cell.accent ? "1px solid rgba(45,212,191,0.55)" : "1px solid #243044",
+            boxShadow: cell.accent ? "0 0 22px rgba(45,212,191,0.16)" : "0 10px 24px rgba(0,0,0,0.35)",
+            color: "#E8EEF6",
+            fontFamily: "JetBrains Mono, ui-monospace, SFMono-Regular, monospace",
+          }}
+        >
+          <div style={{ color: cell.accent ? "#5EEAD4" : "#E8C872", fontSize: 13, fontWeight: 800, letterSpacing: "0.12em" }}>{cell.kicker}</div>
+          <div style={{ marginTop: 4, color: "#C7D2E1", fontSize: 12, letterSpacing: "0.08em" }}>{cell.value}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export default function BeamTwinViewer({ beam, anomalies = [], onSurfacePick, onHardwareSelect, showCallouts = true, layers, pourMode = "post_pour" }) {
   const safeBeam = beam || { twin_type: "i_beam", length_ft: 90, product_type: {}, mark: "Beam" };
   const spec = useBeamSpec(safeBeam);
@@ -1848,6 +1926,7 @@ export default function BeamTwinViewer({ beam, anomalies = [], onSurfacePick, on
           <gridHelper args={[Math.max(safeBeam.length_ft * 1.25, 50), Math.max(Math.round(safeBeam.length_ft / 4), 24), "#2B313B", "#161B24"]} position={[0, -spec.depth / 2 - 0.05, 0]} />
         </group>
       </Scene>
+      <TwinVisualBar beam={safeBeam} spec={spec} pourMode={pourMode} />
       <ViewHeightControl value={viewLift} onChange={setViewLift} />
       {activeLayers.dimensions && <CrossSectionInset beam={safeBeam} />}
       {(activeLayers.dimensions || activeLayers.stations) && <DimensionColorLegend />}

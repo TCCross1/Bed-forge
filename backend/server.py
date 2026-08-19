@@ -24,7 +24,7 @@ from models import (
     BlueprintDocument, BlueprintExtraction, BlueprintExtractionPatch, BlueprintField, BlueprintAuditEvent,
     BlueprintLockInput, LockedBlueprintRevision,
 )
-from beam_spec import materialize_job_beam_specs, twin_beam_from_spec
+from beam_spec import materialize_job_beam_specs, strand_engine_stale, twin_beam_from_spec
 from auth import router as auth_router, get_current_user, require_roles, seed_admin
 from tension import run_tension_calc, calc_theoretical_elongation, evaluate_tension
 from seed import seed_plant
@@ -737,13 +737,26 @@ async def list_beam_specs(
         revision_query = {"document_id": document_id} if document_id else {}
         revisions = await db.locked_blueprint_revisions.find(revision_query, {"_id": 0}).to_list(500)
         for revision in revisions:
-            existing = await db.beam_specs.find({"locked_revision_id": revision.get("id")}, {"_id": 0}).to_list(1)
-            if existing:
+            existing = await db.beam_specs.find({"locked_revision_id": revision.get("id")}, {"_id": 0}).to_list(50)
+            if existing and not any(strand_engine_stale(item) for item in existing):
                 continue
             document = await db.blueprint_documents.find_one({"id": revision.get("document_id")}, {"_id": 0})
             extraction = await db.blueprint_extractions.find_one({"id": revision.get("extraction_id")}, {"_id": 0})
             if document and extraction:
-                await materialize_specs_for_revision(document, extraction, revision, revision.get("beam_ids") or [])
+                try:
+                    logger.info(
+                        "Refreshing strand engine for locked_revision_id=%s document_id=%s stale=%s",
+                        revision.get("id"),
+                        revision.get("document_id"),
+                        bool(existing),
+                    )
+                    await materialize_specs_for_revision(document, extraction, revision, revision.get("beam_ids") or [])
+                except Exception:
+                    logger.exception(
+                        "Failed to rematerialize strand engine locked_revision_id=%s document_id=%s",
+                        revision.get("id"),
+                        revision.get("document_id"),
+                    )
         query = {}
         if job_id:
             query["job_id"] = job_id
@@ -784,6 +797,16 @@ async def get_beam_spec_twin(spec_id: str, user=Depends(get_current_user)):
     if not spec:
         raise HTTPException(status_code=404, detail="Beam spec not found")
     try:
+        if strand_engine_stale(spec):
+            revision = await db.locked_blueprint_revisions.find_one({"id": spec.get("locked_revision_id")}, {"_id": 0})
+            document = await db.blueprint_documents.find_one({"id": spec.get("document_id")}, {"_id": 0})
+            extraction = None
+            if revision and revision.get("extraction_id"):
+                extraction = await db.blueprint_extractions.find_one({"id": revision.get("extraction_id")}, {"_id": 0})
+            if document and extraction:
+                logger.info("Refreshing stale strand engine for spec_id=%s mark=%s", spec_id, spec.get("beam_mark"))
+                saved = await materialize_specs_for_revision(document, extraction, revision, revision.get("beam_ids") or [])
+                spec = next((item for item in saved if item.get("id") == spec_id or item.get("beam_mark") == spec.get("beam_mark")), spec)
         return twin_beam_from_spec(spec)
     except Exception:
         logger.exception("Failed to build twin payload for spec_id=%s", spec_id)

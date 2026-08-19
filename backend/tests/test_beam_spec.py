@@ -1,7 +1,7 @@
 """Beam Spec DNA materialization from locked/confirmed extraction."""
 from models import BlueprintField
 from blueprint_pipeline import extract_structured_fields, normalize_locked_blueprint
-from beam_spec import materialize_job_beam_specs, twin_beam_from_spec
+from beam_spec import materialize_job_beam_specs, strand_engine_stale, twin_beam_from_spec
 from tests.test_blueprint_extraction import L25390_FIXTURE
 
 
@@ -142,4 +142,23 @@ def test_legacy_unconfirmed_draped_keyword_builds_parametric_path():
     strand = specs[0]["strand"]
     assert strand["draped"] is True
     assert strand["path_model"]["source"] == "parametric_midspan"
+    assert strand["path_model"]["span_path"] == "end -> hold-down -> end"
     assert not [item for item in specs[0]["hardware"] if item.get("kind") == "hold_down"]
+
+
+def test_strand_engine_stale_detects_legacy_specs_without_inventing_hardware():
+    assert strand_engine_stale(None) is True
+    assert strand_engine_stale({"strand": {"draped": True, "hold_down_type": "H-56-S"}}) is True
+    assert strand_engine_stale({"strand": {"path_model": {"source": "parametric_midspan"}}}) is True
+    result = extract_structured_fields(L25390_FIXTURE, page_sources=["text_layer"] * len(L25390_FIXTURE))
+    specs = materialize_job_beam_specs(
+        result.fields,
+        document={"id": "doc-stale", "project_name_hint": "L25390"},
+        revision={"id": "rev-stale", "product_family": "i_beam"},
+    )
+    spec = next(item for item in specs if item["beam_mark"] == "201")
+    assert strand_engine_stale(spec) is False
+    assert spec["strand"]["end_treatments"]["marked_end"]["type"] in ("cut_flush_bituminous", "bent_90", "unspecified")
+    assert spec["strand"]["path_model"]["routing"] == "end_hold_down_end"
+    hold_hardware = [item for item in spec["hardware"] if item.get("kind") == "hold_down"]
+    assert hold_hardware == []

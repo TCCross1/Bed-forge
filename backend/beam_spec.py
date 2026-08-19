@@ -329,6 +329,15 @@ def materialize_job_beam_specs(
         raise
 
 
+def strand_engine_stale(spec: Optional[Dict[str, Any]]) -> bool:
+    """True when a stored Spec predates engineered strand paths / end treatments."""
+    if not spec:
+        return True
+    strand = spec.get("strand") or {}
+    path = strand.get("path_model") or {}
+    return not path.get("routing") or "end_treatments" not in strand
+
+
 def twin_beam_from_spec(spec: Dict[str, Any]) -> Dict[str, Any]:
     """Synthetic beam payload so the Digital Twin can render Spec DNA without seed geometry."""
     geometry = spec.get("geometry") or {}
