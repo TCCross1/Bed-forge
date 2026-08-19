@@ -1236,7 +1236,7 @@ function BeamAssembly({ beam, anomalies = [], onSurfacePick, onHardwareSelect, s
   );
 }
 
-function Scene({ children, camera }) {
+function Scene({ children, camera, target = ORBIT_TARGET }) {
   const [contextLost, setContextLost] = useState(false);
 
   if (contextLost) {
@@ -1255,7 +1255,7 @@ function Scene({ children, camera }) {
         <directionalLight position={[-16, 8, -8]} intensity={0.42} />
         <directionalLight position={[0, 10, -18]} intensity={0.3} />
         {children}
-         <OrbitControls enablePan enableZoom enableRotate maxPolarAngle={Math.PI * 0.48} makeDefault />
+         <OrbitControls enablePan enableZoom enableRotate maxPolarAngle={Math.PI * 0.48} makeDefault target={target} />
         </Suspense>
       </Canvas>
     </TwinCanvasErrorBoundary>
@@ -1523,10 +1523,9 @@ function DimensionColorLegend() {
     </span>
   );
   return (
-    <div style={{
-      position: "absolute",
-      right: 14,
-      bottom: 14,
+    <div
+      className="absolute left-3.5 bottom-20 sm:bottom-3.5 z-10"
+      style={{
       display: "flex",
       gap: 12,
       alignItems: "center",
@@ -1546,10 +1545,88 @@ function DimensionColorLegend() {
   );
 }
 
+const VIEW_LIFT_MIN = -2;
+const VIEW_LIFT_MAX = 12;
+const VIEW_LIFT_DEFAULT = 6;
+const ORBIT_TARGET = [0, 2.4, 0];
+
+function invertLift(value) {
+  return VIEW_LIFT_MIN + VIEW_LIFT_MAX - Number(value);
+}
+
+function ViewHeightControl({ value, onChange, align = "right" }) {
+  const slider = (
+    <input
+      type="range"
+      min={VIEW_LIFT_MIN}
+      max={VIEW_LIFT_MAX}
+      step={0.1}
+      value={value}
+      aria-valuemin={VIEW_LIFT_MIN}
+      aria-valuemax={VIEW_LIFT_MAX}
+      aria-valuenow={Number(value.toFixed(1))}
+      aria-label="View height, raise or lower the beam"
+      onChange={(event) => onChange(Number(event.target.value))}
+      data-testid="twin-view-height-slider"
+      className="accent-primary cursor-pointer"
+    />
+  );
+  return (
+    <>
+      <div
+        className={`hidden sm:flex absolute z-20 top-1/2 -translate-y-1/2 flex-col items-center gap-2 rounded-sm border border-primary/40 bg-[#0A0C10]/92 px-2 py-3 shadow-[0_0_24px_rgba(45,212,191,0.12)] ${align === "left" ? "left-3" : "right-3"}`}
+        data-testid="twin-view-height"
+      >
+        <span className="text-[8px] font-mono uppercase tracking-[0.14em] text-primary text-center leading-tight">View height</span>
+        <span className="text-[9px] font-mono uppercase tracking-[0.18em] text-primary [writing-mode:vertical-rl] rotate-180">Raise</span>
+        <input
+          type="range"
+          min={VIEW_LIFT_MIN}
+          max={VIEW_LIFT_MAX}
+          step={0.1}
+          value={invertLift(value)}
+          aria-label="View height, raise or lower the beam"
+          onChange={(event) => onChange(invertLift(event.target.value))}
+          data-testid="twin-view-height-slider-vertical"
+          className="h-[min(38vh,220px)] w-9 cursor-pointer accent-primary"
+          style={{ writingMode: "vertical-lr" }}
+        />
+        <span className="text-[9px] font-mono uppercase tracking-[0.18em] text-muted-foreground [writing-mode:vertical-rl] rotate-180">Lower</span>
+        <button
+          type="button"
+          onClick={() => onChange(VIEW_LIFT_DEFAULT)}
+          className="mt-1 min-h-8 px-1.5 rounded-sm border border-border text-[9px] font-mono uppercase tracking-wider text-white hover:border-primary hover:text-primary"
+        >
+          {value.toFixed(1)} ft
+        </button>
+      </div>
+      <div className="sm:hidden absolute z-20 left-3 right-3 bottom-3 rounded-sm border border-primary/40 bg-[#0A0C10]/94 px-3 py-2.5">
+        <div className="flex items-center justify-between gap-3 mb-1.5">
+          <span className="text-[10px] font-mono uppercase tracking-[0.18em] text-primary">View height · Raise-Lower</span>
+          <button
+            type="button"
+            onClick={() => onChange(VIEW_LIFT_DEFAULT)}
+            className="min-h-8 px-2 rounded-sm border border-border text-[10px] font-mono text-white"
+          >
+            {value.toFixed(1)} ft
+          </button>
+        </div>
+        {slider}
+      </div>
+    </>
+  );
+}
+
 export default function BeamTwinViewer({ beam, anomalies = [], onSurfacePick, onHardwareSelect, showCallouts = true, layers, pourMode = "post_pour" }) {
   const safeBeam = beam || { twin_type: "i_beam", length_ft: 90, product_type: {}, mark: "Beam" };
   const spec = useBeamSpec(safeBeam);
+  const [viewLift, setViewLift] = useState(VIEW_LIFT_DEFAULT);
   const cameraDistance = Math.max(safeBeam.length_ft * 0.34, 22);
+  const cameraHeight = Math.max(spec.depth * 1.05, 6.2);
+  const camera = useMemo(
+    () => ({ position: [cameraDistance * 0.52, cameraHeight, cameraDistance * 0.92], fov: 34 }),
+    [cameraDistance, cameraHeight],
+  );
   const activeLayers = {
     dimensions: showCallouts,
     stations: showCallouts,
@@ -1561,14 +1638,20 @@ export default function BeamTwinViewer({ beam, anomalies = [], onSurfacePick, on
   };
   return (
     <div style={{ width: "100%", height: "100%", background: "#0A0C10", position: "relative" }} data-testid="beam-3d-canvas">
-      <Scene camera={{ position: [cameraDistance * 0.56, spec.depth * 2.45, cameraDistance], fov: 34 }}>
-        <BeamAssembly beam={safeBeam} anomalies={anomalies} onSurfacePick={onSurfacePick} onHardwareSelect={onHardwareSelect} showCallouts={showCallouts} layers={activeLayers} highlighted pourMode={pourMode} />
-        <mesh position={[0, -spec.depth / 2 - 0.14, 0]} receiveShadow>
-          <boxGeometry args={[Math.max(spec.width * 4.2, 18), 0.16, Math.max(safeBeam.length_ft + 12, 34)]} />
-          <meshStandardMaterial color="#20252F" roughness={0.96} metalness={0.04} />
-        </mesh>
-        <gridHelper args={[Math.max(safeBeam.length_ft * 1.25, 50), Math.max(Math.round(safeBeam.length_ft / 4), 24), "#2B313B", "#161B24"]} position={[0, -spec.depth / 2 - 0.05, 0]} />
+      <Scene
+        camera={camera}
+        target={ORBIT_TARGET}
+      >
+        <group position={[0, viewLift, 0]}>
+          <BeamAssembly beam={safeBeam} anomalies={anomalies} onSurfacePick={onSurfacePick} onHardwareSelect={onHardwareSelect} showCallouts={showCallouts} layers={activeLayers} highlighted pourMode={pourMode} />
+          <mesh position={[0, -spec.depth / 2 - 0.14, 0]} receiveShadow>
+            <boxGeometry args={[Math.max(spec.width * 4.2, 18), 0.16, Math.max(safeBeam.length_ft + 12, 34)]} />
+            <meshStandardMaterial color="#20252F" roughness={0.96} metalness={0.04} />
+          </mesh>
+          <gridHelper args={[Math.max(safeBeam.length_ft * 1.25, 50), Math.max(Math.round(safeBeam.length_ft / 4), 24), "#2B313B", "#161B24"]} position={[0, -spec.depth / 2 - 0.05, 0]} />
+        </group>
       </Scene>
+      <ViewHeightControl value={viewLift} onChange={setViewLift} />
       {activeLayers.dimensions && <CrossSectionInset beam={safeBeam} />}
       {(activeLayers.dimensions || activeLayers.stations) && <DimensionColorLegend />}
     </div>
@@ -1632,6 +1715,11 @@ export function BedTwinViewer({ bed, selectedBeamId, onBeamSelect, onHardwareSel
   const bedLength = Math.max(...beams.map((item) => item.length_ft || 0), bed?.length_ft || 120);
   const laneWidth = 7;
   const halfSpread = ((Math.max(beams.length, 1) - 1) * laneWidth) / 2;
+  const [viewLift, setViewLift] = useState(VIEW_LIFT_DEFAULT);
+  const camera = useMemo(
+    () => ({ position: [22, 12, Math.max(bedLength * 0.66, 92)], fov: 33 }),
+    [bedLength],
+  );
   const activeLayers = {
     dimensions: showCallouts,
     hardware: false,
@@ -1642,45 +1730,48 @@ export function BedTwinViewer({ bed, selectedBeamId, onBeamSelect, onHardwareSel
   };
   return (
     <div style={{ width: "100%", height: "100%", background: "#0A0C10", position: "relative" }}>
-      <Scene camera={{ position: [22, 17, Math.max(bedLength * 0.66, 92)], fov: 33 }}>
-        <mesh position={[0, -0.65, 0]} receiveShadow>
-          <boxGeometry args={[Math.max(beams.length * laneWidth + 10, 22), 1.0, bedLength + 24]} />
-          <meshStandardMaterial color="#2D343E" roughness={0.96} metalness={0.03} />
-        </mesh>
-        {[-1, 1].map((side) => (
-          <mesh key={side} position={[side * (Math.max(beams.length * laneWidth + 8, 20) / 2), 0.1, 0]}>
-            <boxGeometry args={[0.28, 0.6, bedLength + 18]} />
-            <meshStandardMaterial color="#495363" roughness={0.72} metalness={0.14} />
+      <Scene camera={camera} target={ORBIT_TARGET}>
+        <group position={[0, viewLift, 0]}>
+          <mesh position={[0, -0.65, 0]} receiveShadow>
+            <boxGeometry args={[Math.max(beams.length * laneWidth + 10, 22), 1.0, bedLength + 24]} />
+            <meshStandardMaterial color="#2D343E" roughness={0.96} metalness={0.03} />
           </mesh>
-        ))}
-        {Array.from({ length: beams.length + 1 }).map((_, index) => (
-          <Line key={index} points={[[-halfSpread - laneWidth / 2 + index * laneWidth, -0.08, -bedLength / 2], [-halfSpread - laneWidth / 2 + index * laneWidth, -0.08, bedLength / 2]]} color="#5D6878" lineWidth={1} />
-        ))}
-        <Line points={[[-halfSpread - laneWidth / 2, -0.02, 0], [halfSpread + laneWidth / 2, -0.02, 0]]} color="#2F9E44" lineWidth={1.2} />
-        {activeLayers.dimensions && <CalloutTag position={[0, 1.55, -bedLength / 2 - 3.8]} color="#8FC5FF" label="HEAD / MARKED END" />}
-        {activeLayers.dimensions && <CalloutTag position={[0, 1.55, bedLength / 2 + 3.2]} color="#8B949E" label="TAIL / STRAND END" />}
-        {activeLayers.dimensions && <BedDimensionLayer bed={bed} beams={beams} bedLength={bedLength} laneWidth={laneWidth} halfSpread={halfSpread} />}
-        {beams.map((item, index) => (
-          <group key={item.id} position={[-halfSpread + index * laneWidth, 0, 0]}>
-            <BeamAssembly
-              beam={item}
-              anomalies={item.anomalies || []}
-              onSurfacePick={null}
-              onHardwareSelect={onHardwareSelect}
-              showCallouts={showCallouts && item.id === selectedBeamId}
-              layers={{ ...activeLayers, dimensions: activeLayers.dimensions && item.id === selectedBeamId }}
-              highlighted={item.id === selectedBeamId}
-              onBeamSelect={onBeamSelect}
-              pourMode={pourMode}
-            />
-            {(item.id === selectedBeamId || activeLayers.dimensions) && <CalloutTag position={[0, 4.2 + (index % 3) * 0.28, 0]} color={item.id === selectedBeamId ? "#8FC5FF" : "#E5EDF5"} label={`${item.mark} · POS ${String(item.position_on_bed).padStart(2, "0")} · ${formatFeet(item.length_ft)}`} />}
-          </group>
-        ))}
-        {activeLayers.dimensions && <CalloutTag position={[0, 1.35, -bedLength / 2 - 7]} color="#2F9E44" label={`BED ${bed?.bed_number} · ${bed?.name} · ${beams.length} BEAMS`} />}
-        <gridHelper args={[Math.max(bedLength + 40, 180), 40, "#222631", "#151922"]} position={[0, -1.02, 0]} />
+          {[-1, 1].map((side) => (
+            <mesh key={side} position={[side * (Math.max(beams.length * laneWidth + 8, 20) / 2), 0.1, 0]}>
+              <boxGeometry args={[0.28, 0.6, bedLength + 18]} />
+              <meshStandardMaterial color="#495363" roughness={0.72} metalness={0.14} />
+            </mesh>
+          ))}
+          {Array.from({ length: beams.length + 1 }).map((_, index) => (
+            <Line key={index} points={[[-halfSpread - laneWidth / 2 + index * laneWidth, -0.08, -bedLength / 2], [-halfSpread - laneWidth / 2 + index * laneWidth, -0.08, bedLength / 2]]} color="#5D6878" lineWidth={1} />
+          ))}
+          <Line points={[[-halfSpread - laneWidth / 2, -0.02, 0], [halfSpread + laneWidth / 2, -0.02, 0]]} color="#2F9E44" lineWidth={1.2} />
+          {activeLayers.dimensions && <CalloutTag position={[0, 1.55, -bedLength / 2 - 3.8]} color="#8FC5FF" label="HEAD / MARKED END" />}
+          {activeLayers.dimensions && <CalloutTag position={[0, 1.55, bedLength / 2 + 3.2]} color="#8B949E" label="TAIL / STRAND END" />}
+          {activeLayers.dimensions && <BedDimensionLayer bed={bed} beams={beams} bedLength={bedLength} laneWidth={laneWidth} halfSpread={halfSpread} />}
+          {beams.map((item, index) => (
+            <group key={item.id} position={[-halfSpread + index * laneWidth, 0, 0]}>
+              <BeamAssembly
+                beam={item}
+                anomalies={item.anomalies || []}
+                onSurfacePick={null}
+                onHardwareSelect={onHardwareSelect}
+                showCallouts={showCallouts && item.id === selectedBeamId}
+                layers={{ ...activeLayers, dimensions: activeLayers.dimensions && item.id === selectedBeamId }}
+                highlighted={item.id === selectedBeamId}
+                onBeamSelect={onBeamSelect}
+                pourMode={pourMode}
+              />
+              {(item.id === selectedBeamId || activeLayers.dimensions) && <CalloutTag position={[0, 4.2 + (index % 3) * 0.28, 0]} color={item.id === selectedBeamId ? "#8FC5FF" : "#E5EDF5"} label={`${item.mark} · POS ${String(item.position_on_bed).padStart(2, "0")} · ${formatFeet(item.length_ft)}`} />}
+            </group>
+          ))}
+          {activeLayers.dimensions && <CalloutTag position={[0, 1.35, -bedLength / 2 - 7]} color="#2F9E44" label={`BED ${bed?.bed_number} · ${bed?.name} · ${beams.length} BEAMS`} />}
+          <gridHelper args={[Math.max(bedLength + 40, 180), 40, "#222631", "#151922"]} position={[0, -1.02, 0]} />
+        </group>
       </Scene>
+      <ViewHeightControl value={viewLift} onChange={setViewLift} align="left" />
       <div
-        style={{ position: "absolute", top: 16, right: 16, width: 280, background: "rgba(12,14,19,0.94)", border: "1px solid #222631", padding: 12, fontFamily: "JetBrains Mono, monospace" }}
+        style={{ position: "absolute", top: 16, right: 16, width: 280, maxWidth: "calc(100% - 5rem)", background: "rgba(12,14,19,0.94)", border: "1px solid #222631", padding: 12, fontFamily: "JetBrains Mono, monospace" }}
         data-testid="bed-sequence-panel"
       >
         <div style={{ color: "#FFFFFF", fontSize: 12, fontWeight: 700, letterSpacing: "0.16em", marginBottom: 10 }}>BED ORDER</div>

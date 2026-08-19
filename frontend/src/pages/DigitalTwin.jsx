@@ -339,16 +339,16 @@ export default function DigitalTwin() {
         }
       />
 
-      <div className="p-4 sm:p-6 lg:p-8 grid grid-cols-1 lg:grid-cols-3 gap-6 overflow-x-hidden">
-        <div className="lg:col-span-2 bg-card border border-border rounded-sm overflow-hidden flex flex-col min-h-[520px] sm:min-h-[640px]">
-          <div className="px-4 sm:px-5 py-4 border-b border-border flex flex-col gap-4">
+      <div className="p-4 sm:p-6 lg:p-8 grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
+        <div className="lg:col-span-2 w-full bg-card border border-border rounded-sm overflow-hidden flex flex-col min-h-[480px] h-[calc(100vh-12.5rem)] max-h-[calc(100vh-11.5rem)] lg:sticky lg:top-24">
+          <div className="px-4 sm:px-5 py-3 border-b border-border flex flex-col gap-3 shrink-0">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2" data-testid="pour-mode-toggle">
               {[["pre_pour", "Pre-Pour", "Cage / before concrete"], ["post_pour", "Post-Pour", "Finished exterior"]].map(([value, label, hint]) => (
                 <button
                   key={value}
                   type="button"
                   onClick={() => setPour(value)}
-                  className={`min-h-14 rounded-sm border px-4 text-left transition-colors duration-100 ${
+                  className={`min-h-12 rounded-sm border px-4 text-left transition-colors duration-100 ${
                     pourMode === value ? "border-primary bg-primary/15 shadow-[0_0_24px_rgba(45,212,191,0.18)]" : "border-border bg-background hover:border-primary/50"
                   }`}
                 >
@@ -388,7 +388,7 @@ export default function DigitalTwin() {
             </div>
           </div>
 
-          <div className="flex-1 min-h-[360px]">
+          <div className="flex-1 min-h-[280px] sm:min-h-[360px] overflow-hidden">
             {draftTwinBlocked ? (
               <div className="h-full flex items-center justify-center p-10">
                 <div className="max-w-lg border border-[#FFD60055] bg-[#FFD60010] rounded-sm p-6 text-sm">
