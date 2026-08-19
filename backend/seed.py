@@ -1,4 +1,15 @@
-"""Idempotent demo data seed: product types, a job/pour, 8 beds, sample beams, anomalies."""
+"""Idempotent demo data seed: product types, a job/pour, 8 beds, sample beams, anomalies.
+
+Run from backend/:
+    python seed.py
+This upserts Login demo users (auth.seed_admin) and plant demo data.
+Startup already calls the same functions from server.py.
+"""
+from pathlib import Path
+from dotenv import load_dotenv
+
+load_dotenv(Path(__file__).parent / ".env")
+
 from db import db
 from models import (
     ProductType, Job, Pour, Bed, Beam, Anomaly, TensionReport, CamberReading,
@@ -358,3 +369,18 @@ async def seed_plant():
             },
         ).model_dump()
     )
+
+
+async def run_all_seeds():
+    from auth import seed_admin
+    await seed_admin()
+    await seed_plant()
+
+
+if __name__ == "__main__":
+    import asyncio
+    import logging
+
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+    asyncio.run(run_all_seeds())
+    logging.getLogger(__name__).info("Seed complete. Demo logins: Plant Admin admin@bedforge.com")

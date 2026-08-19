@@ -10,9 +10,10 @@ API = f"{BASE_URL}/api"
 ADMIN = ("tccrossmusic@gmail.com", "BedForge2026!")
 ADMIN_FALLBACK = ("admin@bedforge.com", "admin123")
 DEMO_USERS = [
-    ("supervisor@bedforge.com", "Super1234!"),
-    ("tech@bedforge.com", "Tech1234!"),
-    ("production@bedforge.com", "Prod1234!"),
+    ("admin@bedforge.com", "admin123"),
+    ("supervisor@bedforge.com", "super123"),
+    ("qc@bedforge.com", "qc123"),
+    ("production@bedforge.com", "prod123"),
 ]
 
 

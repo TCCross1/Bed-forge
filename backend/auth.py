@@ -1,4 +1,5 @@
 import os
+import logging
 import bcrypt
 import jwt
 from datetime import datetime, timezone, timedelta
@@ -6,8 +7,18 @@ from fastapi import APIRouter, Request, HTTPException, Depends
 from models import RegisterInput, LoginInput, UserPublic, new_id, now_iso
 from db import db
 
+logger = logging.getLogger(__name__)
+
 JWT_ALGORITHM = "HS256"
 ROLES = ["qc_tech", "qc_supervisor", "production", "admin"]
+
+# Must stay in lockstep with frontend/src/pages/Login.jsx DEMO_USERS.
+DEMO_USERS = [
+    {"email": "admin@bedforge.com", "password": "admin123", "name": "Plant Admin", "role": "admin"},
+    {"email": "supervisor@bedforge.com", "password": "super123", "name": "Supervisor", "role": "qc_supervisor"},
+    {"email": "qc@bedforge.com", "password": "qc123", "name": "QC Tech", "role": "qc_tech"},
+    {"email": "production@bedforge.com", "password": "prod123", "name": "Production", "role": "production"},
+]
 
 
 def hash_password(password: str) -> str:
@@ -113,38 +124,60 @@ async def list_users(user: dict = Depends(require_roles("admin", "qc_supervisor"
     return users
 
 
-async def seed_admin():
-    admin_email = os.environ.get("ADMIN_EMAIL", "admin@bedforge.com").lower()
-    admin_password = os.environ.get("ADMIN_PASSWORD", "admin123")
-    existing = await db.users.find_one({"email": admin_email})
-    if existing is None:
-        await db.users.insert_one({
-            "id": new_id(),
-            "email": admin_email,
-            "password_hash": hash_password(admin_password),
-            "name": "Plant Admin",
-            "role": "admin",
-            "created_at": now_iso(),
-        })
-    elif not verify_password(admin_password, existing["password_hash"]):
-        await db.users.update_one(
-            {"email": admin_email},
-            {"$set": {"password_hash": hash_password(admin_password)}},
-        )
+def _password_matches(plain: str, hashed) -> bool:
+    if not hashed or not isinstance(hashed, str):
+        return False
+    try:
+        return verify_password(plain, hashed)
+    except Exception:
+        logger.warning("Invalid password hash encountered; demo password will be reset")
+        return False
 
-    # Idempotent demo role accounts
-    demo = [
-        ("tech@bedforge.com", "Tech1234!", "Tyler Chen", "qc_tech"),
-        ("supervisor@bedforge.com", "Super1234!", "Dana Reyes", "qc_supervisor"),
-        ("production@bedforge.com", "Prod1234!", "Marcus Hill", "production"),
-    ]
-    for email, pw, name, role in demo:
-        if not await db.users.find_one({"email": email}):
+
+async def _upsert_demo_user(email: str, password: str, name: str, role: str) -> None:
+    email = (email or "").lower().strip()
+    if not email or not password:
+        raise ValueError("Demo user email and password are required")
+    safe_role = role if role in ROLES else "qc_tech"
+    try:
+        existing = await db.users.find_one({"email": email})
+        if existing is None:
             await db.users.insert_one({
                 "id": new_id(),
                 "email": email,
-                "password_hash": hash_password(pw),
+                "password_hash": hash_password(password),
                 "name": name,
-                "role": role,
+                "role": safe_role,
                 "created_at": now_iso(),
             })
+            logger.info("Seeded demo user %s role=%s", email, safe_role)
+            return
+        updates = {}
+        if not _password_matches(password, existing.get("password_hash")):
+            updates["password_hash"] = hash_password(password)
+        if existing.get("name") != name:
+            updates["name"] = name
+        if existing.get("role") != safe_role:
+            updates["role"] = safe_role
+        if updates:
+            await db.users.update_one({"email": email}, {"$set": updates})
+            logger.info("Updated demo user %s fields=%s", email, sorted(updates.keys()))
+    except Exception:
+        logger.exception("Failed to seed demo user %s", email)
+        raise
+
+
+async def seed_admin():
+    """Idempotently create/update Login.jsx demo users, plus optional env owner."""
+    try:
+        for user in DEMO_USERS:
+            await _upsert_demo_user(user["email"], user["password"], user["name"], user["role"])
+        admin_email = os.environ.get("ADMIN_EMAIL", "admin@bedforge.com").lower().strip()
+        admin_password = os.environ.get("ADMIN_PASSWORD", "admin123")
+        demo_emails = {user["email"] for user in DEMO_USERS}
+        if admin_email and admin_email not in demo_emails:
+            await _upsert_demo_user(admin_email, admin_password, "Plant Admin", "admin")
+        logger.info("Demo user seed complete.")
+    except Exception:
+        logger.exception("Demo user seed failed")
+        raise
