@@ -10,7 +10,7 @@ import logging
 from typing import Any, Dict, Iterable, List, Optional, Sequence
 
 from models import BlueprintField, JobBeamSpec, now_iso
-from blueprint_pipeline import FIELD_GROUPS, _field_value, normalize_locked_blueprint
+from blueprint_pipeline import FIELD_GROUPS, _field_value, normalize_locked_blueprint, refresh_strand_engineering
 
 logger = logging.getLogger(__name__)
 
@@ -240,8 +240,10 @@ def materialize_job_beam_specs(
                     blueprint["casting_length_ft"] = casting
                     blueprint.setdefault("dimensions", {})["casting_length_ft"] = casting
             blueprint["beam_mark"] = mark
+            blueprint["product_family"] = family_name
             section, section_source = _apply_section_envelope(blueprint.get("cross_section") or {}, family_name)
             blueprint["cross_section"] = section
+            blueprint = refresh_strand_engineering(fields, blueprint)
             missing = _missing_drivers(fields, blueprint)
             if section_source == "family_envelope":
                 missing = [item for item in missing if item not in {"top_flange_width_in", "web_thickness_in"}]
@@ -271,15 +273,17 @@ def materialize_job_beam_specs(
                 "section_source": section_source,
             }
             tension = blueprint.get("tension_reference") or {}
-            strand = {
-                "diameter_in": tension.get("strand_diameter_in"),
-                "grade": blueprint.get("strand_grade") or tension.get("strand_grade"),
-                "pattern": blueprint.get("strand_pattern"),
-                "draped": bool(blueprint.get("drape_profile")),
-                "hold_down_type": blueprint.get("hold_down_type"),
-                "jacking_force_kip": tension.get("jacking_force_kip"),
-                "final_pull_lb": blueprint.get("strand_final_pull_lb") or tension.get("strand_final_pull_lb"),
-            }
+            strand = dict(blueprint.get("strand_system") or {})
+            if not strand:
+                strand = {
+                    "diameter_in": tension.get("strand_diameter_in"),
+                    "grade": blueprint.get("strand_grade") or tension.get("strand_grade"),
+                    "pattern": blueprint.get("strand_pattern"),
+                    "draped": bool(blueprint.get("strand_draped") or blueprint.get("drape_profile")),
+                    "hold_down_type": blueprint.get("hold_down_type"),
+                    "jacking_force_kip": tension.get("jacking_force_kip"),
+                    "final_pull_lb": blueprint.get("strand_final_pull_lb") or tension.get("strand_final_pull_lb"),
+                }
             finishes = {
                 "bituminous_ends": blueprint.get("bituminous_ends") or [],
                 "marked_end": blueprint.get("marked_end"),

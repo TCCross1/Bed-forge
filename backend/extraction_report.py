@@ -77,6 +77,8 @@ TWIN_DRIVERS: List[Tuple[str, str]] = [
     ("strand_count", "Fallback strand count"),
     ("straight_strand_count", "Fallback straight-row count"),
     ("draped_strand_count", "Drape profile + draped row"),
+    ("strand_draped", "Draped path flag (DRAPED callout)"),
+    ("strand_end_treatment", "Cut-flush / bent-90 / unspecified ends"),
     ("hold_downs", "Hold-down stations / drape low points"),
     ("lift_loops", "Lift-loop stations"),
     ("inserts", "Insert stations"),

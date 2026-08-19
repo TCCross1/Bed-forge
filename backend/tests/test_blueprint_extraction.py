@@ -82,6 +82,9 @@ def test_l25390_identity_geometry_strand_hardware_fixture():
     assert "low-relaxation" in str(fields["strand_grade"].value)
     assert fields["strand_final_pull_lb"].value == 33817
     assert fields["overall_depth_in"].value == 36.0
+    assert fields["strand_draped"].value is True
+    assert fields["strand_draped"].status == "confirmed"
+    assert "H-56-S" in str(fields["hold_down_type"].value)
     assert "H-56-S" in str(fields["hold_down_type"].value)
     assert "0.6" in str(fields["lift_loop_spec"].value)
     assert "2'-7" in str(fields["lift_loop_spec"].value) or "2'-7\"" in str(fields["lift_loop_spec"].value)
@@ -114,6 +117,17 @@ def test_type2_and_type_iv_overall_depth():
         ["BEAM MARK: B9-01\nAASHTO TYPE IV I-BEAM\nOVERALL LENGTH: 110' 0\""]
     )
     assert type_iv_fallback.fields["overall_depth_in"].value == 54.0
+
+
+def test_strand_end_treatment_callouts():
+    bent = extract_structured_fields(["BEAM MARK: 201\nSTRANDS BENT UP 90 6 IN AT END"])
+    treatment = bent.fields["strand_end_treatment"].value
+    assert isinstance(treatment, dict)
+    assert treatment["type"] == "bent_90"
+    assert treatment.get("length_in") == 6.0
+    bit = extract_structured_fields(["BEAM MARK: 201\nCUT FLUSH AND BITUMINOUS PAINT AT ENDS"])
+    paint = bit.fields["strand_end_treatment"].value
+    assert paint["type"] == "cut_flush_bituminous"
 
 
 def test_casting_inferred_from_based_on_note():

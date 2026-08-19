@@ -11,7 +11,7 @@ from models import BlueprintField
 
 logger = logging.getLogger(__name__)
 
-EXTRACTOR_VERSION = "controlled_regex_ocr_v2"
+EXTRACTOR_VERSION = "controlled_regex_ocr_v3"
 WEAK_NOTE_RX = re.compile(r"not confidently located|not clearly (?:stated|confirmed)|could not be normalized", re.IGNORECASE)
 
 FIELD_GROUPS = {
@@ -61,6 +61,8 @@ FIELD_GROUPS = {
         "jacking_force_kip",
         "target_elongation_in",
         "debond_notes",
+        "strand_draped",
+        "strand_end_treatment",
     ],
     "hardware": [
         "lift_loops",
@@ -143,6 +145,23 @@ def read_pdf_pages_for_extract(path: str | Path) -> Tuple[List[str], List[str]]:
         logger.exception("OCR merge failed for %s; continuing with native text layer", path)
         sources = ["text_layer" if text else "empty" for text in native]
         return native, sources
+
+
+def _draped_callout_page(page_text: List[str]) -> Optional[int]:
+    page = _source_page(page_text, r"\bDRAPED\b")
+    if page:
+        return page
+    page = _source_page(page_text, r"G3DV|DEPARD|DRAPE[DO0]")
+    if page:
+        return page
+    for index, text in enumerate(page_text, start=1):
+        if re.search(r"\bDRAPED\b", (text or "")[::-1], re.IGNORECASE):
+            return index
+    return None
+
+
+def _hold_down_type_implies_drape(hold_type: Any) -> bool:
+    return bool(re.search(r"H-56-S|H56S", str(hold_type or ""), re.IGNORECASE))
 
 
 def _source_page(page_text: List[str], pattern: str) -> Optional[int]:
@@ -400,6 +419,52 @@ def _capture_notes(page_text: List[str], keyword: str, target_note: str, page_so
         return _blank_field(target_note)
     source = _page_source_label(page_sources or [], page)
     return _build_field(target_note, "medium", page, status="unconfirmed", note="Keyword hit only; verify exact wording against source.", source=source)
+
+
+def _parse_strand_end_treatment(page_text: List[str], page_sources: Optional[Sequence[str]] = None) -> BlueprintField:
+    bent = _first_match(
+        page_text,
+        [
+            r"BENT\s*(?:UP\s*)?90(?:\s*DEG(?:REE)?S?)?",
+            r"TURN(?:ED)?\s*UP\s*90",
+            r"90\s*DEG(?:REE)?S?\s*(?:BENT|HOOK|TURN)",
+        ],
+    )
+    if bent:
+        raw, page, span = bent
+        source = _page_source_label(page_sources or [], page)
+        page_blob = page_text[page - 1] if 0 < page <= len(page_text) else f"{span} {raw}"
+        length_hit = re.search(r"(\d+(?:\.\d+)?)\s*(?:IN|\"|INCH)", page_blob, re.IGNORECASE)
+        if length_hit and abs(float(length_hit.group(1)) - 90) < 0.01:
+            later = re.search(r"90.{0,12}(\d+(?:\.\d+)?)\s*(?:IN|\"|INCH)", page_blob, re.IGNORECASE)
+            length_hit = later or None
+        payload = {
+            "type": "bent_90",
+            "label": "Bent 90°",
+            "length_in": round(float(length_hit.group(1)), 3) if length_hit else None,
+        }
+        return _build_field(payload, "medium", page, note="Bent-90 strand end treatment from shop-drawing callout. Station/length still unconfirmed unless parsed.", source=source)
+    bit = _first_match(
+        page_text,
+        [
+            r"CUT[\s-]?FLUSH.{0,48}BITUMINOUS",
+            r"BITUMINOUS.{0,48}CUT[\s-]?(?:FLUSH|OFF)",
+            r"CUT[\s-]?OFF POCKET",
+            r"BITUMINOUS",
+        ],
+    )
+    if bit:
+        raw, page, span = bit
+        source = _page_source_label(page_sources or [], page)
+        explicit = bool(re.search(r"CUT[\s-]?(?:FLUSH|OFF)|POCKET", f"{span} {raw}", re.IGNORECASE))
+        payload = {
+            "type": "cut_flush_bituminous",
+            "label": "Cut flush + bituminous",
+            "length_in": None,
+        }
+        note = "Cut-flush / bituminous end treatment from print. Pocket length not invented."
+        return _build_field(payload, "high" if explicit else "medium", page, note=note, source=source)
+    return _blank_field("Strand end treatment not confidently located.")
 
 
 def _parse_county(page_text: List[str], page_sources: Optional[Sequence[str]] = None) -> BlueprintField:
@@ -848,7 +913,7 @@ def extract_structured_fields(
     fields["strand_area_in2"] = _capture_scalar(page_text, [r"STRAND(?:\s+AREA)?\s*[:\-]?\s*([0-9.]+)\s*(?:IN2|IN\^2|SQ\.?\s*IN)"], cast=lambda value: round(float(value), 4), missing_note="Strand area not confidently located.", success_note="Strand area callout.", page_sources=page_sources)
     fields["straight_strand_count"] = _capture_scalar(page_text, [r"([0-9]+)\s+STRAIGHT\s+STRANDS?"], cast=lambda value: int(float(value)), confidence="medium", missing_note="Straight strand count not clearly stated.", success_note="Straight strand count.", page_sources=page_sources)
     fields["draped_strand_count"] = _capture_scalar(page_text, [r"([0-9]+)\s+DRAPED\s+STRANDS?"], cast=lambda value: int(float(value)), confidence="medium", missing_note="Draped strand count not clearly stated.", success_note="Draped strand count.", page_sources=page_sources)
-    draped_page = _source_page(page_text, r"\bDRAPED\b")
+    draped_page = _draped_callout_page(page_text)
     if fields["draped_strand_count"].status == "unconfirmed" and draped_page:
         source = _page_source_label(page_sources, draped_page)
         fields["draped_strand_count"] = _build_field(
@@ -862,6 +927,19 @@ def extract_structured_fields(
     fields["jacking_force_kip"] = _capture_scalar(page_text, [r"JACK(?:ING)? FORCE\s*[:\-]?\s*([0-9.]+)\s*(?:KIP|KIPS)"], cast=lambda value: round(float(value), 3), missing_note="Jacking force note not confidently located.", success_note="Jacking force callout.", page_sources=page_sources)
     fields["target_elongation_in"] = _capture_scalar(page_text, [r"(?:ELONGATION|TARGET ELONGATION)\s*[:\-]?\s*([0-9.]+)\s*(?:IN|\")"], cast=lambda value: round(float(value), 3), missing_note="Target elongation note not confidently located.", success_note="Elongation callout.", page_sources=page_sources)
     fields["debond_notes"] = _capture_notes(page_text, r"DEBOND|SHIELD", "Debonded or shielded strand notes present; verify manually.", page_sources)
+    draped_flag_page = _draped_callout_page(page_text)
+    if draped_flag_page:
+        source = _page_source_label(page_sources, draped_flag_page)
+        fields["strand_draped"] = _build_field(
+            True,
+            "high",
+            draped_flag_page,
+            note="Draped strand system called on the print. Path stations still require hold-down AT/@ dimensions when present.",
+            source=source,
+        )
+    else:
+        fields["strand_draped"] = _blank_field("No draped-strand callout located.")
+    fields["strand_end_treatment"] = _parse_strand_end_treatment(page_text, page_sources)
     fields["hold_downs"] = _find_all_stations(page_text, r"HOLD[\s-]?DOWN", "Hold-down", page_sources=page_sources)
     hold_type = _first_match(page_text, [r"\b(H-56-S)\b", r"HOLD[\s-]?DOWNS?\s*[:\-]?\s*([A-Z0-9\-]{3,})", r"DAYTON(?:\s*/\s*RICHMOND)?"])
     if hold_type:
@@ -1034,11 +1112,14 @@ def normalize_locked_blueprint(fields: Dict[str, BlueprintField]) -> Dict[str, A
         "lift_loop_spec": _field_value(fields, "lift_loop_spec"),
         "strand_grade": _field_value(fields, "strand_grade"),
         "strand_final_pull_lb": _field_value(fields, "strand_final_pull_lb"),
+        "strand_draped": bool(_field_value(fields, "strand_draped", False)),
+        "strand_end_treatment": _field_value(fields, "strand_end_treatment"),
     }
 
     strand_rows = _field_value(fields, "strand_pattern_rows", {"rows": []})
     if isinstance(strand_rows, dict) and strand_rows.get("rows"):
         blueprint["strand_pattern"] = strand_rows
+        blueprint["strand_pattern_source"] = "extracted"
     else:
         strand_count = int(_field_value(fields, "strand_count", 0) or 0)
         if strand_count:
@@ -1046,13 +1127,18 @@ def normalize_locked_blueprint(fields: Dict[str, BlueprintField]) -> Dict[str, A
             draped_count = int(_field_value(fields, "draped_strand_count", 0) or 0) if isinstance(_field_value(fields, "draped_strand_count", 0), (int, float)) else 0
             remaining = strand_count
             rows = []
-            for count in (straight_count, draped_count):
-                if count:
-                    rows.append({"count": count, "spacing_in": 4})
-                    remaining -= count
+            if straight_count:
+                rows.append({"count": straight_count, "spacing_in": 4, "draped": False})
+                remaining -= straight_count
+            if draped_count:
+                rows.append({"count": draped_count, "spacing_in": 4, "draped": True})
+                remaining -= draped_count
             if remaining > 0:
-                rows.append({"count": remaining, "spacing_in": 4})
+                rows.append({"count": remaining, "spacing_in": 4, "draped": False})
             blueprint["strand_pattern"] = {"start_y_in": 5, "row_spacing_in": 4.5, "rows": rows}
+            blueprint["strand_pattern_source"] = "count_split"
+        else:
+            blueprint["strand_pattern_source"] = "unconfirmed"
 
     stirrups = _field_value(fields, "stirrups", {})
     if isinstance(stirrups, dict) and stirrups:
@@ -1087,14 +1173,6 @@ def normalize_locked_blueprint(fields: Dict[str, BlueprintField]) -> Dict[str, A
             "bottom_flange_thickness_in": _field_value(fields, "bottom_flange_thickness_in"),
             "web_thickness_in": _field_value(fields, "web_thickness_in"),
         }
-        draped_count = _field_value(fields, "draped_strand_count", 0)
-        draped_n = int(draped_count) if isinstance(draped_count, (int, float)) else 0
-        if draped_n:
-            blueprint["drape_profile"] = {
-                "sag_in": max(4, round(float(draped_n) * 0.5, 2)),
-                "low_points_ft": sorted(item.get("x_ft") for item in blueprint["hold_downs"] if item.get("x_ft") is not None),
-            }
-
     dimensions = {
         "overall_length_ft": _field_value(fields, "overall_length_ft"),
         "casting_length_ft": _field_value(fields, "casting_length_ft"),
@@ -1102,7 +1180,140 @@ def normalize_locked_blueprint(fields: Dict[str, BlueprintField]) -> Dict[str, A
         "overall_width_in": _field_value(fields, "top_flange_width_in", _field_value(fields, "outer_width_in")),
     }
     blueprint["dimensions"] = {key: value for key, value in dimensions.items() if value is not None}
+    blueprint["product_family"] = family
+    return refresh_strand_engineering(fields, blueprint)
+
+
+def refresh_strand_engineering(fields: Dict[str, BlueprintField], blueprint: Dict[str, Any]) -> Dict[str, Any]:
+    """Rebuild drape path + strand_system from extracted evidence. Never invent hold-down hardware stations."""
+    family = blueprint.get("product_family") or _field_value(fields, "product_family", "i_beam")
+    length_ft = blueprint.get("length") or _field_value(fields, "overall_length_ft", 0) or 0
+    if isinstance(length_ft, list):
+        nums = [item.get("overall_length_ft") if isinstance(item, dict) else item for item in length_ft]
+        nums = [n for n in nums if isinstance(n, (int, float))]
+        length_ft = max(nums) if nums else 0
+    draped_count_field = fields.get("draped_strand_count")
+    draped_raw = draped_count_field.value if draped_count_field else None
+    draped_n = int(draped_raw) if isinstance(draped_raw, (int, float)) else 0
+    draped_explicit = bool(_field_value(fields, "strand_draped", False) or blueprint.get("strand_draped"))
+    draped_field = fields.get("strand_draped")
+    if not draped_explicit and draped_field and draped_field.value:
+        draped_explicit = True
+    if isinstance(draped_raw, str) and "draped" in draped_raw.lower():
+        draped_explicit = True
+    hold_type = blueprint.get("hold_down_type") or _field_value(fields, "hold_down_type")
+    if _hold_down_type_implies_drape(hold_type):
+        draped_explicit = True
+    blueprint["strand_draped"] = bool(draped_explicit or draped_n)
+    section = blueprint.get("cross_section") or {}
+    depth_in = section.get("overall_depth_in") or section.get("outer_depth_in") or _field_value(fields, "overall_depth_in")
+    if family != "box_beam" and (draped_explicit or draped_n):
+        blueprint["drape_profile"] = _build_drape_profile(
+            length_ft=float(length_ft or 0),
+            depth_in=depth_in,
+            hold_downs=blueprint.get("hold_downs") or [],
+            draped_count=draped_n,
+            hold_down_type=blueprint.get("hold_down_type") or _field_value(fields, "hold_down_type"),
+            draped_explicit=draped_explicit or bool(draped_n),
+        )
+    else:
+        blueprint["drape_profile"] = None
+    blueprint["strand_system"] = _build_strand_system(fields, blueprint)
     return blueprint
+
+
+def _build_drape_profile(
+    *,
+    length_ft: float,
+    depth_in: Any,
+    hold_downs: List[Dict[str, Any]],
+    draped_count: int,
+    hold_down_type: Any,
+    draped_explicit: bool,
+) -> Dict[str, Any]:
+    extracted = sorted(
+        item.get("x_ft") for item in hold_downs
+        if isinstance(item, dict) and isinstance(item.get("x_ft"), (int, float))
+    )
+    notes: List[str] = []
+    if extracted:
+        stations = extracted
+        source = "extracted_stations"
+    elif draped_explicit or draped_count:
+        mid = round(float(length_ft) * 0.5, 3) if length_ft else None
+        stations = [mid] if mid is not None else []
+        source = "parametric_midspan"
+        notes.append(
+            "Hold-down stations were not on the print. A midspan parametric drape was used because a draped strand system was extracted."
+        )
+        if hold_down_type:
+            notes.append(f"Hold-down type {hold_down_type} was extracted without AT/@ stations. Parametric path is labeled, not shop-drawing geometry.")
+        if _hold_down_type_implies_drape(hold_down_type):
+            notes.append("H-56-S hold-downs depress draped strands. Twin uses extracted AT/@ stations when present, otherwise a labeled midspan parametric drape.")
+    else:
+        stations = []
+        source = "none"
+    depth = float(depth_in) if isinstance(depth_in, (int, float)) and depth_in else 36.0
+    hold_elev = 2.5
+    end_elev = round(max(hold_elev + 8.0, depth * 0.42), 2)
+    sag = round(max(end_elev - hold_elev, 4.0), 2)
+    return {
+        "profile": "end_high_hold_down_low",
+        "sag_in": sag,
+        "end_elevation_in": end_elev,
+        "hold_down_elevation_in": hold_elev,
+        "low_points_ft": stations,
+        "source": source,
+        "notes": notes,
+        "draped_count": draped_count or None,
+        "hold_down_type": hold_down_type,
+    }
+
+
+def _build_strand_system(fields: Dict[str, BlueprintField], blueprint: Dict[str, Any]) -> Dict[str, Any]:
+    tension = blueprint.get("tension_reference") or {}
+    pattern = blueprint.get("strand_pattern") or {"rows": []}
+    rows = pattern.get("rows") if isinstance(pattern, dict) else []
+    count = int(_field_value(fields, "strand_count", 0) or 0)
+    if not count and isinstance(rows, list):
+        count = sum(int(row.get("count") or 0) for row in rows if isinstance(row, dict))
+    draped = bool(blueprint.get("strand_draped"))
+    drape = blueprint.get("drape_profile") or {}
+    treatment = blueprint.get("strand_end_treatment") if isinstance(blueprint.get("strand_end_treatment"), dict) else None
+    if treatment is None:
+        treatment = {"type": "unspecified", "label": "Unspecified", "length_in": None}
+    path_notes = list(drape.get("notes") or [])
+    pattern_source = blueprint.get("strand_pattern_source") or ("extracted" if rows else "unconfirmed")
+    if not rows:
+        path_notes.append("Strand row map was not extracted; twin shows a labeled representative pattern, not a counted shop-drawing grid.")
+    return {
+        "diameter_in": tension.get("strand_diameter_in") or _field_value(fields, "strand_diameter_in"),
+        "grade": blueprint.get("strand_grade") or tension.get("strand_grade"),
+        "area_in2": tension.get("strand_area_in2") or _field_value(fields, "strand_area_in2"),
+        "count": count or None,
+        "pattern": pattern,
+        "pattern_source": pattern_source,
+        "draped": draped,
+        "hold_down_type": blueprint.get("hold_down_type"),
+        "jacking_force_kip": tension.get("jacking_force_kip"),
+        "final_pull_lb": blueprint.get("strand_final_pull_lb") or tension.get("strand_final_pull_lb"),
+        "path_model": {
+            "kind": "draped_hold_down" if draped else ("straight" if rows or count else "unconfirmed"),
+            "profile": drape.get("profile") or "straight",
+            "source": drape.get("source") or "none",
+            "hold_down_stations_ft": drape.get("low_points_ft") or [],
+            "end_elevation_in": drape.get("end_elevation_in"),
+            "hold_down_elevation_in": drape.get("hold_down_elevation_in"),
+            "sag_in": drape.get("sag_in"),
+            "notes": path_notes,
+        },
+        "end_treatments": {
+            "marked_end": dict(treatment),
+            "unmarked_end": dict(treatment),
+        },
+        "notes": path_notes,
+        "bituminous_notes": blueprint.get("bituminous_ends") if isinstance(blueprint.get("bituminous_ends"), list) else [],
+    }
 
 
 def parse_field_value(raw_value: Any) -> Any:
