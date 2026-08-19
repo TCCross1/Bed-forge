@@ -652,6 +652,75 @@ async def list_beds(user=Depends(get_current_user)):
     return await db.beds.find({}, {"_id": 0}).sort("bed_number", 1).to_list(50)
 
 
+@api.get("/beds/calendar")
+async def beds_calendar(start: str | None = None, days: int = 7, user=Depends(get_current_user)):
+    """Week grid for Bed Twin Planner. Declared before /beds/{bed_id} so GET is not 405."""
+    try:
+        beds = await db.beds.find({}, {"_id": 0}).sort("bed_number", 1).to_list(50)
+        return {"beds": beds, "cells": [], "start": start, "days": days}
+    except Exception:
+        logger.exception("Failed to load bed calendar")
+        raise HTTPException(status_code=500, detail="Failed to load bed calendar")
+
+
+@api.get("/beds/suggest")
+async def beds_suggest(date: str | None = None, user=Depends(get_current_user)):
+    return {"suggestions": [], "date": date}
+
+
+@api.get("/planner/pool")
+async def planner_pool(date: str | None = None, user=Depends(get_current_user)):
+    try:
+        jobs = await db.jobs.find({}, {"_id": 0}).to_list(500)
+        beams = await db.beams.find({}, {"_id": 0}).to_list(2000)
+        for beam in beams:
+            beam["assigned"] = bool(beam.get("bed_id"))
+        return {"jobs": jobs, "beams": beams, "date": date}
+    except Exception:
+        logger.exception("Failed to load planner pool")
+        raise HTTPException(status_code=500, detail="Failed to load planner pool")
+
+
+@api.get("/beds/{bed_id}/layout")
+async def bed_layout(bed_id: str, date: str | None = None, user=Depends(get_current_user)):
+    try:
+        bed = await db.beds.find_one({"id": bed_id}, {"_id": 0})
+        if not bed:
+            raise HTTPException(status_code=404, detail="Bed not found")
+        beams = await db.beams.find({"bed_id": bed_id}, {"_id": 0}).to_list(500)
+        beams = sorted(beams, key=lambda item: item.get("position_on_bed", 0) or 0)
+        used = sum(float(item.get("length_ft") or 0) for item in beams)
+        length = float(bed.get("length_ft") or 0)
+        remaining = round(max(length - used, 0.0), 2)
+        util = round((used / length) * 100, 1) if length else 0
+        assignments = []
+        for beam in beams:
+            assignments.append({
+                "id": beam.get("id"),
+                "beam_id": beam.get("id"),
+                "mark": beam.get("mark"),
+                "job_id": beam.get("job_id"),
+                "pour_id": beam.get("pour_id"),
+                "length_ft": beam.get("length_ft"),
+                "position_on_bed": beam.get("position_on_bed"),
+                "production_status": beam.get("status"),
+                "marked_end_toward": "header",
+            })
+        return {
+            "bed": bed,
+            "assignments": assignments,
+            "remaining_ft": remaining,
+            "utilization_pct": util,
+            "over_typical": len(assignments) > 4,
+            "active_beam_id": (assignments[0]["beam_id"] if assignments else None),
+        }
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("Failed to load bed layout bed_id=%s", bed_id)
+        raise HTTPException(status_code=500, detail="Failed to load bed layout")
+
+
 @api.get("/beds/{bed_id}/twin")
 async def get_bed_twin(bed_id: str, user=Depends(require_feature("digital_twin"))):
     bed = await db.beds.find_one({"id": bed_id}, {"_id": 0})

@@ -57,23 +57,28 @@ export default function BlueprintStudio() {
   const canLock = ROLE_CAN_LOCK.includes(user?.role);
 
   const loadAll = async (keepSelectedId) => {
-    const [jobsRes, beamsRes, productTypeRes, docsRes] = await Promise.all([
-      api.get("/jobs"),
-      api.get("/beams"),
-      api.get("/product-types"),
-      api.get("/blueprints"),
-    ]);
-    setJobs(jobsRes.data);
-    setBeams(beamsRes.data);
-    setProductTypes(productTypeRes.data);
-    setDocuments(docsRes.data);
-    const nextId = keepSelectedId || selectedId || docsRes.data[0]?.id || "";
-    setSelectedId(nextId);
-    if (nextId) {
-      const blueprintRes = await api.get(`/blueprints/${nextId}`);
-      setDetail(blueprintRes.data);
-    } else {
-      setDetail(null);
+    try {
+      const [jobsRes, beamsRes, productTypeRes, docsRes] = await Promise.all([
+        api.get("/jobs"),
+        api.get("/beams"),
+        api.get("/product-types"),
+        api.get("/blueprints"),
+      ]);
+      setJobs(jobsRes.data);
+      setBeams(beamsRes.data);
+      setProductTypes(productTypeRes.data);
+      setDocuments(docsRes.data);
+      const nextId = keepSelectedId || selectedId || docsRes.data[0]?.id || "";
+      setSelectedId(nextId);
+      if (nextId) {
+        const blueprintRes = await api.get(`/blueprints/${nextId}`);
+        setDetail(blueprintRes.data);
+      } else {
+        setDetail(null);
+      }
+    } catch (err) {
+      console.error("[blueprints] load failed", err);
+      toast.error(err.response?.data?.detail || "Failed to load blueprints");
     }
   };
 
