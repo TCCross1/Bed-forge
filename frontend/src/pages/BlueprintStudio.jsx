@@ -324,44 +324,46 @@ const saveReview = async () => {
             <div className="bg-card border border-border rounded-sm p-10 text-sm text-muted-foreground font-mono">Select a blueprint document to review extraction confidence, page references, and lock status.</div>
           ) : (
             <>
-              <div className="bg-card border border-border rounded-sm p-6 space-y-4">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <h3 className="font-display font-bold uppercase tracking-wider text-xl">{detail.filename}</h3>
-                  <Badge tone={toneForStatus(detail.status)}>{detail.status}</Badge>
-                  {detail.locked_revision && <Badge tone="green">locked revision {detail.locked_revision.revision_number}</Badge>}
-                </div>
-                <div className="flex flex-col items-stretch sm:items-start gap-3">
-                  <button
-                    type="button"
-                    onClick={downloadAssessmentPdf}
-                    className="min-h-14 px-6 py-3 bg-[#D4AF37] text-black font-bold text-base rounded-sm flex items-center justify-center gap-2 hover:bg-[#E8C547] whitespace-nowrap border-2 border-[#F5D76E]"
-                  >
-                    <Download className="w-5 h-5" /> Download Assessment PDF
-                  </button>
-                  <div className="flex flex-wrap gap-3">
-                    <button onClick={runExtraction} disabled={extracting} className="min-h-12 px-4 border border-border rounded-sm text-sm font-semibold uppercase tracking-wider flex items-center gap-2 hover:border-primary hover:text-primary disabled:opacity-60">
+              <div className="bg-card border border-border rounded-sm p-6">
+                <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-6">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <h3 className="font-display font-bold uppercase tracking-wider text-xl">{detail.filename}</h3>
+                      <Badge tone={toneForStatus(detail.status)}>{detail.status}</Badge>
+                      {detail.locked_revision && <Badge tone="green">locked revision {detail.locked_revision.revision_number}</Badge>}
+                    </div>
+                    <div className="mt-3 text-sm text-muted-foreground space-y-1">
+                      <div>{detail.page_count} pages · linked beam {detail.beam_id || "none"} · product type {detail.product_type_id || "none"}</div>
+                      <div>{detail.latest_summary || "Upload complete. Run controlled extraction to populate review fields."}</div>
+                    </div>
+                    {detail.latest_extraction?.fail_reasons?.length > 0 && (
+                      <div className="mt-4 border border-[#FFD60055] bg-[#FFD60011] rounded-sm p-3 text-sm">
+                        <div className="flex items-center gap-2 text-[#FFD600] font-semibold"><AlertTriangle className="w-4 h-4" /> Controlled fail states</div>
+                        <ul className="mt-2 list-disc pl-5 text-muted-foreground">
+                          {detail.latest_extraction.fail_reasons.map((reason) => <li key={reason}>{reason}</li>)}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex flex-col gap-3 w-full lg:w-[240px] shrink-0">
+                    <button onClick={runExtraction} disabled={extracting} className="w-full min-h-12 px-4 border border-border rounded-sm text-sm font-semibold uppercase tracking-wider flex items-center justify-center gap-2 hover:border-primary hover:text-primary disabled:opacity-60">
                       {extracting ? <Loader2 className="w-4 h-4 animate-spin" /> : <ScanSearch className="w-4 h-4" />} Extract
                     </button>
-                    <button onClick={saveReview} disabled={saving || !detail.latest_extraction} className="min-h-12 px-4 border border-border rounded-sm text-sm font-semibold uppercase tracking-wider hover:border-primary hover:text-primary disabled:opacity-60">
+                    <button onClick={saveReview} disabled={saving || !detail.latest_extraction} className="w-full min-h-12 px-4 border border-border rounded-sm text-sm font-semibold uppercase tracking-wider hover:border-primary hover:text-primary disabled:opacity-60">
                       {saving ? "Saving…" : "Save Review"}
                     </button>
-                    <button onClick={lockBlueprint} disabled={!canLock || locking || !detail.latest_extraction} className="min-h-12 px-4 bg-primary text-white rounded-sm text-sm font-bold uppercase tracking-wider flex items-center gap-2 disabled:opacity-60">
+                    <button onClick={lockBlueprint} disabled={!canLock || locking || !detail.latest_extraction} className="w-full min-h-12 px-4 bg-primary text-white rounded-sm text-sm font-bold uppercase tracking-wider flex items-center justify-center gap-2 disabled:opacity-60">
                       {locking ? <Loader2 className="w-4 h-4 animate-spin" /> : <Lock className="w-4 h-4" />} Verify & Lock
+                    </button>
+                    <button
+                      type="button"
+                      onClick={downloadAssessmentPdf}
+                      className="w-full min-h-14 px-4 py-3 bg-[#D4AF37] text-black font-bold text-sm rounded-sm flex items-center justify-center gap-2 hover:bg-[#E8C547] border-2 border-[#F5D76E]"
+                    >
+                      <Download className="w-5 h-5" /> Download Assessment PDF
                     </button>
                   </div>
                 </div>
-                <div className="text-sm text-muted-foreground space-y-1">
-                  <div>{detail.page_count} pages · linked beam {detail.beam_id || "none"} · product type {detail.product_type_id || "none"}</div>
-                  <div>{detail.latest_summary || "Upload complete. Run controlled extraction to populate review fields."}</div>
-                </div>
-                {detail.latest_extraction?.fail_reasons?.length > 0 && (
-                  <div className="border border-[#FFD60055] bg-[#FFD60011] rounded-sm p-3 text-sm">
-                    <div className="flex items-center gap-2 text-[#FFD600] font-semibold"><AlertTriangle className="w-4 h-4" /> Controlled fail states</div>
-                    <ul className="mt-2 list-disc pl-5 text-muted-foreground">
-                      {detail.latest_extraction.fail_reasons.map((reason) => <li key={reason}>{reason}</li>)}
-                    </ul>
-                  </div>
-                )}
               </div>
 
               <div className="grid grid-cols-1 2xl:grid-cols-3 gap-6">
