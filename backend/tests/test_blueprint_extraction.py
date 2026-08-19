@@ -24,8 +24,11 @@ L25390_FIXTURE = [
 def test_parse_feet_inches_shop_drawing_forms():
     assert parse_feet_inches("47'-3\"") == 47.25
     assert abs(parse_feet_inches("47'-3 3/4\"") - (47 + 3.75 / 12)) < 0.0001
+    assert abs(parse_feet_inches("47'-33/4\"") - (47 + 3.75 / 12)) < 0.0001
+    assert abs(parse_feet_inches("47'-3¾\"") - (47 + 3.75 / 12)) < 0.0001
     assert parse_feet_inches("52'-0\"") == 52.0
     assert abs(parse_feet_inches("52'-0 3/4\"") - (52 + 0.75 / 12)) < 0.0001
+    assert abs(parse_feet_inches("52'-03/4\"") - (52 + 0.75 / 12)) < 0.0001
     assert parse_feet_inches("110' 0\"") == 110.0
     assert abs(parse_feet_inches("2'-7\"") - (2 + 7 / 12)) < 0.0001
 
@@ -78,6 +81,7 @@ def test_l25390_identity_geometry_strand_hardware_fixture():
     assert "270" in str(fields["strand_grade"].value)
     assert "low-relaxation" in str(fields["strand_grade"].value)
     assert fields["strand_final_pull_lb"].value == 33817
+    assert fields["overall_depth_in"].value == 36.0
     assert "H-56-S" in str(fields["hold_down_type"].value)
     assert "0.6" in str(fields["lift_loop_spec"].value)
     assert "2'-7" in str(fields["lift_loop_spec"].value) or "2'-7\"" in str(fields["lift_loop_spec"].value)
@@ -86,3 +90,44 @@ def test_l25390_identity_geometry_strand_hardware_fixture():
     for field in fields.values():
         if field.status == "confirmed":
             assert "not confidently located" not in (field.extraction_notes or "").lower()
+
+
+def test_final_pull_ocr_variants():
+    at_comma = extract_structured_fields(["FINAL PULL AT 33,817 LBS"])
+    assert at_comma.fields["strand_final_pull_lb"].value == 33817
+    dotted = extract_structured_fields(["JACKING TO 33.817"])
+    assert dotted.fields["strand_final_pull_lb"].value == 33817
+    spaced = extract_structured_fields(["FINAL PULL AT 33 817 LBS"])
+    assert spaced.fields["strand_final_pull_lb"].value == 33817
+    too_small = extract_structured_fields(["FINAL PULL AT 338 LBS"])
+    assert too_small.fields["strand_final_pull_lb"].value is None
+
+
+def test_type2_and_type_iv_overall_depth():
+    type2 = extract_structured_fields(["Type 2 I-Beam\nMarks 201 / 202 / 203\nOVERALL LENGTH 47'-3\""])
+    assert type2.fields["overall_depth_in"].value == 36.0
+    type_iv_explicit = extract_structured_fields(
+        ["BEAM MARK: B9-01\nAASHTO TYPE IV I-BEAM\nOVERALL LENGTH: 110' 0\"\nOVERALL DEPTH: 54 IN"]
+    )
+    assert type_iv_explicit.fields["overall_depth_in"].value == 54.0
+    type_iv_fallback = extract_structured_fields(
+        ["BEAM MARK: B9-01\nAASHTO TYPE IV I-BEAM\nOVERALL LENGTH: 110' 0\""]
+    )
+    assert type_iv_fallback.fields["overall_depth_in"].value == 54.0
+
+
+def test_casting_inferred_from_based_on_note():
+    pages = [
+        "Beam Shop Drawing — Marks 201 / 202 / 203\nOVERALL LENGTH 47'-3\"\nNOTE: ALL DIMENSIONS ARE BASED ON CASTING LENGTH",
+    ]
+    result = extract_structured_fields(pages)
+    families = {tuple(fam["marks"]): fam for fam in result.fields["mark_length_families"].value}
+    assert abs(families[("201", "202", "203")]["overall_length_ft"] - 47.25) < 0.01
+    assert abs(families[("201", "202", "203")]["casting_length_ft"] - (47 + 3.75 / 12)) < 0.01
+    assert abs(result.fields["casting_length_ft"].value - (47 + 3.75 / 12)) < 0.01
+    sample = extract_structured_fields(
+        ["JOB NO: J-88-2001\nBEAM MARK: B9-01\nAASHTO TYPE IV I-BEAM\nOVERALL LENGTH: 110' 0\"\nOVERALL DEPTH: 54 IN"]
+    )
+    assert sample.fields["casting_length_ft"].value is None
+    assert sample.fields["overall_depth_in"].value == 54.0
+    assert sample.fields["overall_length_ft"].value == 110.0

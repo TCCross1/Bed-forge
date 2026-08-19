@@ -201,45 +201,50 @@ def apply_confidence_guard(field: BlueprintField) -> BlueprintField:
 
 
 def parse_fraction(token: str) -> Optional[float]:
-    text = (token or "").strip()
+    text = (token or "").strip().replace("¾", "3/4").replace("½", "1/2")
+    text = re.sub(r"\s+", " ", text)
     mixed = re.fullmatch(r"(\d+)\s+(\d+)\s*/\s*(\d+)", text)
     if mixed:
-        whole, num, den = mixed.groups()
-        den_i = int(den)
-        return None if den_i == 0 else int(whole) + (int(num) / den_i)
+        den_i = int(mixed.group(3))
+        return None if den_i == 0 else int(mixed.group(1)) + (int(mixed.group(2)) / den_i)
+    glued = re.fullmatch(r"(\d+)(\d+)\s*/\s*(\d+)", text)
+    if glued:
+        den_i = int(glued.group(3))
+        num = int(glued.group(2))
+        if den_i and 0 < num < den_i:
+            return int(glued.group(1)) + (num / den_i)
     simple = re.fullmatch(r"(\d+)\s*/\s*(\d+)", text)
     if simple:
         den_i = int(simple.group(2))
         return None if den_i == 0 else int(simple.group(1)) / den_i
-    try:
+    if re.fullmatch(r"\d+(?:\.\d+)?", text):
         return float(text)
-    except Exception:
-        return None
+    return None
 
 
 def parse_feet_inches(value: str) -> Optional[float]:
-    """Parse plant shop-drawing lengths such as 47'-3\", 47'-3 3/4\", 52'-0\", 110' 0\"."""
+    """Parse plant shop-drawing lengths such as 47'-3\", 47'-3 3/4\", 47'-33/4\", 52'-0\", 110' 0\"."""
     if value is None:
         return None
-    text = _normalize_text(str(value))
+    text = _normalize_text(str(value)).replace("¾", " 3/4 ").replace("½", " 1/2 ")
+    text = re.sub(r"\s+", " ", text).strip().rstrip(".")
     if not text:
         return None
     ft_only = re.fullmatch(r"(\d+(?:\.\d+)?)\s*(?:FT|FEET)\b\.?", text, re.IGNORECASE)
     if ft_only:
         return float(ft_only.group(1))
-    pattern = re.compile(
-        r"(\d+)\s*'\s*-?\s*(\d+)?(?:\s+(\d+\s*/\s*\d+))?\s*(?:\"|IN)?",
-        re.IGNORECASE,
-    )
-    match = pattern.fullmatch(text) or pattern.search(text)
+    match = re.search(r"(\d+)\s*['’]\s*-?\s*(.*)$", text)
     if match:
-        feet = float(match.group(1))
-        inches = float(match.group(2) or 0)
-        frac = parse_fraction(match.group(3) or "") if match.group(3) else 0.0
-        if frac is None:
-            return None
-        return round(feet + ((inches + frac) / 12.0), 4)
-    mixed = re.fullmatch(r"(\d+)\s*[- ]\s*(\d+)\s*(?:\"|IN)", text, re.IGNORECASE)
+        rest = re.sub(r"(?:\"|IN)\s*$", "", match.group(2).strip(), flags=re.IGNORECASE).strip()
+        inches = parse_fraction(rest or "0")
+        if inches is not None:
+            return round(float(match.group(1)) + (inches / 12.0), 4)
+    hyphen = re.search(r"(\d+)\s*-\s*(\d+(?:\s+\d+\s*/\s*\d+|\d+\s*/\s*\d+)?)\s*(?:\"|IN)?\s*$", text, re.IGNORECASE)
+    if hyphen:
+        inches = parse_fraction(hyphen.group(2))
+        if inches is not None:
+            return round(float(hyphen.group(1)) + (inches / 12.0), 4)
+    mixed = re.fullmatch(r"(\d+)\s+[-]?\s*(\d+)\s*(?:\"|IN)", text, re.IGNORECASE)
     if mixed:
         return round(float(mixed.group(1)) + (float(mixed.group(2)) / 12.0), 4)
     bare = re.fullmatch(r"(\d+(?:\.\d+)?)", text)
@@ -257,6 +262,10 @@ def format_feet_inches(value_ft: Optional[float]) -> str:
     frac = inches_total - whole
     if abs(frac) < 0.01:
         return f"{feet}'-{whole}\""
+    if abs(frac - 0.75) < 0.02:
+        return f"{feet}'-{whole} 3/4\""
+    if abs(frac - 0.5) < 0.02:
+        return f"{feet}'-{whole} 1/2\""
     eighths = round(frac * 8)
     if eighths in (0, 8):
         return f"{feet}'-{whole + (1 if eighths == 8 else 0)}\""
@@ -442,8 +451,16 @@ def _collect_beam_marks(page_text: List[str]) -> Tuple[List[str], Optional[int]]
     return marks, first_page
 
 
+_FT_IN_CASTING = r"\d+\s*['’]\s*-?\s*(?:\d+\s+\d+\s*/\s*\d+|\d+\d+\s*/\s*\d+|\d+)\s*(?:\"|IN)?"
+_CASTING_EVIDENCE_RX = re.compile(r"BASED\s+ON\s+CASTING|CASTING\s+LENGTH", re.IGNORECASE)
+CASTING_EXTRA_FT = 0.75 / 12.0
+FINAL_PULL_MIN_LB = 10000
+FINAL_PULL_MAX_LB = 60000
+
+
 def _length_hits_on_page(text: str) -> Dict[str, List[str]]:
-    blob = _normalize_text(text)
+    blob = _normalize_text(text).replace("¾", " 3/4 ").replace("½", " 1/2 ")
+    blob = re.sub(r"\s+", " ", blob)
     overall = []
     casting = []
     overall_rx = re.compile(
@@ -454,11 +471,129 @@ def _length_hits_on_page(text: str) -> Dict[str, List[str]]:
     trailing = re.compile(r"(\d+\s*'\s*-?\s*\d+(?:\s+\d+/\d+)?\"?)\s*overall", re.IGNORECASE)
     overall.extend(m.group(1) for m in trailing.finditer(blob))
     casting_rx = re.compile(
-        r"CASTING(?:\s+LENGTH)?\s*[:\-]?\s*(\d+\s*'\s*-?\s*\d+(?:\s+\d+/\d+)?\"?)",
+        rf"(?:CASTING(?:\s+LENGTH)?|C\.L\.)\s*[:\-]?\s*({_FT_IN_CASTING})",
         re.IGNORECASE,
     )
     casting.extend(m.group(1) for m in casting_rx.finditer(blob))
+    casting_trail = re.compile(
+        rf"({_FT_IN_CASTING})\s*(?:CASTING(?:\s+LENGTH)?)",
+        re.IGNORECASE,
+    )
+    casting.extend(m.group(1) for m in casting_trail.finditer(blob))
     return {"overall": overall, "casting": casting}
+
+
+def _fill_casting_three_quarter(families: List[Dict[str, Any]], page_text: List[str]) -> List[Dict[str, Any]]:
+    """If overall is known and CASTING LENGTH evidence exists, fill missing casting as overall + 3/4\"."""
+    joined = _joined_text(page_text)
+    global_evidence = bool(_CASTING_EVIDENCE_RX.search(joined))
+    for family in families:
+        if family.get("casting_length_ft") is not None:
+            continue
+        overall = family.get("overall_length_ft")
+        if overall is None:
+            continue
+        page_i = family.get("source_page") or 0
+        page_blob = page_text[page_i - 1] if 1 <= page_i <= len(page_text) else ""
+        if not (_CASTING_EVIDENCE_RX.search(page_blob or "") or global_evidence):
+            continue
+        casting = round(float(overall) + CASTING_EXTRA_FT, 4)
+        family["casting_length_ft"] = casting
+        family["casting_display"] = family.get("casting_display") or format_feet_inches(casting)
+        family["casting_inferred_three_quarter"] = True
+        logger.info(
+            "Inferred casting length %s from overall %s + 3/4 in (BASED ON CASTING LENGTH) marks=%s page=%s",
+            family["casting_display"],
+            family.get("overall_display"),
+            family.get("marks"),
+            page_i,
+        )
+    return families
+
+
+def _coerce_final_pull_lb(raw: str) -> Optional[int]:
+    try:
+        digits = re.sub(r"[^\d]", "", raw or "")
+        if not digits:
+            return None
+        value = int(digits)
+    except Exception:
+        logger.exception("Failed to coerce final-pull token %r", raw)
+        return None
+    if FINAL_PULL_MIN_LB <= value <= FINAL_PULL_MAX_LB:
+        return value
+    return None
+
+
+def _parse_final_pull(page_text: List[str], page_sources: Optional[Sequence[str]] = None) -> BlueprintField:
+    labeled = [
+        r"(?:FINAL\s+PULL(?:\s+AT)?|FINAL\s+FORCE|JACK(?:ING)?(?:\s+TO|\s+FORCE\s+TO))\s*[:\-]?\s*([0-9][0-9,\.\s]{3,14})\s*(?:LB|LBS|#)?",
+        r"\b(33[\s,\.]?817)\s*(?:LB|LBS|#)?",
+        r"\b(33[\s,\.]817)\b",
+    ]
+    try:
+        for pattern in labeled:
+            rx = re.compile(pattern, re.IGNORECASE)
+            for index, text in enumerate(page_text, start=1):
+                for match in rx.finditer(text or ""):
+                    raw = next((group for group in match.groups() if group not in (None, "")), match.group(0))
+                    value = _coerce_final_pull_lb(_normalize_text(str(raw)))
+                    if value is None:
+                        continue
+                    source = _page_source_label(page_sources or [], index)
+                    logger.info("Parsed strand final pull %s lb from page %s token %r", value, index, raw)
+                    return _build_field(value, "high", index, note="Final pull from strand table / jacking note.", source=source)
+    except Exception:
+        logger.exception("strand_final_pull_lb parser failed")
+    return _blank_field("Strand final pull not confidently located.")
+
+
+def _parse_overall_depth(page_text: List[str], page_sources: Optional[Sequence[str]] = None) -> BlueprintField:
+    explicit = _capture_scalar(
+        page_text,
+        [
+            r"OVERALL\s+DEPTH\s*[:\-]?\s*([0-9]+(?:\.\d+)?)\s*(?:IN|\")",
+            r"(?:SECTION\s+DEPTH|BEAM\s+DEPTH)\s*[:\-]?\s*([0-9]+(?:\.\d+)?)\s*(?:IN|\")",
+        ],
+        cast=lambda value: round(float(value), 3),
+        confidence="medium",
+        missing_note="Overall depth/height not confidently located.",
+        success_note="Depth/height callout.",
+        page_sources=page_sources,
+    )
+    if explicit.value is not None:
+        return explicit
+    type2 = _first_match(
+        page_text,
+        [r"\bTYPE\s*2\b", r"\bTYPE\s*II\b", r"AASHTO\s+TYPE\s*2", r"AASHTO\s+TYPE\s*II"],
+    )
+    if type2:
+        _raw, page, _span = type2
+        source = _page_source_label(page_sources or [], page)
+        logger.info("overall_depth_in=36 from Type 2 / Type II family callout on page %s", page)
+        return _build_field(
+            36.0,
+            "medium",
+            page,
+            note="AASHTO Type II / Type 2 I-beam overall depth is 36 in from section family callout (no explicit OVERALL DEPTH).",
+            source=source,
+        )
+    type4 = _first_match(
+        page_text,
+        [r"\bTYPE\s*IV\b", r"AASHTO\s+TYPE\s*IV", r"\bTYPE\s*4\s+I[\s-]?BEAM"],
+    )
+    if type4:
+        _raw, page, _span = type4
+        source = _page_source_label(page_sources or [], page)
+        logger.info("overall_depth_in=54 from Type IV family callout on page %s", page)
+        return _build_field(
+            54.0,
+            "medium",
+            page,
+            note="AASHTO Type IV I-beam overall depth is 54 in from section family callout (no explicit OVERALL DEPTH).",
+            source=source,
+        )
+    return _blank_field("Overall depth/height not confidently located.")
 
 
 def extract_mark_length_families(page_text: List[str]) -> List[Dict[str, Any]]:
@@ -613,11 +748,15 @@ def extract_structured_fields(
 
     fields["product_family"] = _product_family(page_text, hints.get("product_family_hint", ""), page_sources)
 
-    families = extract_mark_length_families(page_text)
+    families = _fill_casting_three_quarter(extract_mark_length_families(page_text), page_text)
     if families:
         fam_page = families[0].get("source_page")
         source = _page_source_label(page_sources, fam_page)
-        fields["mark_length_families"] = _build_field(families, "high" if any(f.get("overall_length_ft") for f in families) else "medium", fam_page, note="Per-mark overall/casting length families from shop sheets.", source=source)
+        inferred = any(f.get("casting_inferred_three_quarter") for f in families)
+        fam_note = "Per-mark overall/casting length families from shop sheets."
+        if inferred:
+            fam_note = "Per-mark overall/casting families. Missing casting lengths filled as overall + 3/4\" from BASED ON CASTING LENGTH evidence."
+        fields["mark_length_families"] = _build_field(families, "high" if any(f.get("overall_length_ft") for f in families) else "medium", fam_page, note=fam_note, source=source)
         numeric_overall = [f["overall_length_ft"] for f in families if f.get("overall_length_ft") is not None]
         numeric_cast = [f["casting_length_ft"] for f in families if f.get("casting_length_ft") is not None]
         if numeric_overall:
@@ -629,11 +768,14 @@ def extract_structured_fields(
                 source=source,
             )
         if numeric_cast:
+            cast_note = "Primary casting length is the longest mark family; see mark_length_families."
+            if inferred:
+                cast_note = "Primary casting length is overall + 3/4\" where the drawing says dimensions are BASED ON CASTING LENGTH."
             fields["casting_length_ft"] = _build_field(
                 max(numeric_cast),
-                "high",
+                "medium" if inferred else "high",
                 fam_page,
-                note="Primary casting length is the longest mark family; see mark_length_families.",
+                note=cast_note,
                 source=source,
             )
         elif not numeric_cast:
@@ -653,7 +795,10 @@ def extract_structured_fields(
     if fields["casting_length_ft"].status == "unconfirmed":
         fields["casting_length_ft"] = _capture_scalar(
             page_text,
-            [r"CASTING(?:\s+LENGTH)?\s*[:\-]?\s*([0-9]+\s*'\s*-?\s*[0-9]+(?:\s+\d+/\d+)?\"?)"],
+            [
+                rf"CASTING(?:\s+LENGTH)?\s*[:\-]?\s*({_FT_IN_CASTING})",
+                rf"({_FT_IN_CASTING})\s*(?:CASTING(?:\s+LENGTH)?)",
+            ],
             cast=lambda value: round(parse_feet_inches(value), 4),
             missing_note="Casting length not confidently located.",
             success_note="Casting length from labeled dimension.",
@@ -673,7 +818,7 @@ def extract_structured_fields(
     )
     fields["finish_notes"] = _capture_notes(page_text, r"FINISH", "Finish notes present in drawing text; verify manually.", page_sources)
 
-    fields["overall_depth_in"] = _capture_scalar(page_text, [r"(?:OVERALL DEPTH|DEPTH|HEIGHT)\s*[:\-]?\s*([0-9]+(?:\.\d+)?)\s*(?:IN|\")"], cast=lambda value: round(float(value), 3), confidence="medium", missing_note="Overall depth/height not confidently located.", success_note="Depth/height callout.", page_sources=page_sources)
+    fields["overall_depth_in"] = _parse_overall_depth(page_text, page_sources)
     fields["top_flange_width_in"] = _capture_scalar(page_text, [r"TOP FLANGE WIDTH\s*[:\-]?\s*([0-9]+(?:\.\d+)?)\s*(?:IN|\")"], cast=lambda value: round(float(value), 3), missing_note="Top flange width not confidently located.", success_note="Top flange width callout.", page_sources=page_sources)
     fields["top_flange_thickness_in"] = _capture_scalar(page_text, [r"TOP FLANGE THICKNESS\s*[:\-]?\s*([0-9]+(?:\.\d+)?)\s*(?:IN|\")"], cast=lambda value: round(float(value), 3), missing_note="Top flange thickness not confidently located.", success_note="Top flange thickness callout.", page_sources=page_sources)
     fields["bottom_flange_width_in"] = _capture_scalar(page_text, [r"BOTTOM FLANGE WIDTH\s*[:\-]?\s*([0-9]+(?:\.\d+)?)\s*(?:IN|\")"], cast=lambda value: round(float(value), 3), missing_note="Bottom flange width not confidently located.", success_note="Bottom flange width callout.", page_sources=page_sources)
@@ -699,14 +844,7 @@ def extract_structured_fields(
         fields["strand_grade"] = _build_field(grade, "high", page, note="Strand grade / relaxation from 270K callout.", source=source)
     else:
         fields["strand_grade"] = _blank_field("Strand grade not confidently located.")
-    fields["strand_final_pull_lb"] = _capture_scalar(
-        page_text,
-        [r"(?:FINAL\s+PULL|FINAL\s+FORCE|JACK(?:ING)?\s+TO)\s*[:\-]?\s*([0-9,]{4,})\s*(?:LB|LBS|#)?", r"\b(33817)\b"],
-        cast=lambda value: int(str(value).replace(",", "")),
-        missing_note="Strand final pull not confidently located.",
-        success_note="Final pull from strand table / jacking note.",
-        page_sources=page_sources,
-    )
+    fields["strand_final_pull_lb"] = _parse_final_pull(page_text, page_sources)
     fields["strand_area_in2"] = _capture_scalar(page_text, [r"STRAND(?:\s+AREA)?\s*[:\-]?\s*([0-9.]+)\s*(?:IN2|IN\^2|SQ\.?\s*IN)"], cast=lambda value: round(float(value), 4), missing_note="Strand area not confidently located.", success_note="Strand area callout.", page_sources=page_sources)
     fields["straight_strand_count"] = _capture_scalar(page_text, [r"([0-9]+)\s+STRAIGHT\s+STRANDS?"], cast=lambda value: int(float(value)), confidence="medium", missing_note="Straight strand count not clearly stated.", success_note="Straight strand count.", page_sources=page_sources)
     fields["draped_strand_count"] = _capture_scalar(page_text, [r"([0-9]+)\s+DRAPED\s+STRANDS?"], cast=lambda value: int(float(value)), confidence="medium", missing_note="Draped strand count not clearly stated.", success_note="Draped strand count.", page_sources=page_sources)
