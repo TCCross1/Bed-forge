@@ -221,7 +221,7 @@ const saveReview = async () => {
       });
       setDetail(data);
       await loadAll(selectedId);
-      toast.success("Blueprint revision locked");
+      toast.success("Blueprint revision locked — Spec DNA is ready on Digital Twin");
     } catch (err) {
       toast.error(err.response?.data?.detail || "Unable to lock blueprint");
     } finally {

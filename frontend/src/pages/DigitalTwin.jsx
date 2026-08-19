@@ -5,7 +5,8 @@ import Layout, { PageHeader } from "../components/Layout";
 import BeamTwinViewer, { BedTwinViewer } from "../components/BeamViewer";
 import { bedState, qcState } from "../lib/constants";
 import { toast } from "sonner";
-import { Layers3, Loader2, MapPin, Ruler, ScanLine, Box, Construction, Lock, AlertTriangle } from "lucide-react";
+import { Drawer, DrawerContent, DrawerHeader, DrawerTitle } from "../components/ui/drawer";
+import { Layers3, Loader2, MapPin, Ruler, ScanLine, Box, Construction, Lock, AlertTriangle, SlidersHorizontal } from "lucide-react";
 
 function SpecRows({ spec }) {
   return Object.entries(spec || {}).map(([key, value]) => (
@@ -17,14 +18,16 @@ function SpecRows({ spec }) {
 }
 
 function stationList(items = []) {
-  return items.length ? items.map((item) => `${Number(item.x_ft || 0).toFixed(1)}'`).join(" · ") : "—";
+  const stations = items.map((item) => item.x_ft ?? item.station_ft ?? item?.position?.station_ft).filter((value) => value != null && value !== "");
+  return stations.length ? stations.map((value) => `${Number(value).toFixed(1)}'`).join(" · ") : "unconfirmed";
 }
 
 const LAYER_OPTIONS = [
   ["dimensions", "Dimensions"],
+  ["stations", "Stations"],
   ["hardware", "Hardware"],
   ["strands", "Strands"],
-  ["stirrups", "Stirrups"],
+  ["stirrups", "Stirrups / rebar"],
   ["anomalies", "Anomalies"],
 ];
 
@@ -33,7 +36,7 @@ function LayerChip({ active, label, onClick }) {
     <button
       type="button"
       onClick={onClick}
-      className={`min-h-9 px-3 rounded-sm border text-[11px] font-mono uppercase tracking-wider transition-colors duration-100 ${
+      className={`min-h-9 px-3 rounded-sm border text-[11px] font-mono uppercase tracking-wider transition-colors duration-100 whitespace-nowrap ${
         active ? "border-primary bg-primary/15 text-primary" : "border-border bg-background text-muted-foreground hover:border-primary/60 hover:text-white"
       }`}
     >
@@ -42,25 +45,67 @@ function LayerChip({ active, label, onClick }) {
   );
 }
 
+function TwinSelectors({ selectedSpecId, specs, onSpecChange, selectedBedId, beds, onBedChange, selectedId, beams, onBeamChange }) {
+  return (
+    <div className="flex flex-wrap items-center gap-3">
+      <select
+        value={selectedSpecId}
+        onChange={onSpecChange}
+        className="bg-background border border-border rounded-sm px-3 min-h-12 font-mono text-sm min-w-[12rem] flex-1"
+        data-testid="twin-spec-select"
+      >
+        <option value="">{specs.length ? "Spec DNA — select mark" : "No locked Spec DNA yet"}</option>
+        {specs.map((item) => (
+          <option key={item.id} value={item.id}>
+            {item.job_number || "JOB"} · MK {item.beam_mark} · {item.geometry?.length_ft ? `${Number(item.geometry.length_ft).toFixed(2)} ft` : "length unconfirmed"}
+          </option>
+        ))}
+      </select>
+      <select value={selectedBedId} onChange={onBedChange} className="bg-background border border-border rounded-sm px-3 min-h-12 font-mono text-sm">
+        {beds.map((item) => <option key={item.id} value={item.id}>BED {item.bed_number} · {item.name}</option>)}
+      </select>
+      <select value={selectedId} onChange={onBeamChange} className="bg-background border border-border rounded-sm px-3 min-h-12 font-mono text-sm" data-testid="twin-beam-select">
+        {beams.filter((item) => !selectedBedId || item.bed_id === selectedBedId).map((item) => <option key={item.id} value={item.id}>{item.mark} · {item.twin_type === "box_beam" ? "Box" : "I-Beam"}</option>)}
+      </select>
+    </div>
+  );
+}
+
+function TwinLayerChips({ activeLayers, onToggle }) {
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <span className="text-[10px] font-mono uppercase tracking-[0.22em] text-muted-foreground mr-1">Layers</span>
+      {LAYER_OPTIONS.map(([key, label]) => (
+        <LayerChip key={key} label={label} active={!!activeLayers[key]} onClick={() => onToggle(key)} />
+      ))}
+    </div>
+  );
+}
+
+function layersForPour(mode) {
+  if (mode === "pre_pour") {
+    return { dimensions: true, stations: true, hardware: true, strands: true, stirrups: true, anomalies: true };
+  }
+  return { dimensions: true, stations: true, hardware: true, strands: false, stirrups: false, anomalies: true };
+}
+
 export default function DigitalTwin() {
   const [params] = useSearchParams();
   const [beams, setBeams] = useState([]);
   const [beds, setBeds] = useState([]);
+  const [specs, setSpecs] = useState([]);
   const [selectedId, setSelectedId] = useState(params.get("beam") || "");
+  const [selectedSpecId, setSelectedSpecId] = useState(params.get("spec") || "");
   const [beam, setBeam] = useState(null);
   const [bedTwin, setBedTwin] = useState(null);
   const [selectedBedId, setSelectedBedId] = useState("");
   const [selectedHardware, setSelectedHardware] = useState(null);
   const [pickPos, setPickPos] = useState(null);
   const [showCallouts, setShowCallouts] = useState(true);
-  const [layers, setLayers] = useState({
-    dimensions: true,
-    hardware: false,
-    strands: true,
-    stirrups: true,
-    anomalies: true,
-  });
+  const [pourMode, setPourMode] = useState("post_pour");
+  const [layers, setLayers] = useState(layersForPour("post_pour"));
   const [mode, setMode] = useState("beam");
+  const [controlsOpen, setControlsOpen] = useState(false);
   const [form, setForm] = useState({ type: "crack", severity: "minor", note: "", length_in: 0 });
 
   useEffect(() => {
@@ -70,24 +115,37 @@ export default function DigitalTwin() {
       setSelectedBedId((current) => current || r.data[0]?.bed_id || "");
     });
     api.get("/beds").then((r) => setBeds(r.data));
+    api.get("/beam-specs").then((r) => setSpecs(Array.isArray(r.data) ? r.data : [])).catch(() => setSpecs([]));
   }, []);
 
   useEffect(() => {
+    if (selectedSpecId) {
+      api.get(`/beam-specs/${selectedSpecId}/twin`).then((r) => {
+        setBeam(r.data);
+        if (r.data.bed_id) setSelectedBedId(r.data.bed_id);
+      }).catch(() => toast.error("Failed to load Spec twin"));
+      return;
+    }
     if (!selectedId) return;
     api.get(`/beams/${selectedId}`).then((r) => {
       setBeam(r.data);
-      setSelectedBedId(r.data.bed_id);
+      if (r.data.bed_id) setSelectedBedId(r.data.bed_id);
     });
-  }, [selectedId]);
+  }, [selectedId, selectedSpecId]);
 
   useEffect(() => {
     if (!selectedBedId) return;
     api.get(`/beds/${selectedBedId}/twin`).then((r) => setBedTwin(r.data));
   }, [selectedBedId, selectedId]);
 
+  const setPour = (next) => {
+    setPourMode(next);
+    setLayers(layersForPour(next));
+  };
+
   const saveAnomaly = async () => {
-    if (!pickPos || !selectedId) {
-      toast.error("Tap the beam shell to set the anomaly location first");
+    if (!pickPos || !selectedId || String(selectedId).startsWith("spec:")) {
+      toast.error(String(selectedId).startsWith("spec:") ? "Lock this Spec to a plant beam before capturing anomalies" : "Tap the beam shell to set the anomaly location first");
       return;
     }
     try {
@@ -104,8 +162,10 @@ export default function DigitalTwin() {
       setForm({ type: "crack", severity: "minor", note: "", length_in: 0 });
       const beamRes = await api.get(`/beams/${selectedId}`);
       setBeam(beamRes.data);
-      const bedRes = await api.get(`/beds/${beamRes.data.bed_id}/twin`);
-      setBedTwin(bedRes.data);
+      if (beamRes.data.bed_id) {
+        const bedRes = await api.get(`/beds/${beamRes.data.bed_id}/twin`);
+        setBedTwin(bedRes.data);
+      }
     } catch {
       toast.error("Failed to save anomaly");
     }
@@ -114,18 +174,12 @@ export default function DigitalTwin() {
   const selectedBed = useMemo(() => beds.find((item) => item.id === selectedBedId), [beds, selectedBedId]);
   const beamState = beam ? qcState(beam.qc_state) : null;
   const bedStatus = selectedBed ? bedState(selectedBed.status) : null;
-  const blueprint = beam?.product_type?.blueprint || {};
+  const blueprint = beam?.beam_spec?.blueprint || beam?.product_type?.blueprint || {};
+  const beamSpec = beam?.beam_spec;
   const blueprintSource = beam?.blueprint_source || { status: "legacy_seed" };
-  const draftTwinBlocked = blueprintSource.status === "draft";
+  const draftTwinBlocked = blueprintSource.status === "draft" && !beamSpec;
+  const specDnaActive = Boolean(beamSpec);
   const strandCount = (blueprint.strand_pattern?.rows || []).reduce((sum, row) => sum + (row.count || 0), 0);
-  const stirrupCount = (() => {
-    const stirrups = blueprint.stirrups || {};
-    const spacingFt = (stirrups.spacing_in || 24) / 12;
-    const startFt = stirrups.start_ft ?? 0;
-    const endFt = stirrups.end_ft ?? beam?.length_ft ?? 0;
-    if (!spacingFt || endFt <= startFt) return 0;
-    return Math.floor((endFt - startFt) / spacingFt) + 1;
-  })();
   const featureCounts = [
     ["Lift loops", blueprint.lift_loops?.length || 0],
     ["Inserts", blueprint.inserts?.length || 0],
@@ -133,21 +187,16 @@ export default function DigitalTwin() {
     ["Tie-rods", blueprint.tie_rod_openings?.length || 0],
     ["Drain holes", blueprint.drain_holes?.length || 0],
     ["Hold-downs", blueprint.hold_downs?.length || 0],
-    ["Stirrups", stirrupCount],
+    ["Stirrup zones", (beamSpec?.stirrup_zones || []).length],
     ["Strand ends", strandCount * 2],
     ["Bituminous pockets", blueprint.bituminous_ends?.length || 0],
   ];
   const quickDimensions = beam ? [
-    ["OAL", `${beam.length_ft} ft`],
-    ["Depth", `${blueprint.cross_section?.overall_depth_in || blueprint.cross_section?.outer_depth_in || beam.product_type?.depth_in || "—"} in`],
-    ["Width", `${blueprint.cross_section?.top_flange_width_in || blueprint.cross_section?.outer_width_in || beam.product_type?.width_in || "—"} in`],
-    beam.twin_type === "box_beam"
-      ? ["Void", `${blueprint.cross_section?.void_width_in || "—"} × ${blueprint.cross_section?.void_depth_in || "—"} in`]
-      : ["Top flange", `${blueprint.cross_section?.top_flange_width_in || "—"} × ${blueprint.cross_section?.top_flange_thickness_in || "—"} in`],
-    beam.twin_type === "box_beam"
-      ? ["Wall", `${blueprint.cross_section?.wall_thickness_in || "—"} in`]
-      : ["Web / bottom flange", `${blueprint.cross_section?.web_thickness_in || "—"} in / ${blueprint.cross_section?.bottom_flange_width_in || "—"} × ${blueprint.cross_section?.bottom_flange_thickness_in || "—"} in`],
-    ["Stirrups", blueprint.stirrups?.spacing_in ? `@ ${blueprint.stirrups.spacing_in} in from ${blueprint.stirrups.start_ft ?? 0}' to ${blueprint.stirrups.end_ft ?? beam.length_ft}'` : "—"],
+    ["OAL", beam.length_ft != null ? `${beam.length_ft} ft` : "unconfirmed"],
+    ["Casting", beamSpec?.geometry?.casting_length_ft != null ? `${beamSpec.geometry.casting_length_ft} ft` : "unconfirmed"],
+    ["Depth", `${blueprint.cross_section?.overall_depth_in || blueprint.cross_section?.outer_depth_in || beam.product_type?.depth_in || "unconfirmed"}`],
+    ["Width", `${blueprint.cross_section?.top_flange_width_in || blueprint.cross_section?.outer_width_in || beam.product_type?.width_in || "unconfirmed"}`],
+    ["Section source", beamSpec?.section_source || blueprintSource.section_source || (specDnaActive ? "extracted" : "legacy seed")],
   ] : [];
   const qcStations = beam ? [
     ["Lift loops", stationList(blueprint.lift_loops || [])],
@@ -156,24 +205,126 @@ export default function DigitalTwin() {
     ["Drains", stationList(blueprint.drain_holes || [])],
     ["Hold-downs", stationList(blueprint.hold_downs || [])],
     ["Grooves", stationList(blueprint.grout_grooves || [])],
-    ["Bituminous", (blueprint.bituminous_ends || []).length ? (blueprint.bituminous_ends || []).map((item) => `${item.end?.toUpperCase() || "END"} ${item.length_in || 0}"`).join(" · ") : "—"],
   ] : [];
   const activeLayers = useMemo(() => ({
     ...layers,
     dimensions: showCallouts && layers.dimensions,
-    hardware: showCallouts && layers.hardware,
+    stations: showCallouts && layers.stations,
+    hardware: layers.hardware,
     strands: layers.strands,
     stirrups: layers.stirrups,
     anomalies: layers.anomalies,
   }), [layers, showCallouts]);
 
+  const sidebar = (
+    <div className="space-y-6">
+      <div className="bg-card border border-border rounded-sm p-6">
+        <h3 className="font-display font-bold uppercase tracking-wider text-lg mb-4 flex items-center gap-2"><Ruler className="w-5 h-5 text-primary" /> Spec / Blueprint DNA</h3>
+        {beam ? (
+          <div className="space-y-4 text-sm font-mono">
+            <div className="grid grid-cols-2 gap-3">
+              <div className="border border-border rounded-sm px-3 py-2"><div className="text-xs uppercase tracking-widest text-muted-foreground">Beam</div><div className="mt-1 text-white">{beam.mark}</div></div>
+              <div className="border border-border rounded-sm px-3 py-2"><div className="text-xs uppercase tracking-widest text-muted-foreground">Job</div><div className="mt-1 text-white">{beamSpec?.job_number || beamSpec?.identity?.job_number || "—"}</div></div>
+              <div className="border border-border rounded-sm px-3 py-2"><div className="text-xs uppercase tracking-widest text-muted-foreground">Length</div><div className="mt-1 text-white">{beam.length_ft != null ? `${beam.length_ft} ft` : "unconfirmed"}</div></div>
+              <div className="border border-border rounded-sm px-3 py-2"><div className="text-xs uppercase tracking-widest text-muted-foreground">Marked End</div><div className="mt-1 text-white">{blueprint.marked_end?.label || "MARKED END"}</div></div>
+              <div className="border border-border rounded-sm px-3 py-2 col-span-2"><div className="text-xs uppercase tracking-widest text-muted-foreground">DNA source</div><div className="mt-1 text-white">{specDnaActive ? `Spec ${beamSpec.beam_mark} · ${blueprintSource.status}` : blueprintSource.status.replace(/_/g, " ")}</div></div>
+            </div>
+            {(beamSpec?.missing_fields || []).length > 0 && (
+              <div className="border border-[#C9A22755] bg-[#C9A22712] rounded-sm p-3 text-xs text-[#E8C872]">
+                Missing / unconfirmed on print: {(beamSpec.missing_fields || []).join(", ")}. Twin does not invent these stations.
+              </div>
+            )}
+            <div className="border border-border rounded-sm p-3">
+              <div className="text-xs uppercase tracking-widest text-muted-foreground mb-3 flex items-center gap-2"><ScanLine className="w-4 h-4" /> Embedded details</div>
+              <div className="grid grid-cols-2 gap-2">
+                {featureCounts.map(([label, count]) => (
+                  <div key={label} className="flex items-center justify-between text-xs"><span className="text-muted-foreground">{label}</span><span className="text-white">{count}</span></div>
+                ))}
+              </div>
+            </div>
+            <div className="border border-border rounded-sm p-3">
+              <div className="text-xs uppercase tracking-widest text-muted-foreground mb-3">QC dimensions</div>
+              <div className="space-y-2">
+                {quickDimensions.map(([label, value]) => (
+                  <div key={label} className="flex items-start justify-between gap-3 text-xs font-mono">
+                    <span className="text-muted-foreground">{label}</span>
+                    <span className="text-right text-white">{value}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="border border-border rounded-sm p-3">
+              <div className="text-xs uppercase tracking-widest text-muted-foreground mb-3">Stations from marked end</div>
+              <div className="space-y-2">
+                {qcStations.map(([label, value]) => (
+                  <div key={label} className="flex items-start justify-between gap-3 text-xs font-mono">
+                    <span className="text-muted-foreground">{label}</span>
+                    <span className="text-right text-white">{value}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        ) : <div className="text-sm text-muted-foreground font-mono">Load a beam or Spec to inspect DNA.</div>}
+      </div>
+
+      <div className="bg-card border border-border rounded-sm p-6">
+        <h3 className="font-display font-bold uppercase tracking-wider text-lg mb-4 flex items-center gap-2"><Construction className="w-5 h-5 text-primary" /> Hardware Inspector</h3>
+        {selectedHardware ? (
+          <div className="space-y-3">
+            <div className="border border-border rounded-sm px-3 py-2">
+              <div className="text-xs uppercase tracking-widest text-muted-foreground">Selected</div>
+              <div className="mt-1 font-mono text-white">{selectedHardware.type} · {selectedHardware.beamMark}</div>
+            </div>
+            <SpecRows spec={selectedHardware.spec} />
+          </div>
+        ) : (
+          <div className="text-sm text-muted-foreground font-mono">Tap any loop, insert, tube, strand, or hold-down to inspect its spec.</div>
+        )}
+      </div>
+
+      <div className="bg-card border border-border rounded-sm p-6">
+        <h3 className="font-display font-bold uppercase tracking-wider text-lg mb-4 flex items-center gap-2"><MapPin className="w-5 h-5 text-primary" /> Capture Anomaly</h3>
+        <div className="space-y-4">
+          <div className={`text-xs font-mono px-3 py-2 rounded-sm border ${pickPos ? "border-primary text-primary" : "border-border text-muted-foreground"}`} data-testid="pick-status">
+            {pickPos ? `POINT SET · STA ${pickPos.z.toFixed(1)} FT · EL ${pickPos.y.toFixed(2)} FT` : "TAP THE BEAM SHELL TO SET LOCATION"}
+          </div>
+          <div>
+            <label className="text-xs font-mono uppercase tracking-widest text-muted-foreground">Type</label>
+            <select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })} className="mt-1 w-full bg-background border border-border rounded-sm px-3 min-h-12 font-mono text-sm" data-testid="anomaly-type">
+              {["crack", "spall", "honeycomb", "chip", "stain", "other"].map((item) => <option key={item} value={item}>{item}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="text-xs font-mono uppercase tracking-widest text-muted-foreground">Severity</label>
+            <select value={form.severity} onChange={(e) => setForm({ ...form, severity: e.target.value })} className="mt-1 w-full bg-background border border-border rounded-sm px-3 min-h-12 font-mono text-sm" data-testid="anomaly-severity">
+              {["minor", "moderate", "major"].map((item) => <option key={item} value={item}>{item}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="text-xs font-mono uppercase tracking-widest text-muted-foreground">Length (in)</label>
+            <input type="number" value={form.length_in} onChange={(e) => setForm({ ...form, length_in: e.target.value })} className="mt-1 w-full bg-background border border-border rounded-sm px-3 min-h-12 font-mono text-sm" data-testid="anomaly-length" />
+          </div>
+          <div>
+            <label className="text-xs font-mono uppercase tracking-widest text-muted-foreground">Note</label>
+            <textarea value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} rows={2} className="mt-1 w-full bg-background border border-border rounded-sm px-3 py-2 font-mono text-sm" data-testid="anomaly-note" />
+          </div>
+          <button onClick={saveAnomaly} className="w-full min-h-14 bg-primary text-white font-display font-bold uppercase tracking-widest rounded-sm hover:bg-white hover:text-black transition-colors duration-100" data-testid="save-anomaly">Save To Twin</button>
+        </div>
+      </div>
+    </div>
+  );
+
   return (
     <Layout>
       <PageHeader
         title="Digital Twin Viewer"
-        subtitle="Production-grade beam and bed twins driven by product blueprint data"
+        subtitle="Job Spec DNA drives unique per-beam twins — Pre-Pour cage vs Post-Pour finish"
         right={
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <button type="button" onClick={() => setControlsOpen(true)} className="lg:hidden min-h-11 px-3 rounded-sm border border-primary text-primary text-xs font-mono uppercase tracking-wider flex items-center gap-2">
+              <SlidersHorizontal className="w-4 h-4" /> Controls
+            </button>
             <button onClick={() => setShowCallouts((value) => !value)} className={`min-h-11 px-4 rounded-sm border text-xs font-mono uppercase tracking-wider ${showCallouts ? "border-primary text-primary" : "border-border text-muted-foreground"}`}>
               {showCallouts ? "Hide" : "Show"} Labels
             </button>
@@ -188,43 +339,61 @@ export default function DigitalTwin() {
         }
       />
 
-      <div className="p-8 grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2 bg-card border border-border rounded-sm overflow-hidden flex flex-col" style={{ minHeight: 640 }}>
-          <div className="px-5 py-3 border-b border-border flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-            <div className="flex flex-wrap items-center gap-3">
-              <select value={selectedBedId} onChange={(e) => setSelectedBedId(e.target.value)} className="bg-background border border-border rounded-sm px-3 min-h-12 font-mono text-sm">
-                {beds.map((item) => <option key={item.id} value={item.id}>BED {item.bed_number} · {item.name}</option>)}
-              </select>
-              <select value={selectedId} onChange={(e) => setSelectedId(e.target.value)} className="bg-background border border-border rounded-sm px-3 min-h-12 font-mono text-sm" data-testid="twin-beam-select">
-                {beams.filter((item) => !selectedBedId || item.bed_id === selectedBedId).map((item) => <option key={item.id} value={item.id}>{item.mark} · {item.twin_type === "box_beam" ? "Box" : "I-Beam"}</option>)}
-              </select>
-            </div>
-            <div className="flex items-center gap-2">
-              {blueprintSource.status === "locked" && <span className="font-mono text-xs font-bold tracking-widest px-3 py-1 rounded-sm border border-primary/40 text-primary flex items-center gap-2"><Lock className="w-3.5 h-3.5" /> LOCKED BLUEPRINT</span>}
-              {blueprintSource.status === "draft" && <span className="font-mono text-xs font-bold tracking-widest px-3 py-1 rounded-sm border border-[#FFD60055] text-[#FFD600] flex items-center gap-2"><AlertTriangle className="w-3.5 h-3.5" /> DRAFT EXTRACTION</span>}
-              {bedStatus && <span className="font-mono text-xs font-bold tracking-widest px-3 py-1 rounded-sm" style={{ color: bedStatus.color, border: `1px solid ${bedStatus.color}55` }}>{bedStatus.label}</span>}
-              {beamState && <span className="font-mono text-xs font-bold tracking-widest px-3 py-1 rounded-sm" style={{ color: beamState.color, border: `1px solid ${beamState.color}55` }}>{beamState.label}</span>}
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-[10px] font-mono uppercase tracking-[0.22em] text-muted-foreground">Layers</span>
-              {LAYER_OPTIONS.map(([key, label]) => (
-                <LayerChip
-                  key={key}
-                  label={label}
-                  active={!!activeLayers[key]}
-                  onClick={() => setLayers((current) => ({ ...current, [key]: !current[key] }))}
-                />
+      <div className="p-4 sm:p-6 lg:p-8 grid grid-cols-1 lg:grid-cols-3 gap-6 overflow-x-hidden">
+        <div className="lg:col-span-2 bg-card border border-border rounded-sm overflow-hidden flex flex-col min-h-[520px] sm:min-h-[640px]">
+          <div className="px-4 sm:px-5 py-4 border-b border-border flex flex-col gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2" data-testid="pour-mode-toggle">
+              {[["pre_pour", "Pre-Pour", "Cage / before concrete"], ["post_pour", "Post-Pour", "Finished exterior"]].map(([value, label, hint]) => (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => setPour(value)}
+                  className={`min-h-14 rounded-sm border px-4 text-left transition-colors duration-100 ${
+                    pourMode === value ? "border-primary bg-primary/15 shadow-[0_0_24px_rgba(45,212,191,0.18)]" : "border-border bg-background hover:border-primary/50"
+                  }`}
+                >
+                  <div className={`font-display font-bold uppercase tracking-wider text-sm ${pourMode === value ? "text-primary" : "text-white"}`}>{label}</div>
+                  <div className="text-[11px] font-mono text-muted-foreground mt-1">{hint}</div>
+                </button>
               ))}
+            </div>
+            <div className="flex flex-col gap-4">
+              <TwinSelectors
+                selectedSpecId={selectedSpecId}
+                specs={specs}
+                onSpecChange={(e) => {
+                  const next = e.target.value;
+                  setSelectedSpecId(next);
+                  if (!next) return;
+                  const spec = specs.find((item) => item.id === next);
+                  if (spec?.beam_id) setSelectedId(spec.beam_id);
+                }}
+                selectedBedId={selectedBedId}
+                beds={beds}
+                onBedChange={(e) => { setSelectedBedId(e.target.value); setSelectedSpecId(""); }}
+                selectedId={selectedId}
+                beams={beams}
+                onBeamChange={(e) => { setSelectedId(e.target.value); setSelectedSpecId(""); }}
+              />
+              <div className="flex flex-wrap items-center gap-2">
+                {blueprintSource.status === "locked" && <span className="font-mono text-xs font-bold tracking-widest px-3 py-1 rounded-sm border border-primary/40 text-primary flex items-center gap-2"><Lock className="w-3.5 h-3.5" /> {specDnaActive ? "SPEC DNA" : "LOCKED BLUEPRINT"}</span>}
+                {blueprintSource.status === "draft" && <span className="font-mono text-xs font-bold tracking-widest px-3 py-1 rounded-sm border border-[#FFD60055] text-[#FFD600] flex items-center gap-2"><AlertTriangle className="w-3.5 h-3.5" /> DRAFT EXTRACTION</span>}
+                {bedStatus && <span className="font-mono text-xs font-bold tracking-widest px-3 py-1 rounded-sm" style={{ color: bedStatus.color, border: `1px solid ${bedStatus.color}55` }}>{bedStatus.label}</span>}
+                {beamState && <span className="font-mono text-xs font-bold tracking-widest px-3 py-1 rounded-sm" style={{ color: beamState.color, border: `1px solid ${beamState.color}55` }}>{beamState.label}</span>}
+              </div>
+              <div className="hidden md:block">
+                <TwinLayerChips activeLayers={activeLayers} onToggle={(key) => setLayers((current) => ({ ...current, [key]: !current[key] }))} />
+              </div>
+              <p className="md:hidden text-[11px] font-mono text-muted-foreground">Open Controls for layer chips and DNA inspector</p>
             </div>
           </div>
 
-          <div className="flex-1">
+          <div className="flex-1 min-h-[360px]">
             {draftTwinBlocked ? (
               <div className="h-full flex items-center justify-center p-10">
                 <div className="max-w-lg border border-[#FFD60055] bg-[#FFD60010] rounded-sm p-6 text-sm">
                   <div className="flex items-center gap-2 text-[#FFD600] font-display font-bold uppercase tracking-wider"><AlertTriangle className="w-5 h-5" /> Locked blueprint required</div>
-                  <p className="text-muted-foreground mt-3">This beam is linked to a draft blueprint extraction. BedForge blocks production twin rendering until a reviewer verifies and locks the blueprint revision.</p>
-                  <p className="text-muted-foreground mt-2">Once locked, geometry, strand rows, hold-downs, hardware, and inspection expectations will come only from the immutable revision.</p>
+                  <p className="text-muted-foreground mt-3">This beam is linked to a draft blueprint extraction. Lock the revision in Blueprint Intelligence to materialize Spec DNA and render the twin.</p>
                 </div>
               </div>
             ) : mode === "beam" && beam ? (
@@ -233,6 +402,7 @@ export default function DigitalTwin() {
                 anomalies={beam.anomalies || []}
                 showCallouts={showCallouts}
                 layers={activeLayers}
+                pourMode={pourMode}
                 onSurfacePick={(point) => {
                   setPickPos(point);
                   toast.info("Surface point marked for anomaly capture");
@@ -245,8 +415,10 @@ export default function DigitalTwin() {
                 selectedBeamId={selectedId}
                 showCallouts={showCallouts}
                 layers={activeLayers}
+                pourMode={pourMode}
                 onBeamSelect={(item) => {
                   setSelectedId(item.id);
+                  setSelectedSpecId("");
                   setMode("beam");
                 }}
                 onHardwareSelect={(item) => setSelectedHardware(item)}
@@ -257,111 +429,22 @@ export default function DigitalTwin() {
           </div>
         </div>
 
-        <div className="space-y-6">
-          <div className="bg-card border border-border rounded-sm p-6">
-            <h3 className="font-display font-bold uppercase tracking-wider text-lg mb-4 flex items-center gap-2"><Ruler className="w-5 h-5 text-primary" /> Blueprint Callouts</h3>
-            {beam ? (
-              <div className="space-y-4 text-sm font-mono">
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="border border-border rounded-sm px-3 py-2"><div className="text-xs uppercase tracking-widest text-muted-foreground">Beam</div><div className="mt-1 text-white">{beam.mark}</div></div>
-                  <div className="border border-border rounded-sm px-3 py-2"><div className="text-xs uppercase tracking-widest text-muted-foreground">Product</div><div className="mt-1 text-white">{beam.product_type?.name || "—"}</div></div>
-                  <div className="border border-border rounded-sm px-3 py-2"><div className="text-xs uppercase tracking-widest text-muted-foreground">Length</div><div className="mt-1 text-white">{beam.length_ft} ft</div></div>
-                  <div className="border border-border rounded-sm px-3 py-2"><div className="text-xs uppercase tracking-widest text-muted-foreground">Marked End</div><div className="mt-1 text-white">{blueprint.marked_end?.label || "MARKED END"}</div></div>
-                  <div className="border border-border rounded-sm px-3 py-2 col-span-2"><div className="text-xs uppercase tracking-widest text-muted-foreground">Blueprint source</div><div className="mt-1 text-white">{blueprintSource.status === "locked" ? `Locked revision ${blueprintSource.revision_id?.slice(0, 8)}` : blueprintSource.status.replace(/_/g, " ")}</div></div>
-                </div>
-                <div className="border border-border rounded-sm p-3">
-                  <div className="text-xs uppercase tracking-widest text-muted-foreground mb-3 flex items-center gap-2"><ScanLine className="w-4 h-4" /> Embedded details</div>
-                  <div className="grid grid-cols-2 gap-2">
-                    {featureCounts.map(([label, count]) => (
-                      <div key={label} className="flex items-center justify-between text-xs"><span className="text-muted-foreground">{label}</span><span className="text-white">{count}</span></div>
-                    ))}
-                  </div>
-                </div>
-                <div className="border border-border rounded-sm p-3">
-                  <div className="text-xs uppercase tracking-widest text-muted-foreground mb-3">QC quick dimensions</div>
-                  <div className="space-y-2">
-                    {quickDimensions.map(([label, value]) => (
-                      <div key={label} className="flex items-start justify-between gap-3 text-xs font-mono">
-                        <span className="text-muted-foreground">{label}</span>
-                        <span className="text-right text-white">{value}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-                <div className="border border-border rounded-sm p-3">
-                  <div className="text-xs uppercase tracking-widest text-muted-foreground mb-3">QC hardware stations</div>
-                  <div className="space-y-2">
-                    {qcStations.map(([label, value]) => (
-                      <div key={label} className="flex items-start justify-between gap-3 text-xs font-mono">
-                        <span className="text-muted-foreground">{label}</span>
-                        <span className="text-right text-white">{value}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-                {selectedBed && (
-                  <div className="border border-border rounded-sm p-3">
-                    <div className="text-xs uppercase tracking-widest text-muted-foreground mb-2">Bed order</div>
-                    <div className="space-y-2">
-                      {beams.filter((item) => item.bed_id === selectedBedId).sort((a, b) => (a.position_on_bed || 0) - (b.position_on_bed || 0)).map((item) => (
-                        <div key={item.id} className={`flex items-center justify-between text-xs font-mono rounded-sm px-2 py-1 border ${item.id === selectedId ? "border-primary text-primary" : "border-border text-muted-foreground"}`}>
-                          <span>POS {String(item.position_on_bed || 0).padStart(2, "0")}</span>
-                          <span className={item.id === selectedId ? "text-white" : "text-white/80"}>{item.mark} · {item.length_ft} ft · {item.product_type?.name || item.twin_type}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-            ) : <div className="text-sm text-muted-foreground font-mono">Load a beam to inspect blueprint data.</div>}
-          </div>
-
-          <div className="bg-card border border-border rounded-sm p-6">
-            <h3 className="font-display font-bold uppercase tracking-wider text-lg mb-4 flex items-center gap-2"><Construction className="w-5 h-5 text-primary" /> Hardware Inspector</h3>
-            {selectedHardware ? (
-              <div className="space-y-3">
-                <div className="border border-border rounded-sm px-3 py-2">
-                  <div className="text-xs uppercase tracking-widest text-muted-foreground">Selected</div>
-                  <div className="mt-1 font-mono text-white">{selectedHardware.type} · {selectedHardware.beamMark}</div>
-                </div>
-                <SpecRows spec={selectedHardware.spec} />
-              </div>
-            ) : (
-              <div className="text-sm text-muted-foreground font-mono">Tap any loop, insert, tube, tie-rod, drain, strand, groove, pocket, or hold-down to inspect its spec.</div>
-            )}
-          </div>
-
-          <div className="bg-card border border-border rounded-sm p-6">
-            <h3 className="font-display font-bold uppercase tracking-wider text-lg mb-4 flex items-center gap-2"><MapPin className="w-5 h-5 text-primary" /> Capture Anomaly</h3>
-            <div className="space-y-4">
-              <div className={`text-xs font-mono px-3 py-2 rounded-sm border ${pickPos ? "border-primary text-primary" : "border-border text-muted-foreground"}`} data-testid="pick-status">
-                {pickPos ? `POINT SET · STA ${pickPos.z.toFixed(1)} FT · EL ${pickPos.y.toFixed(2)} FT` : "TAP THE BEAM SHELL TO SET LOCATION"}
-              </div>
-              <div>
-                <label className="text-xs font-mono uppercase tracking-widest text-muted-foreground">Type</label>
-                <select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })} className="mt-1 w-full bg-background border border-border rounded-sm px-3 min-h-12 font-mono text-sm" data-testid="anomaly-type">
-                  {["crack", "spall", "honeycomb", "chip", "stain", "other"].map((item) => <option key={item} value={item}>{item}</option>)}
-                </select>
-              </div>
-              <div>
-                <label className="text-xs font-mono uppercase tracking-widest text-muted-foreground">Severity</label>
-                <select value={form.severity} onChange={(e) => setForm({ ...form, severity: e.target.value })} className="mt-1 w-full bg-background border border-border rounded-sm px-3 min-h-12 font-mono text-sm" data-testid="anomaly-severity">
-                  {["minor", "moderate", "major"].map((item) => <option key={item} value={item}>{item}</option>)}
-                </select>
-              </div>
-              <div>
-                <label className="text-xs font-mono uppercase tracking-widest text-muted-foreground">Length (in)</label>
-                <input type="number" value={form.length_in} onChange={(e) => setForm({ ...form, length_in: e.target.value })} className="mt-1 w-full bg-background border border-border rounded-sm px-3 min-h-12 font-mono text-sm" data-testid="anomaly-length" />
-              </div>
-              <div>
-                <label className="text-xs font-mono uppercase tracking-widest text-muted-foreground">Note</label>
-                <textarea value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} rows={2} className="mt-1 w-full bg-background border border-border rounded-sm px-3 py-2 font-mono text-sm" data-testid="anomaly-note" />
-              </div>
-              <button onClick={saveAnomaly} className="w-full min-h-14 bg-primary text-white font-display font-bold uppercase tracking-widest rounded-sm hover:bg-white hover:text-black transition-colors duration-100" data-testid="save-anomaly">Save To Twin</button>
-            </div>
-          </div>
-        </div>
+        <div className="hidden lg:block">{sidebar}</div>
       </div>
+
+      <Drawer open={controlsOpen} onOpenChange={setControlsOpen}>
+        <DrawerContent className="max-h-[85vh] overflow-y-auto bg-[#0A0C10] border-[#1C2230]">
+          <DrawerHeader>
+            <DrawerTitle className="font-display uppercase tracking-wider">Twin controls</DrawerTitle>
+          </DrawerHeader>
+          <div className="px-4 pb-8 space-y-6">
+            <div className="md:hidden space-y-4">
+              <TwinLayerChips activeLayers={activeLayers} onToggle={(key) => setLayers((current) => ({ ...current, [key]: !current[key] }))} />
+            </div>
+            {sidebar}
+          </div>
+        </DrawerContent>
+      </Drawer>
     </Layout>
   );
 }

@@ -83,13 +83,75 @@ function formatStation(value = 0) {
   return `STA ${Number(value).toFixed(1)}`;
 }
 
-function normalizeBlueprint(beam) {
-  const depth = beam?.product_type?.depth_in || (beam?.twin_type === "box_beam" ? 30 : 48);
-  const width = beam?.product_type?.width_in || (beam?.twin_type === "box_beam" ? 42 : 18);
-  const length = Math.max(beam?.length_ft || beam?.product_type?.default_length_ft || 80, 10);
-  const source = beam?.product_type?.blueprint || {};
+function hasSpecDna(beam) {
+  return Boolean(beam?.beam_spec || beam?.blueprint_source?.spec_id || (beam?.blueprint_source?.status === "locked" && beam?.product_type?.blueprint));
+}
 
-  const base = beam?.twin_type === "box_beam"
+function familySectionEnvelope(family, depth) {
+  if (family === "box_beam") {
+    return {
+      outer_width_in: 42,
+      outer_depth_in: depth || 30,
+      wall_thickness_in: 4,
+      void_width_in: 24,
+      void_depth_in: 16,
+    };
+  }
+  const envelopes = {
+    36: { bottom_flange_width_in: 18, bottom_flange_thickness_in: 6, web_thickness_in: 6, top_flange_width_in: 12, top_flange_thickness_in: 6, overall_depth_in: 36 },
+    45: { bottom_flange_width_in: 28, bottom_flange_thickness_in: 8, web_thickness_in: 7, top_flange_width_in: 16, top_flange_thickness_in: 7, overall_depth_in: 45 },
+    54: { bottom_flange_width_in: 32, bottom_flange_thickness_in: 8.5, web_thickness_in: 7, top_flange_width_in: 20, top_flange_thickness_in: 7.5, overall_depth_in: 54 },
+    72: { bottom_flange_width_in: 26, bottom_flange_thickness_in: 9, web_thickness_in: 8, top_flange_width_in: 42, top_flange_thickness_in: 8, overall_depth_in: 72 },
+  };
+  return envelopes[Math.round(Number(depth) || 0)] || envelopes[36];
+}
+
+function normalizeBlueprint(beam) {
+  const specDriven = hasSpecDna(beam);
+  const source = beam?.beam_spec?.blueprint || beam?.product_type?.blueprint || {};
+  const family = beam?.twin_type === "box_beam" ? "box_beam" : "i_beam";
+  const extracted = source.cross_section || {};
+  const depth = extracted.overall_depth_in || extracted.outer_depth_in || beam?.product_type?.depth_in || (family === "box_beam" ? 30 : 36);
+  const width = extracted.top_flange_width_in || extracted.outer_width_in || beam?.product_type?.width_in || (family === "box_beam" ? 42 : 12);
+  const length = Math.max(Number(source.length || source.dimensions?.overall_length_ft || beam?.length_ft || beam?.product_type?.default_length_ft || 10), 4);
+  const envelope = familySectionEnvelope(family, depth);
+  const crossSection = family === "box_beam"
+    ? { ...envelope, ...extracted, outer_depth_in: extracted.outer_depth_in || depth, outer_width_in: extracted.outer_width_in || width }
+    : { ...envelope, ...extracted, overall_depth_in: extracted.overall_depth_in || depth };
+
+  if (specDriven) {
+    const stirrups = source.stirrups && typeof source.stirrups === "object" ? { ...source.stirrups } : {};
+    const specZones = beam?.beam_spec?.stirrup_zones;
+    if ((!Array.isArray(stirrups.zones) || !stirrups.zones.length) && Array.isArray(specZones) && specZones.length) {
+      stirrups.zones = specZones;
+    }
+    return {
+      cross_section: crossSection,
+      lift_loops: Array.isArray(source.lift_loops) ? source.lift_loops : [],
+      inserts: Array.isArray(source.inserts) ? source.inserts : [],
+      tubes: Array.isArray(source.tubes) ? source.tubes : [],
+      tie_rod_openings: Array.isArray(source.tie_rod_openings) ? source.tie_rod_openings : [],
+      drain_holes: Array.isArray(source.drain_holes) ? source.drain_holes : [],
+      hold_downs: Array.isArray(source.hold_downs) ? source.hold_downs : [],
+      bituminous_ends: Array.isArray(source.bituminous_ends) ? source.bituminous_ends : [],
+      strand_pattern: source.strand_pattern || { start_y_in: 5, row_spacing_in: 4.5, rows: [] },
+      stirrups,
+      marked_end: source.marked_end || { end: "start", label: "MARKED END", color: "#F4F7FB" },
+      grout_grooves: Array.isArray(source.grout_grooves) ? source.grout_grooves : [],
+      drape_profile: source.drape_profile || null,
+      dimensions: {
+        overall_length_ft: length,
+        overall_depth_in: depth,
+        overall_width_in: width,
+        ...(source.dimensions || {}),
+      },
+      length,
+      specDriven: true,
+      missing_fields: beam?.beam_spec?.missing_fields || [],
+    };
+  }
+
+  const base = family === "box_beam"
     ? {
         cross_section: {
           outer_width_in: width,
@@ -116,7 +178,7 @@ function normalizeBlueprint(beam) {
       };
 
   return {
-    cross_section: { ...base.cross_section, ...(source.cross_section || {}) },
+    cross_section: { ...base.cross_section, ...extracted },
     lift_loops: source.lift_loops || [{ x_ft: length * 0.18 }, { x_ft: length * 0.82 }],
     inserts: source.inserts || [{ x_ft: length * 0.25, side: "left", embed: "plate" }, { x_ft: length * 0.75, side: "right", embed: "plate" }],
     tubes: source.tubes || [{ x_ft: length * 0.38, diameter_in: 3 }, { x_ft: length * 0.62, diameter_in: 3 }],
@@ -136,6 +198,8 @@ function normalizeBlueprint(beam) {
       ...(source.dimensions || {}),
     },
     length,
+    specDriven: false,
+    missing_fields: [],
   };
 }
 
@@ -234,14 +298,15 @@ function CalloutTag({ position, color, label }) {
   );
 }
 
-function Shell({ spec, beam, highlighted, onSurfacePick, onBeamSelect }) {
+function Shell({ spec, beam, highlighted, onSurfacePick, onBeamSelect, pourMode = "post_pour" }) {
   const geometry = useMemo(() => new THREE.ExtrudeGeometry(spec.shape, { depth: spec.length, bevelEnabled: false }), [spec]);
   const edges = useMemo(() => new THREE.EdgesGeometry(geometry, 25), [geometry]);
+  const prePour = pourMode === "pre_pour";
   return (
     <group>
       <mesh
-        castShadow
-        receiveShadow
+        castShadow={!prePour}
+        receiveShadow={!prePour}
         geometry={geometry}
         onClick={(event) => {
           event.stopPropagation();
@@ -249,10 +314,21 @@ function Shell({ spec, beam, highlighted, onSurfacePick, onBeamSelect }) {
           onBeamSelect?.(beam);
         }}
       >
-        <meshPhysicalMaterial color={concreteBase} roughness={0.9} metalness={0.03} clearcoat={0.08} reflectivity={0.14} emissive={highlighted ? "#123762" : "#000000"} emissiveIntensity={highlighted ? 0.18 : 0} />
+        <meshPhysicalMaterial
+          color={prePour ? "#1A2430" : concreteBase}
+          roughness={prePour ? 0.35 : 0.9}
+          metalness={prePour ? 0.08 : 0.03}
+          transparent={prePour}
+          opacity={prePour ? 0.12 : 1}
+          depthWrite={!prePour}
+          clearcoat={prePour ? 0 : 0.08}
+          reflectivity={prePour ? 0.05 : 0.14}
+          emissive={highlighted ? "#123762" : "#000000"}
+          emissiveIntensity={highlighted ? 0.18 : 0}
+        />
       </mesh>
       <lineSegments geometry={edges}>
-        <lineBasicMaterial color={highlighted ? "#8FC5FF" : concreteEdge} transparent opacity={0.6} />
+        <lineBasicMaterial color={prePour ? "#5EEAD4" : (highlighted ? "#8FC5FF" : concreteEdge)} transparent opacity={prePour ? 0.95 : 0.6} />
       </lineSegments>
     </group>
   );
@@ -297,6 +373,8 @@ function SectionRevealLines({ beam, spec }) {
 
 function LiftLoops({ beam, spec, onHardwareSelect }) {
   return (spec.blueprint.lift_loops || []).map((item, index) => {
+    const station = stationValue(item);
+    if (station == null) return null;
     const radius = Math.max(inchesToFeet(item.diameter_in || 0) / 2, spec.width * 0.2, 0.38);
     const legHeight = Math.max(radius * 1.35, 0.55);
     const spread = Math.max(radius * 0.58, 0.22);
@@ -310,7 +388,7 @@ function LiftLoops({ beam, spec, onHardwareSelect }) {
     ];
     const payload = { id: `lift-loop-${index}`, type: "Lift loop", beamMark: beam.mark, spec: item };
     return (
-      <group key={payload.id} position={[0, spec.depth + 0.05, item.x_ft]} onClick={(event) => clickHardware(event, payload, onHardwareSelect)}>
+      <group key={payload.id} position={[0, spec.depth + 0.05, station]} onClick={(event) => clickHardware(event, payload, onHardwareSelect)}>
         <Line points={arch} color={steelBright} lineWidth={3.4} />
         {[-spread, spread].map((offset) => (
           <React.Fragment key={offset}>
@@ -331,12 +409,14 @@ function LiftLoops({ beam, spec, onHardwareSelect }) {
 
 function SideInserts({ beam, spec, onHardwareSelect }) {
   return (spec.blueprint.inserts || []).map((item, index) => {
+    const station = stationValue(item);
+    if (station == null) return null;
     const side = item.side === "right" ? 1 : -1;
     const radius = Math.max(inchesToFeet(item.diameter_in || 2) / 2, spec.width * 0.038);
     const x = side * (spec.width / 2 + radius * 0.28);
     const payload = { id: `insert-${index}`, type: "Side insert", beamMark: beam.mark, spec: item };
     return (
-      <group key={payload.id} position={[x, spec.depth * 0.7, item.x_ft]} onClick={(event) => clickHardware(event, payload, onHardwareSelect)}>
+      <group key={payload.id} position={[x, spec.depth * 0.7, station]} onClick={(event) => clickHardware(event, payload, onHardwareSelect)}>
         <mesh position={[-side * radius * 0.32, 0, 0]}>
           <boxGeometry args={[radius * 0.55, radius * 1.8, radius * 1.8]} />
           <meshStandardMaterial color="#525B67" roughness={0.55} metalness={0.42} />
@@ -360,12 +440,14 @@ function SideInserts({ beam, spec, onHardwareSelect }) {
 
 function CylindricalOpenings({ beam, spec, items, type, color, y, onHardwareSelect }) {
   return (items || []).map((item, index) => {
+    const station = stationValue(item);
+    if (station == null) return null;
     const radius = Math.max(inchesToFeet(item.diameter_in || 2) / 2, 0.08);
     const isDrain = type.toLowerCase().includes("drain");
     const isTie = type.toLowerCase().includes("tie");
     const payload = { id: `${type}-${index}`, type, beamMark: beam.mark, spec: item };
     return (
-      <group key={payload.id} position={[0, y, item.x_ft]} onClick={(event) => clickHardware(event, payload, onHardwareSelect)}>
+      <group key={payload.id} position={[0, y, station]} onClick={(event) => clickHardware(event, payload, onHardwareSelect)}>
         <mesh rotation={[0, 0, Math.PI / 2]}>
           <cylinderGeometry args={[radius, radius, spec.width * 1.02, 22]} />
           <meshStandardMaterial color={color} roughness={0.78} metalness={0.1} />
@@ -413,9 +495,11 @@ function HoldDowns({ beam, spec, onHardwareSelect }) {
   const height = Math.max(inchesToFeet(8), spec.depth * 0.16);
   const embeddedY = Math.max(inchesToFeet(5), height / 2 + 0.08);
   return (spec.blueprint.hold_downs || []).map((item, index) => {
+    const station = stationValue(item);
+    if (station == null) return null;
     const payload = { id: `hold-down-${index}`, type: "Hold-down", beamMark: beam.mark, spec: item };
     return (
-      <group key={payload.id} position={[0, embeddedY, item.x_ft]} onClick={(event) => clickHardware(event, payload, onHardwareSelect)}>
+      <group key={payload.id} position={[0, embeddedY, station]} onClick={(event) => clickHardware(event, payload, onHardwareSelect)}>
         <mesh position={[0, -embeddedY + 0.025, 0]}>
           <boxGeometry args={[spec.width * 0.58, 0.05, width * 0.52]} />
           <meshStandardMaterial color="#B97838" roughness={0.58} metalness={0.34} transparent opacity={0.72} depthWrite={false} />
@@ -462,9 +546,11 @@ function BituminousEnds({ beam, spec, onHardwareSelect }) {
 function GroutGrooves({ beam, spec, onHardwareSelect }) {
   if (beam.twin_type !== "box_beam") return null;
   return (spec.blueprint.grout_grooves || []).map((item, index) => {
+    const station = stationValue(item);
+    if (station == null) return null;
     const payload = { id: `grout-groove-${index}`, type: "Grout groove", beamMark: beam.mark, spec: item };
     return (
-      <group key={payload.id} position={[0, spec.depth + 0.01, item.x_ft]} onClick={(event) => clickHardware(event, payload, onHardwareSelect)}>
+      <group key={payload.id} position={[0, spec.depth + 0.01, station]} onClick={(event) => clickHardware(event, payload, onHardwareSelect)}>
         <mesh>
           <boxGeometry args={[spec.width * 0.84, 0.035, 0.24]} />
           <meshStandardMaterial color="#586272" roughness={0.76} metalness={0.05} />
@@ -492,9 +578,11 @@ function Stirrups({ beam, spec, onHardwareSelect }) {
       return range;
     };
     const zones = Array.isArray(stirrup.zones) ? stirrup.zones : [];
+    const hasCallout = zones.length > 0 || stirrup.spacing_in != null;
+    if (!hasCallout) return [];
     const rawStations = zones.length
       ? zones.flatMap((zone) => makeRange(zone.from_ft, zone.to_ft, zone.spacing_in))
-      : makeRange(0.2, spec.length - 0.2, stirrup.spacing_in || 24);
+      : makeRange(stirrup.start_ft ?? 0.2, stirrup.end_ft ?? spec.length - 0.2, stirrup.spacing_in);
     return rawStations
       .filter((station) => station >= 0 && station <= spec.length)
       .sort((a, b) => a - b)
@@ -571,7 +659,10 @@ function strandRows(blueprint) {
 function StrandPaths({ beam, spec, onHardwareSelect }) {
   const strands = strandRows(spec.blueprint);
   const sag = inchesToFeet(spec.blueprint.drape_profile?.sag_in || 0);
-  const holdPoints = (spec.blueprint.hold_downs || []).map((item) => item.x_ft).sort((a, b) => a - b);
+  const holdPoints = (spec.blueprint.hold_downs || [])
+    .map((item) => stationValue(item))
+    .filter((value) => value != null)
+    .sort((a, b) => a - b);
   return strands.map((strand, index) => {
     const points = [new THREE.Vector3(strand.x, strand.y, 0)];
     if (beam.twin_type === "i_beam" && holdPoints.length) {
@@ -753,10 +844,17 @@ function runningDimensionStations(spec) {
     });
   };
   const rows = [];
+  add(rows, spec.blueprint.lift_loops, "Lift");
   add(rows, spec.blueprint.inserts, "Insert");
   add(rows, spec.blueprint.tubes, "Tube");
   add(rows, spec.blueprint.tie_rod_openings, "Tie");
   add(rows, spec.blueprint.drain_holes, "Drain");
+  add(rows, spec.blueprint.hold_downs, "Hold-down");
+  const stirrup = spec.blueprint.stirrups || {};
+  const stirrupStart = finiteNumber(stirrup.start_ft);
+  if (stirrupStart != null) {
+    rows.push({ key: "stirrup-start", kind: "Stirrup", station: stirrupStart });
+  }
   const sorted = rows
     .filter((item) => item.station >= 0 && item.station <= spec.length)
     .sort((a, b) => a.station - b.station || a.kind.localeCompare(b.kind));
@@ -767,7 +865,7 @@ function runningDimensionStations(spec) {
       previous.label = previous.kinds.map((kind) => kind.toUpperCase()).join(" / ");
       previous.key = `${previous.key}-${item.key}`;
     } else {
-      grouped.push({ ...item, kinds: [item.kind] });
+      grouped.push({ ...item, kinds: [item.kind], label: item.kind.toUpperCase() });
     }
     return grouped;
   }, []);
@@ -811,43 +909,50 @@ function elevationDimensionTargets(spec) {
   return unique;
 }
 
-function EngineeringDimensions({ beam, spec }) {
+function EngineeringDimensions({ beam, spec, showOverall = true, showStations = true }) {
   const lengthFt = valueOrNull(spec.blueprint.dimensions?.overall_length_ft, beam.length_ft, spec.length);
-  const stations = runningDimensionStations(spec);
+  const stations = showStations ? runningDimensionStations(spec) : [];
   const sideX = -spec.width / 2 - 0.1;
   const outsideX = -spec.width / 2 - 0.42;
   const tubeRowY = spec.depth * 0.56;
   const runLineY = Math.max(spec.depth * 0.34, tubeRowY - 0.52);
-  const overallY = -0.42;
-  const elevationTargets = elevationDimensionTargets(spec);
+  const overallY = -0.55;
+  const elevationTargets = showOverall ? elevationDimensionTargets(spec) : [];
   const finalStation = stations.length ? Math.max(...stations.map((item) => item.station)) : 0;
   return (
     <group>
-      {lengthFt && (
+      {showOverall && lengthFt && (
         <group>
-          <Line points={[[outsideX, overallY, 0], [outsideX, overallY, spec.length]]} color={overallDimensionColor} lineWidth={1.05} />
+          <Line points={[[outsideX, overallY, 0], [outsideX, overallY, spec.length]]} color={overallDimensionColor} lineWidth={1.2} />
           <Line points={[[outsideX - 0.18, overallY, 0], [outsideX + 0.18, overallY, 0]]} color={overallDimensionColor} lineWidth={1} />
           <Line points={[[outsideX - 0.18, overallY, spec.length], [outsideX + 0.18, overallY, spec.length]]} color={overallDimensionColor} lineWidth={1} />
-          <MeasurementText position={[outsideX - 0.1, overallY - 0.18, spec.length / 2]} label={formatFeet(lengthFt)} color={overallDimensionColor} size={11} />
+          <MeasurementText position={[outsideX - 0.12, overallY - 0.28, spec.length / 2]} label={`OAL ${formatFeet(lengthFt)}`} color={overallDimensionColor} size={13} />
         </group>
       )}
-      {finalStation > 0 && (
-        <Line points={[[sideX, runLineY, 0], [sideX, runLineY, finalStation]]} color={runningDimensionColor} lineWidth={1.1} />
+      {showStations && (
+        <group>
+          {finalStation > 0 && (
+            <Line points={[[sideX, runLineY, 0], [sideX, runLineY, finalStation]]} color={runningDimensionColor} lineWidth={1.1} />
+          )}
+          <Line points={[[sideX - 0.16, runLineY, 0], [sideX + 0.16, runLineY, 0]]} color={runningDimensionColor} lineWidth={1} />
+          <MeasurementText position={[sideX - 0.08, runLineY + 0.28, 0]} label={`ME 0'-0"`} color={runningDimensionColor} />
+          {stations.map((item, index) => {
+            const lane = index % 3;
+            const side = index % 2 === 0 ? -1 : 1;
+            const textY = runLineY + 0.28 + lane * 0.26;
+            const labelX = sideX - 0.08 + (side > 0 ? 0 : -0.02);
+            return (
+              <group key={item.key}>
+                <Line points={[[sideX - 0.18, runLineY, item.station], [sideX + 0.18, runLineY, item.station]]} color={runningDimensionColor} lineWidth={1} />
+                <Line points={[[sideX, runLineY, item.station], [labelX, textY - 0.08, item.station]]} color={runningDimensionColor} lineWidth={0.6} />
+                <MeasurementText position={[labelX, textY, item.station]} label={`ME→${item.label || item.kind} ${formatFeet(item.station)}`} color={runningDimensionColor} />
+              </group>
+            );
+          })}
+        </group>
       )}
-      <Line points={[[sideX - 0.16, runLineY, 0], [sideX + 0.16, runLineY, 0]]} color={runningDimensionColor} lineWidth={1} />
-      <MeasurementText position={[sideX - 0.08, runLineY + 0.22, 0]} label={formatFeet(0)} color={runningDimensionColor} />
-      {stations.map((item, index) => {
-        const textY = runLineY + 0.22 + (index % 2) * 0.18;
-        return (
-          <group key={item.key}>
-            <Line points={[[sideX - 0.18, runLineY, item.station], [sideX + 0.18, runLineY, item.station]]} color={runningDimensionColor} lineWidth={1} />
-            <Line points={[[sideX, runLineY, item.station], [sideX, textY - 0.08, item.station]]} color={runningDimensionColor} lineWidth={0.6} />
-            <MeasurementText position={[sideX - 0.08, textY, item.station]} label={formatFeet(item.station)} color={runningDimensionColor} />
-          </group>
-        );
-      })}
       {elevationTargets.map((item, index) => {
-        const x = sideX - 0.46 - (index % 3) * 0.14;
+        const x = sideX - 0.46 - (index % 3) * 0.18;
         const z = item.station;
         const tick = 0.14;
         return (
@@ -1091,10 +1196,11 @@ function Anomalies({ anomalies, spec }) {
   });
 }
 
-function BeamAssembly({ beam, anomalies = [], onSurfacePick, onHardwareSelect, showCallouts = true, layers = {}, highlighted = false, onBeamSelect }) {
+function BeamAssembly({ beam, anomalies = [], onSurfacePick, onHardwareSelect, showCallouts = true, layers = {}, highlighted = false, onBeamSelect, pourMode = "post_pour" }) {
   const spec = useBeamSpec(beam);
   const activeLayers = {
     dimensions: showCallouts,
+    stations: showCallouts,
     hardware: false,
     strands: false,
     stirrups: false,
@@ -1108,7 +1214,7 @@ function BeamAssembly({ beam, anomalies = [], onSurfacePick, onHardwareSelect, s
   };
   return (
     <group ref={groupRef} position={[0, -spec.depth / 2, -spec.length / 2]}>
-      <Shell spec={spec} beam={beam} highlighted={highlighted} onSurfacePick={surfacePick} onBeamSelect={onBeamSelect} />
+      <Shell spec={spec} beam={beam} highlighted={highlighted} onSurfacePick={surfacePick} onBeamSelect={onBeamSelect} pourMode={pourMode} />
       {activeLayers.dimensions && <SectionRevealLines beam={beam} spec={spec} />}
       {activeLayers.hardware && <BituminousEnds beam={beam} spec={spec} onHardwareSelect={onHardwareSelect} />}
       {activeLayers.strands && <StrandPaths beam={beam} spec={spec} onHardwareSelect={onHardwareSelect} />}
@@ -1121,7 +1227,9 @@ function BeamAssembly({ beam, anomalies = [], onSurfacePick, onHardwareSelect, s
       {activeLayers.hardware && <HoldDowns beam={beam} spec={spec} onHardwareSelect={onHardwareSelect} />}
       {activeLayers.hardware && <GroutGrooves beam={beam} spec={spec} onHardwareSelect={onHardwareSelect} />}
       <MarkedEnd beam={beam} spec={spec} onHardwareSelect={onHardwareSelect} />
-      {activeLayers.dimensions && <EngineeringDimensions beam={beam} spec={spec} />}
+      {(activeLayers.dimensions || activeLayers.stations) && (
+        <EngineeringDimensions beam={beam} spec={spec} showOverall={activeLayers.dimensions} showStations={activeLayers.stations} />
+      )}
       {activeLayers.hardware && <SmartHardwareCallouts beam={beam} spec={spec} />}
       {activeLayers.anomalies && <Anomalies anomalies={anomalies} spec={spec} />}
     </group>
@@ -1438,12 +1546,13 @@ function DimensionColorLegend() {
   );
 }
 
-export default function BeamTwinViewer({ beam, anomalies = [], onSurfacePick, onHardwareSelect, showCallouts = true, layers }) {
+export default function BeamTwinViewer({ beam, anomalies = [], onSurfacePick, onHardwareSelect, showCallouts = true, layers, pourMode = "post_pour" }) {
   const safeBeam = beam || { twin_type: "i_beam", length_ft: 90, product_type: {}, mark: "Beam" };
   const spec = useBeamSpec(safeBeam);
   const cameraDistance = Math.max(safeBeam.length_ft * 0.34, 22);
   const activeLayers = {
     dimensions: showCallouts,
+    stations: showCallouts,
     hardware: false,
     strands: false,
     stirrups: false,
@@ -1453,7 +1562,7 @@ export default function BeamTwinViewer({ beam, anomalies = [], onSurfacePick, on
   return (
     <div style={{ width: "100%", height: "100%", background: "#0A0C10", position: "relative" }} data-testid="beam-3d-canvas">
       <Scene camera={{ position: [cameraDistance * 0.56, spec.depth * 2.45, cameraDistance], fov: 34 }}>
-        <BeamAssembly beam={safeBeam} anomalies={anomalies} onSurfacePick={onSurfacePick} onHardwareSelect={onHardwareSelect} showCallouts={showCallouts} layers={activeLayers} highlighted />
+        <BeamAssembly beam={safeBeam} anomalies={anomalies} onSurfacePick={onSurfacePick} onHardwareSelect={onHardwareSelect} showCallouts={showCallouts} layers={activeLayers} highlighted pourMode={pourMode} />
         <mesh position={[0, -spec.depth / 2 - 0.14, 0]} receiveShadow>
           <boxGeometry args={[Math.max(spec.width * 4.2, 18), 0.16, Math.max(safeBeam.length_ft + 12, 34)]} />
           <meshStandardMaterial color="#20252F" roughness={0.96} metalness={0.04} />
@@ -1461,7 +1570,7 @@ export default function BeamTwinViewer({ beam, anomalies = [], onSurfacePick, on
         <gridHelper args={[Math.max(safeBeam.length_ft * 1.25, 50), Math.max(Math.round(safeBeam.length_ft / 4), 24), "#2B313B", "#161B24"]} position={[0, -spec.depth / 2 - 0.05, 0]} />
       </Scene>
       {activeLayers.dimensions && <CrossSectionInset beam={safeBeam} />}
-      {activeLayers.dimensions && <DimensionColorLegend />}
+      {(activeLayers.dimensions || activeLayers.stations) && <DimensionColorLegend />}
     </div>
   );
 }
@@ -1518,7 +1627,7 @@ function BedDimensionLayer({ bed, beams, bedLength, laneWidth, halfSpread }) {
   );
 }
 
-export function BedTwinViewer({ bed, selectedBeamId, onBeamSelect, onHardwareSelect, showCallouts = false, layers }) {
+export function BedTwinViewer({ bed, selectedBeamId, onBeamSelect, onHardwareSelect, showCallouts = false, layers, pourMode = "post_pour" }) {
   const beams = [...(bed?.beams || [])].sort((a, b) => (a.position_on_bed || 0) - (b.position_on_bed || 0));
   const bedLength = Math.max(...beams.map((item) => item.length_ft || 0), bed?.length_ft || 120);
   const laneWidth = 7;
@@ -1562,6 +1671,7 @@ export function BedTwinViewer({ bed, selectedBeamId, onBeamSelect, onHardwareSel
               layers={{ ...activeLayers, dimensions: activeLayers.dimensions && item.id === selectedBeamId }}
               highlighted={item.id === selectedBeamId}
               onBeamSelect={onBeamSelect}
+              pourMode={pourMode}
             />
             {(item.id === selectedBeamId || activeLayers.dimensions) && <CalloutTag position={[0, 4.2 + (index % 3) * 0.28, 0]} color={item.id === selectedBeamId ? "#8FC5FF" : "#E5EDF5"} label={`${item.mark} · POS ${String(item.position_on_bed).padStart(2, "0")} · ${formatFeet(item.length_ft)}`} />}
           </group>
