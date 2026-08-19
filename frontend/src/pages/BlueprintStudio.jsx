@@ -3,7 +3,7 @@ import api from "../lib/api";
 import Layout, { PageHeader } from "../components/Layout";
 import { useAuth } from "../context/AuthContext";
 import { toast } from "sonner";
-import { Loader2, Lock, ScanSearch, Upload, AlertTriangle, CheckCircle2 } from "lucide-react";
+import { Loader2, Lock, ScanSearch, Upload, AlertTriangle, CheckCircle2, Download } from "lucide-react";
 
 const ROLE_CAN_LOCK = ["qc_supervisor", "admin"];
 
@@ -151,7 +151,7 @@ export default function BlueprintStudio() {
   };
 
   
-  const downloadExtractionPdf = async () => {
+  const downloadAssessmentPdf = async () => {
     if (!selectedId) {
       toast.error("Select a blueprint first");
       return;
@@ -165,14 +165,14 @@ export default function BlueprintStudio() {
       const a = document.createElement("a");
       a.href = url;
       const base = detail?.filename || detail?.original_filename || selectedId;
-      a.download = `extraction-report-${base}`.replace(/\.pdf$/i, "") + ".pdf";
+      a.download = `blueprint-assessment-${base}`.replace(/\.pdf$/i, "") + ".pdf";
       document.body.appendChild(a);
       a.click();
       a.remove();
       window.URL.revokeObjectURL(url);
-      toast.success("Extraction report downloaded");
+      toast.success("Blueprint Assessment PDF downloaded");
     } catch (err) {
-      toast.error(err.response?.data?.detail || "Failed to download extraction report");
+      toast.error(err.response?.data?.detail || "Failed to download Blueprint Assessment PDF");
     }
   };
 
@@ -335,17 +335,6 @@ const saveReview = async () => {
                     <div className="mt-3 text-sm text-muted-foreground space-y-1">
                       <div>{detail.page_count} pages · linked beam {detail.beam_id || "none"} · product type {detail.product_type_id || "none"}</div>
                       <div>{detail.latest_summary || "Upload complete. Run controlled extraction to populate review fields."}</div>
-
-              <div className="mt-3 flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  onClick={downloadExtractionPdf}
-                  disabled={!selectedId}
-                  className="inline-flex items-center gap-2 rounded-md bg-[#0F172A] px-3 py-2 text-sm font-semibold text-white hover:bg-[#1E293B] disabled:opacity-50"
-                >
-                  Download Extraction PDF
-                </button>
-              </div>
                     </div>
                     {detail.latest_extraction?.fail_reasons?.length > 0 && (
                       <div className="mt-4 border border-[#FFD60055] bg-[#FFD60011] rounded-sm p-3 text-sm">
@@ -357,6 +346,14 @@ const saveReview = async () => {
                     )}
                   </div>
                   <div className="flex flex-wrap gap-3">
+                    <button
+                      type="button"
+                      onClick={downloadAssessmentPdf}
+                      disabled={!selectedId}
+                      className="min-h-12 px-4 bg-[#0F172A] text-white rounded-sm text-sm font-bold uppercase tracking-wider flex items-center gap-2 hover:bg-[#1E293B] disabled:opacity-60"
+                    >
+                      <Download className="w-4 h-4" /> Download Assessment PDF
+                    </button>
                     <button onClick={runExtraction} disabled={extracting} className="min-h-12 px-4 border border-border rounded-sm text-sm font-semibold uppercase tracking-wider flex items-center gap-2 hover:border-primary hover:text-primary disabled:opacity-60">
                       {extracting ? <Loader2 className="w-4 h-4 animate-spin" /> : <ScanSearch className="w-4 h-4" />} Extract
                     </button>

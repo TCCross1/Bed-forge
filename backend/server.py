@@ -450,23 +450,39 @@ async def download_blueprint_file(document_id: str, user=Depends(require_feature
 
 @api.get("/blueprints/{document_id}/extraction-report.pdf")
 async def download_extraction_report(document_id: str, user=Depends(require_feature("blueprint_intelligence"))):
-    """Download Blueprint Intelligence extraction long-form as PDF for print verification."""
-    document = await fetch_blueprint_document(document_id)
-    extraction = None
-    latest_id = document.get("latest_extraction_id")
-    if latest_id:
-        extraction = await fetch_blueprint_extraction(latest_id)
-    pdf_bytes = build_extraction_report_pdf(document, extraction)
-    base = document.get("filename") or document.get("original_filename") or document_id
-    safe_name = str(base).replace("/", "_").replace("\\", "_")
-    if not safe_name.lower().endswith(".pdf"):
-        safe_name = f"{safe_name}.pdf"
-    filename = f"extraction-report-{safe_name}"
-    return Response(
-        content=pdf_bytes,
-        media_type="application/pdf",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
-    )
+    """Download Blueprint Assessment PDF for print verification against plant shop drawings."""
+    try:
+        document = await fetch_blueprint_document(document_id)
+        extraction = None
+        locked_revision = None
+        latest_id = document.get("latest_extraction_id")
+        if latest_id:
+            extraction = await fetch_blueprint_extraction(latest_id)
+        locked_id = document.get("locked_revision_id")
+        if locked_id:
+            locked_revision = await db.locked_blueprint_revisions.find_one({"id": locked_id}, {"_id": 0})
+        pdf_bytes = build_extraction_report_pdf(document, extraction, locked_revision=locked_revision)
+        base = document.get("filename") or document.get("original_filename") or document_id
+        safe_name = str(base).replace("/", "_").replace("\\", "_")
+        if not safe_name.lower().endswith(".pdf"):
+            safe_name = f"{safe_name}.pdf"
+        filename = f"blueprint-assessment-{safe_name}"
+        logger.info(
+            "Blueprint assessment PDF downloaded document_id=%s user=%s bytes=%s",
+            document_id,
+            user.get("email") or user.get("name"),
+            len(pdf_bytes),
+        )
+        return Response(
+            content=pdf_bytes,
+            media_type="application/pdf",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("Failed to generate Blueprint Assessment PDF document_id=%s", document_id)
+        raise HTTPException(status_code=500, detail="Failed to generate Blueprint Assessment PDF")
 
 @api.post("/blueprints/{document_id}/extract")
 async def extract_blueprint(document_id: str, user=Depends(require_feature("blueprint_intelligence", "qc_supervisor", "admin"))):
