@@ -407,9 +407,10 @@ class BlueprintExtraction(BaseModel):
     id: str = Field(default_factory=new_id)
     document_id: str
     status: str = "needs_review"
-    extractor_version: str = "controlled_regex_v1"
+    extractor_version: str = "controlled_regex_ocr_v2"
     summary: str = ""
     page_text: List[str] = Field(default_factory=list)
+    page_sources: List[str] = Field(default_factory=list)
     field_groups: Dict[str, List[str]] = Field(default_factory=dict)
     fields: Dict[str, BlueprintField] = Field(default_factory=dict)
     confirmed_count: int = 0

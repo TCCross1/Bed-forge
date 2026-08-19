@@ -32,11 +32,13 @@ import package_export
 from extraction_report import build_extraction_report_pdf
 from blueprint_pipeline import (
     CRITICAL_FIELDS,
+    EXTRACTOR_VERSION,
     FIELD_GROUPS,
     extract_structured_fields,
     normalize_locked_blueprint,
     parse_field_value,
     read_pdf_pages,
+    read_pdf_pages_for_extract,
 )
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
@@ -491,34 +493,53 @@ async def extract_blueprint(document_id: str, user=Depends(require_feature("blue
     if not storage_path.exists():
         raise HTTPException(status_code=404, detail="Stored blueprint PDF is missing")
 
-    page_text = read_pdf_pages(storage_path)
-    result = extract_structured_fields(page_text, {
-        "product_family_hint": document.get("product_family_hint", ""),
-        "beam_mark_hint": document.get("beam_mark_hint", ""),
-        "project_name_hint": document.get("project_name_hint", ""),
-    })
-    extraction = BlueprintExtraction(
-        document_id=document_id,
-        status=result.status,
-        summary=result.summary,
-        page_text=result.page_text,
-        field_groups=result.field_groups,
-        fields=result.fields,
-        confirmed_count=sum(1 for field in result.fields.values() if field.status in ("confirmed", "manually_confirmed")),
-        unconfirmed_count=sum(1 for field in result.fields.values() if field.status == "unconfirmed"),
-        fail_reasons=result.fail_reasons,
-        created_by=user.get("name", ""),
-    )
-    await db.blueprint_extractions.insert_one(extraction.model_dump())
-    await db.blueprint_documents.update_one({"id": document_id}, {"$set": {
-        "status": extraction.status,
-        "latest_extraction_id": extraction.id,
-        "latest_summary": extraction.summary,
-        "page_count": len(page_text),
-        "updated_at": now_iso(),
-    }})
-    await record_blueprint_event(document_id, user, "extract", {"extraction_id": extraction.id, "status": extraction.status})
-    return await blueprint_detail(document_id)
+    try:
+        logger.info("Blueprint extract start document_id=%s path=%s", document_id, storage_path)
+        page_text, page_sources = read_pdf_pages_for_extract(storage_path)
+        result = extract_structured_fields(page_text, {
+            "product_family_hint": document.get("product_family_hint", ""),
+            "beam_mark_hint": document.get("beam_mark_hint", ""),
+            "project_name_hint": document.get("project_name_hint", ""),
+        }, page_sources=page_sources)
+        extraction = BlueprintExtraction(
+            document_id=document_id,
+            status=result.status,
+            extractor_version=EXTRACTOR_VERSION,
+            summary=result.summary,
+            page_text=result.page_text,
+            page_sources=result.page_sources,
+            field_groups=result.field_groups,
+            fields=result.fields,
+            confirmed_count=sum(1 for field in result.fields.values() if field.status in ("confirmed", "manually_confirmed")),
+            unconfirmed_count=sum(1 for field in result.fields.values() if field.status == "unconfirmed"),
+            fail_reasons=result.fail_reasons,
+            created_by=user.get("name", ""),
+        )
+        await db.blueprint_extractions.insert_one(extraction.model_dump())
+        await db.blueprint_documents.update_one({"id": document_id}, {"$set": {
+            "status": extraction.status,
+            "latest_extraction_id": extraction.id,
+            "latest_summary": extraction.summary,
+            "page_count": len(page_text),
+            "updated_at": now_iso(),
+        }})
+        await record_blueprint_event(document_id, user, "extract", {
+            "extraction_id": extraction.id,
+            "status": extraction.status,
+            "ocr_pages": sum(1 for src in result.page_sources if "ocr" in (src or "")),
+        })
+        logger.info(
+            "Blueprint extract complete document_id=%s status=%s confirmed=%s unconfirmed=%s ocr_pages=%s",
+            document_id,
+            extraction.status,
+            extraction.confirmed_count,
+            extraction.unconfirmed_count,
+            sum(1 for src in result.page_sources if "ocr" in (src or "")),
+        )
+        return await blueprint_detail(document_id)
+    except Exception:
+        logger.exception("Blueprint extract failed document_id=%s path=%s", document_id, storage_path)
+        raise
 
 
 @api.patch("/blueprints/{document_id}/extraction")
@@ -586,6 +607,8 @@ async def lock_blueprint(document_id: str, payload: BlueprintLockInput, user=Dep
     normalized = normalize_locked_blueprint(fields)
     product_family = fields["product_family"].value or document.get("product_family_hint") or "i_beam"
     beam_mark = fields["beam_mark"].value or document.get("beam_mark_hint") or "UNCONFIRMED"
+    if isinstance(beam_mark, list):
+        beam_mark = "/".join(str(item) for item in beam_mark)
     beam_ids = payload.beam_ids or ([document["beam_id"]] if document.get("beam_id") else [])
     revision = LockedBlueprintRevision(
         document_id=document_id,

@@ -21,7 +21,7 @@ from models import BlueprintField
 logger = logging.getLogger(__name__)
 
 FOOTER = "BedForge Blueprint Assessment — for print verification only"
-OCR_NOTICE = "OCR is not implemented. controlled_regex_v1 reads the PDF text layer only (pypdf extract_text)."
+OCR_NOTICE = "Sparse/empty text pages are rasterized and OCR'd (pytesseract). Field notes label source as text_layer, ocr, or text_layer+ocr."
 
 NAVY = colors.HexColor("#0F172A")
 SLATE = colors.HexColor("#475569")
@@ -41,14 +41,22 @@ GROUP_TITLES = {
 
 IDENTITY_ROWS: List[Tuple[str, str, bool]] = [
     ("job_number", "Job number", False),
-    ("beam_mark", "Beam mark(s)", False),
+    ("cid", "CID", False),
+    ("beam_mark", "Beam mark (compact)", False),
+    ("beam_marks", "Beam marks (all)", False),
     ("product_family", "Product family / beam type", False),
     ("county_dot", "County / DOT", False),
-    ("bridge_id", "Bridge ID / CID", True),
-    ("route", "Route", True),
+    ("bridge_id", "Bridge ID", False),
+    ("route", "Route", False),
     ("overall_length_ft", "Overall length", False),
-    ("casting_length_ft", "Casting length", True),
+    ("casting_length_ft", "Casting length", False),
+    ("mark_length_families", "Mark length families", False),
     ("overall_depth_in", "Depth", False),
+    ("strand_diameter_in", "Strand diameter", False),
+    ("strand_grade", "Strand grade", False),
+    ("strand_final_pull_lb", "Strand final pull", False),
+    ("hold_down_type", "Hold-down type", False),
+    ("lift_loop_spec", "Lift-loop spec", False),
 ]
 
 TWIN_DRIVERS: List[Tuple[str, str]] = [
@@ -83,17 +91,18 @@ TWIN_DRIVERS: List[Tuple[str, str]] = [
     ("target_elongation_in", "Tension reference elongation"),
     ("strand_diameter_in", "Tension reference diameter"),
     ("strand_area_in2", "Tension reference area"),
+    ("strand_grade", "270K / low-relaxation identity"),
+    ("strand_final_pull_lb", "Final pull (lb) into tension reference"),
+    ("hold_down_type", "Hold-down hardware type (H-56-S)"),
+    ("lift_loop_spec", "Lift-loop specification (no invented counts)"),
+    ("beam_marks", "Multi-beam DNA mark list"),
+    ("mark_length_families", "Per-mark overall/casting length families"),
+    ("casting_length_ft", "Casting length for bed setup"),
 ]
 
 SCHEMA_GAPS = [
-    "bridge_id / CID (e.g. 25-5390)",
-    "route",
-    "casting_length_ft (e.g. 47'-3\" vs 52'-0\")",
-    "multi-mark schedule (201–209)",
-    "standard section name (Type 2 I-Beam)",
-    "strand grade (270 ksi)",
-    "bed layout / bulkheads",
-    "OCR for image-only sheets",
+    "bed layout / bulkhead stations (still plant-setup, not twin DNA)",
+    "invented hardware quantities (intentionally omitted unless BOM text is explicit)",
 ]
 
 styles = getSampleStyleSheet()
@@ -164,6 +173,8 @@ def _is_weak(field: Optional[Dict[str, Any]]) -> bool:
     value, conf, state, _page, _notes = _field_bits(field)
     state_l = state.lower()
     conf_l = conf.lower()
+    if state_l == "not_applicable":
+        return False
     if not _has_value(value):
         return True
     if state_l in {"unconfirmed", "needs_review", ""}:
@@ -298,8 +309,9 @@ def build_extraction_report_pdf(
         fields = _field_map(extraction)
         stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
         status = (extraction.get("status") or document.get("status") or "uploaded").upper()
-        extractor = extraction.get("extractor_version") or "controlled_regex_v1"
+        extractor = extraction.get("extractor_version") or "controlled_regex_ocr_v2"
         page_text = extraction.get("page_text") or []
+        page_sources = extraction.get("page_sources") or []
         page_count = document.get("page_count") or len(page_text) or 0
 
         buffer = BytesIO()
@@ -359,7 +371,7 @@ def build_extraction_report_pdf(
         ]
         ident_rows = [ident_header]
         for key, label, virtual in IDENTITY_ROWS:
-            if virtual:
+            if virtual and key not in fields:
                 ident_rows.append(_identity_extra_row(label, key, f"{label} is not extracted by {extractor}."))
                 continue
             value, conf, state, page, notes = _field_bits(fields.get(key))
@@ -435,19 +447,20 @@ def build_extraction_report_pdf(
 
         story.append(PageBreak())
         story.append(Paragraph("E. Page text evidence appendix", styles["SectionTitle"]))
-        story.append(Paragraph(OCR_NOTICE, styles["Warn"]))
+        story.append(Paragraph(OCR_NOTICE, styles["SmallMuted"]))
         if not page_text:
-            story.append(Paragraph("No page_text stored on this document. Either Extract has not been run, or pypdf found no text layer on any page.", styles["BodyText2"]))
+            story.append(Paragraph("No page_text stored on this document. Either Extract has not been run, or neither the text layer nor OCR produced tokens.", styles["BodyText2"]))
             if page_count:
                 story.append(Paragraph(f"Upload recorded page_count={page_count}. Re-run Extract to capture per-page text evidence.", styles["SmallMuted"]))
         for index, raw in enumerate(page_text, start=1):
             text = (raw or "").strip()
-            story.append(Paragraph(f"Page {index}", styles["SectionTitle"]))
+            source = page_sources[index - 1] if index - 1 < len(page_sources) else "text_layer"
+            story.append(Paragraph(f"Page {index} · source={escape(str(source))}", styles["SectionTitle"]))
             if not text:
-                story.append(Paragraph("IMAGE-ONLY / NO TEXT LAYER on this page. OCR is not implemented, so no tokens were extracted.", styles["Warn"]))
+                story.append(Paragraph("IMAGE-ONLY / EMPTY after native text + OCR. No tokens were extracted from this page.", styles["Warn"]))
             else:
                 excerpt = text if len(text) <= 1800 else text[:1800] + "…"
-                story.append(Paragraph(f"Text-layer excerpt ({len(text)} chars):", styles["SmallMuted"]))
+                story.append(Paragraph(f"Merged excerpt ({len(text)} chars, source={escape(str(source))}):", styles["SmallMuted"]))
                 story.append(Paragraph(escape(excerpt).replace("\n", "<br/>"), styles["MonoExcerpt"]))
 
         story.append(PageBreak())
