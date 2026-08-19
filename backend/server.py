@@ -24,6 +24,7 @@ from models import (
     BlueprintDocument, BlueprintExtraction, BlueprintExtractionPatch, BlueprintField, BlueprintAuditEvent,
     BlueprintLockInput, LockedBlueprintRevision,
 )
+from beam_spec import materialize_job_beam_specs, twin_beam_from_spec
 from auth import router as auth_router, get_current_user, require_roles, seed_admin
 from tension import run_tension_calc, calc_theoretical_elongation, evaluate_tension
 from seed import seed_plant
@@ -143,6 +144,80 @@ def require_feature(feature: str, *roles: str):
     return checker
 
 
+async def upsert_beam_specs(specs: list) -> list:
+    saved = []
+    for spec in specs:
+        try:
+            query = {"document_id": spec.get("document_id"), "beam_mark": spec.get("beam_mark")}
+            existing = await db.beam_specs.find_one(query, {"_id": 0})
+            spec["updated_at"] = now_iso()
+            if existing:
+                spec["id"] = existing.get("id")
+                spec["created_at"] = existing.get("created_at") or spec.get("created_at")
+                await db.beam_specs.update_one({"id": existing["id"]}, {"$set": spec})
+            else:
+                await db.beam_specs.insert_one(spec)
+            saved.append(spec)
+        except Exception:
+            logger.exception("Failed to upsert beam spec mark=%s document_id=%s", spec.get("beam_mark"), spec.get("document_id"))
+            raise
+    return saved
+
+
+async def materialize_specs_for_revision(document: dict, extraction: dict, revision: dict, beam_ids: list | None = None) -> list:
+    fields = {
+        key: BlueprintField(**value) if not isinstance(value, BlueprintField) else value
+        for key, value in (extraction.get("fields") or {}).items()
+    }
+    beam_ids_by_mark = {}
+    for beam_id in beam_ids or revision.get("beam_ids") or []:
+        beam = await db.beams.find_one({"id": beam_id}, {"_id": 0})
+        if beam and beam.get("mark"):
+            beam_ids_by_mark[str(beam["mark"])] = beam_id
+    specs = materialize_job_beam_specs(
+        fields,
+        document=document,
+        revision=revision,
+        beam_ids_by_mark=beam_ids_by_mark,
+    )
+    return await upsert_beam_specs(specs)
+
+
+async def attach_beam_spec(data: dict, locked_revision: dict | None = None) -> dict:
+    spec = None
+    try:
+        if data.get("id"):
+            spec = await db.beam_specs.find_one({"beam_id": data["id"]}, {"_id": 0})
+        if spec is None and locked_revision and data.get("mark"):
+            spec = await db.beam_specs.find_one({
+                "locked_revision_id": locked_revision.get("id"),
+                "beam_mark": str(data.get("mark")),
+            }, {"_id": 0})
+    except Exception:
+        logger.exception("Failed to load beam spec for beam_id=%s", data.get("id"))
+        spec = None
+    if not spec:
+        return data
+    data["beam_spec"] = spec
+    product_type = dict(data.get("product_type") or {})
+    product_type["blueprint"] = spec.get("blueprint") or product_type.get("blueprint") or {}
+    geometry = spec.get("geometry") or {}
+    if geometry.get("depth_in") is not None:
+        product_type["depth_in"] = geometry["depth_in"]
+    if geometry.get("width_in") is not None:
+        product_type["width_in"] = geometry["width_in"]
+    data["product_type"] = product_type
+    if geometry.get("length_ft") is not None:
+        data["length_ft"] = geometry["length_ft"]
+    if spec.get("product_family"):
+        data["twin_type"] = spec["product_family"]
+    source = dict(data.get("blueprint_source") or {})
+    source["spec_id"] = spec.get("id")
+    source["section_source"] = spec.get("section_source") or geometry.get("section_source")
+    data["blueprint_source"] = source
+    return data
+
+
 async def enrich_beam(beam: dict, include_details: bool = False) -> dict:
     data = dict(beam)
     if data.get("product_type_id"):
@@ -191,6 +266,7 @@ async def enrich_beam(beam: dict, include_details: bool = False) -> dict:
             "locked_at": None,
             "critical_fields_complete": False,
         }
+    data = await attach_beam_spec(data, locked_revision)
     if include_details:
         beam_id = data["id"]
         data["anomalies"] = await db.anomalies.find({"beam_id": beam_id}, {"_id": 0}).to_list(500)
@@ -640,7 +716,78 @@ async def lock_blueprint(document_id: str, payload: BlueprintLockInput, user=Dep
             "locked_blueprint_revision_id": revision.id,
         }})
     await record_blueprint_event(document_id, user, "lock", {"revision_id": revision.id, "beam_ids": beam_ids, "product_type_id": revision.product_type_id})
+    try:
+        specs = await materialize_specs_for_revision(document, extraction, revision.model_dump(), beam_ids)
+        logger.info("Locked blueprint materialized %s specs document_id=%s", len(specs), document_id)
+    except Exception:
+        logger.exception("Blueprint lock succeeded but Spec materialization failed document_id=%s", document_id)
     return await blueprint_detail(document_id)
+
+
+@api.get("/beam-specs")
+async def list_beam_specs(
+    job_id: str | None = None,
+    job_number: str | None = None,
+    document_id: str | None = None,
+    beam_id: str | None = None,
+    beam_mark: str | None = None,
+    user=Depends(get_current_user),
+):
+    try:
+        revision_query = {"document_id": document_id} if document_id else {}
+        revisions = await db.locked_blueprint_revisions.find(revision_query, {"_id": 0}).to_list(500)
+        for revision in revisions:
+            existing = await db.beam_specs.find({"locked_revision_id": revision.get("id")}, {"_id": 0}).to_list(1)
+            if existing:
+                continue
+            document = await db.blueprint_documents.find_one({"id": revision.get("document_id")}, {"_id": 0})
+            extraction = await db.blueprint_extractions.find_one({"id": revision.get("extraction_id")}, {"_id": 0})
+            if document and extraction:
+                await materialize_specs_for_revision(document, extraction, revision, revision.get("beam_ids") or [])
+        query = {}
+        if job_id:
+            query["job_id"] = job_id
+        if job_number:
+            query["job_number"] = job_number
+        if document_id:
+            query["document_id"] = document_id
+        if beam_id:
+            query["beam_id"] = beam_id
+        if beam_mark:
+            query["beam_mark"] = beam_mark
+        specs = await db.beam_specs.find(query, {"_id": 0}).to_list(1000)
+        specs.sort(key=lambda item: (
+            0 if str(item.get("job_number") or "").strip() else 1,
+            str(item.get("job_number") or ""),
+            str(item.get("beam_mark") or ""),
+        ))
+        logger.info("Listed %s beam specs user=%s", len(specs), user.get("email"))
+        return specs
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("Failed to list beam specs")
+        raise HTTPException(status_code=500, detail="Failed to list beam specs")
+
+
+@api.get("/beam-specs/{spec_id}")
+async def get_beam_spec(spec_id: str, user=Depends(get_current_user)):
+    spec = await db.beam_specs.find_one({"id": spec_id}, {"_id": 0})
+    if not spec:
+        raise HTTPException(status_code=404, detail="Beam spec not found")
+    return spec
+
+
+@api.get("/beam-specs/{spec_id}/twin")
+async def get_beam_spec_twin(spec_id: str, user=Depends(get_current_user)):
+    spec = await db.beam_specs.find_one({"id": spec_id}, {"_id": 0})
+    if not spec:
+        raise HTTPException(status_code=404, detail="Beam spec not found")
+    try:
+        return twin_beam_from_spec(spec)
+    except Exception:
+        logger.exception("Failed to build twin payload for spec_id=%s", spec_id)
+        raise HTTPException(status_code=500, detail="Failed to build spec twin")
 
 
 # ---------------- Jobs ----------------
@@ -1246,10 +1393,11 @@ app.include_router(api)
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
-    allow_origins=os.environ.get(
+    allow_origins=[origin.strip() for origin in os.environ.get(
         "CORS_ORIGINS",
         "http://localhost:3000,http://127.0.0.1:3000",
-    ).split(","),
+    ).split(",") if origin.strip()],
+    allow_origin_regex=r"https?://(localhost|127\.0\.0\.1)(:\d+)?",
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -1265,6 +1413,8 @@ async def startup():
     await db.blueprint_extractions.create_index("document_id")
     await db.locked_blueprint_revisions.create_index("document_id")
     await db.blueprint_audit_events.create_index("document_id")
+    await db.beam_specs.create_index("document_id")
+    await db.beam_specs.create_index("beam_mark")
     await seed_admin()
     await seed_plant()
     logger.info("BedForge QC startup complete.")

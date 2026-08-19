@@ -465,3 +465,31 @@ class BlueprintLockInput(BaseModel):
     beam_ids: List[str] = Field(default_factory=list)
     product_type_id: Optional[str] = None
     notes: str = ""
+
+
+class JobBeamSpec(BaseModel):
+    """Per-mark Spec DNA stored with the job after blueprint lock/confirm."""
+    id: str = Field(default_factory=new_id)
+    job_id: Optional[str] = None
+    job_number: str = ""
+    beam_mark: str
+    beam_id: Optional[str] = None
+    document_id: Optional[str] = None
+    locked_revision_id: Optional[str] = None
+    product_family: str = "i_beam"
+    product_type: Optional[str] = None
+    identity: Dict[str, Any] = Field(default_factory=dict)
+    geometry: Dict[str, Any] = Field(default_factory=dict)
+    strand: Dict[str, Any] = Field(default_factory=dict)
+    hardware: List[Dict[str, Any]] = Field(default_factory=list)
+    stirrup_zones: List[Dict[str, Any]] = Field(default_factory=list)
+    finishes: Dict[str, Any] = Field(default_factory=dict)
+    qc: Dict[str, Any] = Field(default_factory=dict)
+    missing_fields: List[str] = Field(default_factory=list)
+    unconfirmed_fields: List[str] = Field(default_factory=list)
+    blueprint: Dict[str, Any] = Field(default_factory=dict)
+    status: str = "locked"
+    section_source: str = "extracted"
+    locked_at: Optional[str] = None
+    created_at: str = Field(default_factory=now_iso)
+    updated_at: str = Field(default_factory=now_iso)

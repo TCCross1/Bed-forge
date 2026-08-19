@@ -291,3 +291,12 @@ class TestBlueprintPipeline:
         assert beam_data["blueprint_source"]["status"] == "locked"
         assert beam_data["product_type"]["blueprint"]["cross_section"]["overall_depth_in"] == 54.0
         assert len(beam_data["product_type"]["blueprint"]["hold_downs"]) == 2
+        specs = requests.get(f"{API}/beam-specs", headers=auth_headers, params={"document_id": document["id"]}, timeout=30)
+        assert specs.status_code == 200, specs.text
+        spec_rows = specs.json()
+        assert spec_rows, "lock should materialize at least one beam spec"
+        assert spec_rows[0]["beam_mark"] == "B9-01"
+        assert spec_rows[0]["geometry"]["depth_in"] == 54.0
+        twin = requests.get(f"{API}/beam-specs/{spec_rows[0]['id']}/twin", headers=auth_headers, timeout=30)
+        assert twin.status_code == 200, twin.text
+        assert twin.json()["mark"] == "B9-01"
