@@ -150,7 +150,33 @@ export default function BlueprintStudio() {
     }
   };
 
-  const saveReview = async () => {
+  
+  const downloadExtractionPdf = async () => {
+    if (!selectedId) {
+      toast.error("Select a blueprint first");
+      return;
+    }
+    try {
+      const res = await api.get(`/blueprints/${selectedId}/extraction-report.pdf`, {
+        responseType: "blob",
+      });
+      const blob = new Blob([res.data], { type: "application/pdf" });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      const base = detail?.filename || detail?.original_filename || selectedId;
+      a.download = `extraction-report-${base}`.replace(/\.pdf$/i, "") + ".pdf";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+      toast.success("Extraction report downloaded");
+    } catch (err) {
+      toast.error(err.response?.data?.detail || "Failed to download extraction report");
+    }
+  };
+
+const saveReview = async () => {
     if (!selectedId) return;
     setSaving(true);
     try {
@@ -309,6 +335,17 @@ export default function BlueprintStudio() {
                     <div className="mt-3 text-sm text-muted-foreground space-y-1">
                       <div>{detail.page_count} pages · linked beam {detail.beam_id || "none"} · product type {detail.product_type_id || "none"}</div>
                       <div>{detail.latest_summary || "Upload complete. Run controlled extraction to populate review fields."}</div>
+
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={downloadExtractionPdf}
+                  disabled={!selectedId}
+                  className="inline-flex items-center gap-2 rounded-md bg-[#0F172A] px-3 py-2 text-sm font-semibold text-white hover:bg-[#1E293B] disabled:opacity-50"
+                >
+                  Download Extraction PDF
+                </button>
+              </div>
                     </div>
                     {detail.latest_extraction?.fail_reasons?.length > 0 && (
                       <div className="mt-4 border border-[#FFD60055] bg-[#FFD60011] rounded-sm p-3 text-sm">

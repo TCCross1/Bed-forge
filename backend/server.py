@@ -9,7 +9,7 @@ import logging
 import secrets
 from collections import Counter
 from datetime import date, datetime, timezone, timedelta
-from fastapi import FastAPI, APIRouter, Depends, HTTPException, File, Form, UploadFile
+from fastapi import Response, FastAPI, APIRouter, Depends, HTTPException, File, Form, UploadFile
 from fastapi.responses import StreamingResponse
 from starlette.middleware.cors import CORSMiddleware
 import io
@@ -29,6 +29,7 @@ from tension import run_tension_calc, calc_theoretical_elongation, evaluate_tens
 from seed import seed_plant
 import excel_export
 import package_export
+from extraction_report import build_extraction_report_pdf
 from blueprint_pipeline import (
     CRITICAL_FIELDS,
     FIELD_GROUPS,
@@ -445,6 +446,27 @@ async def download_blueprint_file(document_id: str, user=Depends(require_feature
         headers={"Content-Disposition": f"attachment; filename={document['filename']}"},
     )
 
+
+
+@api.get("/blueprints/{document_id}/extraction-report.pdf")
+async def download_extraction_report(document_id: str, user=Depends(require_feature("blueprint_intelligence"))):
+    """Download Blueprint Intelligence extraction long-form as PDF for print verification."""
+    document = await fetch_blueprint_document(document_id)
+    extraction = None
+    latest_id = document.get("latest_extraction_id")
+    if latest_id:
+        extraction = await fetch_blueprint_extraction(latest_id)
+    pdf_bytes = build_extraction_report_pdf(document, extraction)
+    base = document.get("filename") or document.get("original_filename") or document_id
+    safe_name = str(base).replace("/", "_").replace("\\", "_")
+    if not safe_name.lower().endswith(".pdf"):
+        safe_name = f"{safe_name}.pdf"
+    filename = f"extraction-report-{safe_name}"
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 @api.post("/blueprints/{document_id}/extract")
 async def extract_blueprint(document_id: str, user=Depends(require_feature("blueprint_intelligence", "qc_supervisor", "admin"))):
