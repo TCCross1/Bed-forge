@@ -30,8 +30,10 @@ export default function OpenJobPage() {
       await openJobById(jobId);
       toast.success("Open Job set");
     } catch (err) {
-      console.error("[open-job] set failed", err);
-      toast.error(formatApiErrorDetail(err.response?.data?.detail) || "Failed to open job");
+      const status = err?.response?.status;
+      const detail = formatApiErrorDetail(err.response?.data?.detail, err);
+      console.error("[open-job] set failed", status, err.response?.data, err);
+      toast.error(status ? `${status}: ${detail}` : detail || "Failed to open job");
     } finally {
       setBusy("");
     }

@@ -898,12 +898,26 @@ async def get_open_job(user=Depends(get_current_user)):
 @api.put("/jobs/open")
 async def put_open_job(payload: OpenJobInput, user=Depends(get_current_user)):
     try:
-        return await set_open_job_for_user(user, payload.job_id)
-    except HTTPException:
+        opened = await set_open_job_for_user(user, payload.job_id)
+        logger.info(
+            "PUT /jobs/open ok user=%s role=%s job_number=%s",
+            user.get("email"),
+            user.get("role"),
+            (opened.get("job") or {}).get("job_number"),
+        )
+        return opened
+    except HTTPException as exc:
+        logger.info(
+            "PUT /jobs/open rejected status=%s detail=%s user=%s token=%s",
+            exc.status_code,
+            exc.detail,
+            user.get("email"),
+            payload.job_id,
+        )
         raise
     except Exception:
-        logger.exception("Failed to set open job user=%s", user.get("email"))
-        raise HTTPException(status_code=500, detail="Failed to open job")
+        logger.exception("Failed to set open job user=%s token=%s", user.get("email"), payload.job_id)
+        raise HTTPException(status_code=500, detail="Failed to persist open job")
 
 
 @api.get("/jobs/{job_id}/cabinet")

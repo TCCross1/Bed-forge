@@ -472,20 +472,143 @@ async def get_open_job_for_user(user: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-async def set_open_job_for_user(user: Dict[str, Any], job_id: str) -> Dict[str, Any]:
-    job = decorate_job(await db.jobs.find_one({"id": job_id}, {"_id": 0}))
+def _looks_like_id(value: str) -> bool:
+    text = str(value or "").strip()
+    return len(text) >= 32 and "-" in text
+
+
+def _job_number_from_blueprint(document: Optional[dict], fallback: str = "") -> str:
+    rec = document or {}
+    for candidate in (rec.get("job_number"), fallback, rec.get("project_name_hint"), rec.get("filename")):
+        text = str(candidate or "").strip()
+        if not text or _looks_like_id(text):
+            continue
+        stem = text.rsplit(".", 1)[0] if "." in text and " " not in text else text
+        match = re.search(
+            r"\b([A-Za-z]{0,3}\d{3,}[A-Za-z0-9_-]*|[A-Za-z][A-Za-z0-9]*-(?:[A-Za-z0-9]+-)*[A-Za-z0-9]+)\b",
+            stem,
+        )
+        if match:
+            return match.group(1)
+        if " " not in stem and len(stem) <= 32:
+            return stem
+    return ""
+
+
+async def _find_blueprint_for_token(token: str) -> Optional[Dict[str, Any]]:
+    needle = (token or "").strip()
+    if not needle:
+        return None
+    document = await db.blueprint_documents.find_one({"id": needle}, {"_id": 0})
+    if document:
+        return document
+    document = await db.blueprint_documents.find_one({"job_number": needle}, {"_id": 0})
+    if document:
+        return document
+    rows = await db.blueprint_documents.find({}, {"_id": 0}).to_list(500)
+    upper = needle.upper()
+    for row in rows:
+        blob = " ".join(
+            str(row.get(key) or "")
+            for key in ("project_name_hint", "filename", "job_number", "beam_mark_hint")
+        )
+        if upper in blob.upper():
+            return row
+    return None
+
+
+async def ensure_job_from_blueprint(document: Dict[str, Any], token: str) -> Optional[Dict[str, Any]]:
+    """If a blueprint exists without a jobs row, open a cabinet from that drawing instead of 404."""
+    if document.get("job_id"):
+        job = decorate_job(await db.jobs.find_one({"id": document["job_id"]}, {"_id": 0}))
+        if job:
+            return job
+    job_number = _job_number_from_blueprint(document, token)
+    if not job_number:
+        return None
+    job = decorate_job(await db.jobs.find_one({"job_number": job_number}, {"_id": 0}))
     if not job:
-        raise HTTPException(status_code=404, detail="Job not found")
+        created = Job(
+            job_number=job_number,
+            name=str(document.get("project_name_hint") or job_number),
+            customer="",
+            status="open",
+            notes="Opened from blueprint / job cabinet link.",
+        )
+        job = created.model_dump()
+        await db.jobs.insert_one(dict(job))
+        logger.info("Created job from blueprint job_number=%s document=%s", job_number, document.get("id"))
+        job = decorate_job(job)
+    doc_id = document.get("id")
+    if doc_id:
+        try:
+            await db.blueprint_documents.update_one({"id": doc_id}, {"$set": {"job_id": job["id"]}})
+        except Exception:
+            logger.exception("Failed to link blueprint document=%s to job_id=%s", doc_id, job.get("id"))
+        docs = list(job.get("document_ids") or [])
+        if doc_id not in docs:
+            docs.append(doc_id)
+            await db.jobs.update_one({"id": job["id"]}, {"$set": {"document_ids": docs, "updated_at": now_iso()}})
+            job["document_ids"] = docs
+    return job
+
+
+async def resolve_job_for_open(token: str) -> Dict[str, Any]:
+    needle = str(token or "").strip()
+    if not needle:
+        raise HTTPException(status_code=404, detail="no job found")
+    job = decorate_job(await db.jobs.find_one({"id": needle}, {"_id": 0}))
+    if job:
+        return job
+    job = decorate_job(await db.jobs.find_one({"job_number": needle}, {"_id": 0}))
+    if job:
+        return job
+    rows = await db.jobs.find({}, {"_id": 0}).to_list(500)
+    upper = needle.upper()
+    for row in rows:
+        if str(row.get("job_number") or "").strip().upper() == upper:
+            return decorate_job(row)
+    document = await _find_blueprint_for_token(needle)
+    if document:
+        job = await ensure_job_from_blueprint(document, needle)
+        if job:
+            logger.info("Opened job from blueprint token=%s job_number=%s", needle, job.get("job_number"))
+            return job
+    raise HTTPException(status_code=404, detail="no job found")
+
+
+async def persist_open_job_session(user_id: str, job_id: str) -> None:
+    payload = {"user_id": user_id, "job_id": job_id, "updated_at": now_iso()}
     try:
-        await db.user_open_jobs.update_one(
-            {"user_id": user["id"]},
-            {"$set": {"user_id": user["id"], "job_id": job["id"], "updated_at": now_iso()}},
+        result = await db.user_open_jobs.update_one(
+            {"user_id": user_id},
+            {"$set": payload},
             upsert=True,
         )
+        if getattr(result, "matched_count", 1) == 0 and getattr(result, "modified_count", 1) == 0:
+            existing = await db.user_open_jobs.find_one({"user_id": user_id}, {"_id": 0})
+            if not existing:
+                await db.user_open_jobs.insert_one(dict(payload))
+        return
+    except TypeError:
+        logger.warning("open-job datastore rejected upsert; inserting session user_id=%s", user_id)
+    existing = await db.user_open_jobs.find_one({"user_id": user_id}, {"_id": 0})
+    if existing:
+        await db.user_open_jobs.update_one({"user_id": user_id}, {"$set": payload})
+        return
+    await db.user_open_jobs.insert_one(dict(payload))
+
+
+async def set_open_job_for_user(user: Dict[str, Any], job_id: str) -> Dict[str, Any]:
+    job = await resolve_job_for_open(job_id)
+    try:
+        await persist_open_job_session(user["id"], job["id"])
         logger.info("Opened job_id=%s job_number=%s user=%s", job["id"], job.get("job_number"), user.get("email"))
-    except Exception:
-        logger.exception("Failed to persist open job user_id=%s job_id=%s", user.get("id"), job_id)
+    except HTTPException:
         raise
+    except Exception:
+        logger.exception("Failed to persist open job user_id=%s token=%s", user.get("id"), job_id)
+        raise HTTPException(status_code=500, detail="Failed to persist open job")
     return await get_open_job_for_user(user)
 
 

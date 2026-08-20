@@ -95,12 +95,22 @@ class MemoryCollection:
                 return _project(document, projection)
         return None
 
-    async def update_one(self, query, update):
-        updates = update.get("$set", {})
+    async def update_one(self, query, update, upsert=False, **_kwargs):
+        updates = update.get("$set", {}) if isinstance(update, dict) else {}
         for document in self.documents:
             if _matches(document, query):
                 document.update(copy.deepcopy(updates))
                 return MemoryWriteResult(1, 1)
+        if upsert:
+            doc = copy.deepcopy(updates)
+            if isinstance(query, dict):
+                for key, value in query.items():
+                    if str(key).startswith("$"):
+                        continue
+                    if not isinstance(value, dict) and key not in doc:
+                        doc[key] = copy.deepcopy(value)
+            self.documents.append(doc)
+            return MemoryWriteResult(0, 1)
         return MemoryWriteResult(0, 0)
 
     async def update_many(self, query, update):

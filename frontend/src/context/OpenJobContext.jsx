@@ -73,6 +73,8 @@ export function OpenJobProvider({ children }) {
     setMarks(Array.isArray(data.marks) ? data.marks : []);
     setPrivileges(data.privileges || {});
     setActiveMark("");
+    const activePour = (Array.isArray(data.pours) ? data.pours : []).find((item) => item.status === "active") || (data.pours || [])[0];
+    if (activePour?.pour_date) setPourDate(activePour.pour_date);
     await refresh();
   }, [refresh]);
 
