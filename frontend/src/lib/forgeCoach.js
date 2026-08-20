@@ -1,8 +1,15 @@
-/** Forge Coach — grounded prestress QC knowledge, route scripts, local answers. Offline-first. */
+/** Ask Expert — BedForge Product Auditor + Operator Guide. Offline-first plant answers plus contract audits. */
 
 import { TUTORIAL_SECTIONS } from "./tutorial";
 
-export const COACH_NAME = "Forge Coach";
+export const COACH_NAME = "Ask Expert";
+
+export const AUDIT_PROMPTS = [
+  "What needs to be fixed?",
+  "Audit open job",
+  "Audit twin vs Spec",
+  "Audit Batch Plant",
+];
 
 export const ARTICLES = [
   {
@@ -115,7 +122,15 @@ export const ARTICLES = [
     title: "Overrides",
     tutorial: "supervisors",
     route: "/command",
-    body: "Forge Coach cannot issue overrides. A plant manager (Command → Overrides) types a bed number, a written reason, and that hits the append-only audit log. Use it for a destroyed mill tag or a plant emergency — not to skip logging the heat.",
+    body: "Ask Expert cannot issue overrides. A plant manager (Command → Overrides) types a bed number, a written reason, and that hits the append-only audit log. Use it for a destroyed mill tag or a plant emergency — not to skip logging the heat.",
+  },
+  {
+    id: "contract",
+    tags: ["fix", "audit", "contract", "spec", "dna", "twin", "insert", "batch", "job specs", "gap"],
+    title: "BedForge contract",
+    tutorial: "what",
+    route: "/job-specs",
+    body: "Ask Expert scores the plant against the BedForge contract: Blueprint Intelligence, Spec DNA, JOB SPECS twin, Open Job, roles, QC, Batch Plant, Command Board, security. Unconfirmed stays unconfirmed. Panel embed counts must match visible mesh or an UNCONFIRMED placeholder — never silent omit. Ask “What needs to be fixed?” for Fail / Warn / Pass.",
   },
   {
     id: "offline",
@@ -262,7 +277,7 @@ export function suggestedPrompts(route = "/", role = "qc_tech") {
     "/fresh": ["Truck’s here — how do I log spread?", "What is J-ring?", "Walk me through this screen"],
     "/batch": ["How do I log a batch?", "Can the analyst change the mix?", "Who confirms a batch?"],
     "/tension": ["How do I log a mill tag?", "What is ±5%?", "Explain the L25390 strand pattern"],
-    "/job-specs": ["How do I open L25390?", "Walk me through this screen", "What is Spec DNA?"],
+    "/job-specs": ["Audit L25390 MK 205 twin vs Spec DNA", "What is Spec DNA?", "Walk me through this screen"],
     "/inspection": ["How do I run a QIR?", "What does HOLD mean?"],
     "/camber": ["Which camber points do I take?", "What if release strength is short?"],
     "/finish": ["What is Marked End ID?", "Walk me through this screen"],
@@ -277,10 +292,13 @@ export function suggestedPrompts(route = "/", role = "qc_tech") {
     "/packages": ["What is in the DOT package?"],
   };
   const base = byRoute[path] || ["Walk me through this screen", "Why does this step exist?", "Show me the tutorial"];
-  if (role === "production") return ["How do I tension the right way?", "How do I assign a beam to a bed?", ...base].slice(0, 4);
-  if (role === "qc_supervisor") return ["How do I lock a BeamSpec?", "What do I do on a HOLD?", ...base].slice(0, 4);
-  if (role === "admin" || role === "executive") return ["How do I override with an audit trail?", "How do I revoke a lost phone?", ...base].slice(0, 4);
-  return base.slice(0, 4);
+  const plantAdmin = role === "admin" || role === "executive";
+  if (plantAdmin || path === "/job-specs" || path === "/") {
+    return [...AUDIT_PROMPTS, ...base].filter((item, index, all) => all.indexOf(item) === index).slice(0, 6);
+  }
+  if (role === "production") return [...AUDIT_PROMPTS.slice(0, 2), "How do I tension the right way?", ...base].slice(0, 5);
+  if (role === "qc_supervisor") return [...AUDIT_PROMPTS.slice(0, 2), "How do I lock a BeamSpec?", ...base].slice(0, 5);
+  return [...AUDIT_PROMPTS.slice(0, 2), ...base].slice(0, 5);
 }
 
 export function walkForRoute(route = "/") {
@@ -293,8 +311,31 @@ function isOverrideAsk(question) {
   return /override|unlock (the )?(bed|gate|spec)|bypass|force pass|turn off the gate/.test(q);
 }
 
+function isAuditAsk(question) {
+  const q = String(question || "").toLowerCase();
+  return /what needs to be fixed|what needs fixing|audit|product contract|what's broken|whats broken|twin vs spec|fail\/warn/.test(q);
+}
+
 export function localAnswer(question, route = "/", role = "qc_tech") {
   const q = String(question || "").trim();
+  if (isAuditAsk(q)) {
+    return {
+      source: "local",
+      text: [
+        "Summary",
+        "Ask Expert scores BedForge against the product contract. This on-device fallback cannot read live APIs.",
+        "",
+        "Cannot verify",
+        "jobs/open, blueprints, beam-specs, twin, batches, and command-board were not checked. Do not treat missing live rows as Pass.",
+        "",
+        "Suggested order of work",
+        "1. Stay signed in and ask again so POST /api/coach/ask can run read-only live checks.",
+        "2. On /job-specs, ask “Audit twin vs Spec” for insert count vs mesh (UNCONFIRMED placeholder required — never silent omit).",
+      ].join("\n"),
+      tutorial: null,
+      articles: retrieveArticles("audit spec dna twin batch"),
+    };
+  }
   if (isOverrideAsk(q)) {
     return {
       source: "local",
@@ -384,7 +425,7 @@ export function localAnswer(question, route = "/", role = "qc_tech") {
   ].filter(Boolean).join("\n\n");
   return {
     source: "local",
-    text: text || "Ask me about mill tags, tension, inspection, camber, finish, QR, or what to do when it goes wrong. I am a plant coach, not a generic chatbot.",
+    text: text || "Ask me about mill tags, tension, Spec DNA, inspection, or what needs to be fixed. I am Ask Expert — not a generic chatbot.",
     tutorial: top?.tutorial || "what",
     highlights: walkForRoute(top?.route || route).slice(0, 2),
     articles: hits,

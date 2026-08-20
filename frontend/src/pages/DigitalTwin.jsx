@@ -8,7 +8,7 @@ import { bedState, qcState } from "../lib/constants";
 import { toast } from "sonner";
 import { useOpenJob } from "../context/OpenJobContext";
 import { collectEmbeddedHardware, embedFeatureCounts, embedStationList } from "../lib/beamSpec";
-import { Layers3, Loader2, MapPin, Ruler, ScanLine, Box, Construction, Lock, AlertTriangle, SlidersHorizontal } from "lucide-react";
+import { Layers3, Loader2, MapPin, Ruler, ScanLine, Box, Construction, Lock, AlertTriangle, SlidersHorizontal, Sparkles } from "lucide-react";
 
 function SpecRows({ spec }) {
   return Object.entries(spec || {}).map(([key, value]) => (
@@ -369,6 +369,14 @@ export default function DigitalTwin() {
         subtitle={`${openJob?.job_number || "Open a job"} · Spec DNA twins — Pre-Pour cage vs Post-Pour finish`}
         right={
           <div className="flex flex-wrap items-center justify-end gap-2">
+            <button
+              type="button"
+              data-testid="forge-coach-open-job-specs"
+              onClick={() => window.dispatchEvent(new CustomEvent("bf-coach-open"))}
+              className="min-h-11 px-3 rounded-sm border border-[#C9A227] text-[#C9A227] text-xs font-mono uppercase tracking-wider flex items-center gap-2 hover:bg-[#C9A227] hover:text-black"
+            >
+              <Sparkles className="w-4 h-4" /> Ask Expert
+            </button>
             <button type="button" onClick={() => setControlsOpen(true)} className="lg:hidden min-h-11 px-3 rounded-sm border border-primary text-primary text-xs font-mono uppercase tracking-wider flex items-center gap-2">
               <SlidersHorizontal className="w-4 h-4" /> Controls
             </button>

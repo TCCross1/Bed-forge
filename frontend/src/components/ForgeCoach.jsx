@@ -6,7 +6,7 @@ import api, { formatApiErrorDetail } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 import { useDevice } from "../context/DeviceContext";
 import {
-  COACH_NAME, groundedPayload, localAnswer, suggestedPrompts, walkForRoute,
+  AUDIT_PROMPTS, COACH_NAME, groundedPayload, localAnswer, suggestedPrompts, walkForRoute,
 } from "../lib/forgeCoach";
 
 function SpeechEngine() {
@@ -226,17 +226,17 @@ export default function ForgeCoach() {
 
       {open && (
         <div className="fixed inset-0 z-[60] flex justify-end" data-testid="forge-coach-panel">
-          <button type="button" className="flex-1 bg-black/50 backdrop-blur-[2px]" aria-label="Close Forge Coach" onClick={() => setOpen(false)} />
+          <button type="button" className="flex-1 bg-black/50 backdrop-blur-[2px]" aria-label="Close Ask Expert" onClick={() => setOpen(false)} />
           <div
             className={`bg-[#0A0C10]/95 backdrop-blur-md border-l border-[#1C2230] flex flex-col ${
-              field ? "w-full" : "w-full max-w-md"
+              field ? "w-full" : "w-full max-w-lg"
             }`}
             style={{ height: "100%", paddingBottom: "env(safe-area-inset-bottom)" }}
           >
             <div className="min-h-14 px-4 border-b border-[#1C2230] flex items-center justify-between gap-3">
               <div>
                 <div className="text-[10px] font-mono uppercase tracking-[0.25em] text-[#C9A227]">{COACH_NAME}</div>
-                <div className="font-display font-bold uppercase tracking-wider text-sm">Prestress QC expert</div>
+                <div className="font-display font-bold uppercase tracking-wider text-sm">Product auditor + operator guide</div>
               </div>
               <button type="button" data-testid="forge-coach-close" onClick={() => setOpen(false)} className="min-h-12 min-w-12 border border-[#1C2230] flex items-center justify-center">
                 <X className="w-5 h-5" />
@@ -247,7 +247,7 @@ export default function ForgeCoach() {
               {messages.length === 0 && (
                 <div className="border border-[#1C2230] bg-[#0F1218] p-4">
                   <p className="text-sm leading-relaxed">
-                    I am the plant coach — not a generic chatbot. Ask why we log heats, how to tension L25390, or tap Walk me through this screen and I will ring the control. I cannot override a gate.
+                    I score BedForge against the product contract — Blueprint Intelligence, Spec DNA, JOB SPECS, Open Job, QC, Batch Plant, Command Board. Ask what needs to be fixed. I cannot invent Spec numbers or override a gate.
                   </p>
                 </div>
               )}
@@ -260,7 +260,7 @@ export default function ForgeCoach() {
                 >
                   <div className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground mb-1">
                     {msg.role === "user" ? "You" : COACH_NAME}
-                    {msg.source === "llm" ? " · live" : msg.role === "coach" ? " · plant manual" : ""}
+                    {msg.source === "llm" ? " · live" : msg.source === "audit" ? " · contract" : msg.role === "coach" ? " · plant manual" : ""}
                   </div>
                   <div className="whitespace-pre-wrap">{msg.text}</div>
                   {msg.tutorial && (
@@ -277,14 +277,27 @@ export default function ForgeCoach() {
               ))}
               {busy && (
                 <div className="flex items-center gap-2 text-xs font-mono uppercase tracking-widest text-muted-foreground">
-                  <Loader2 className="w-4 h-4 animate-spin" /> Checking the plant manual…
+                  <Loader2 className="w-4 h-4 animate-spin" /> Checking the contract and plant APIs…
                 </div>
               )}
             </div>
 
             <div className="p-3 border-t border-[#1C2230] space-y-2">
               <div className="flex flex-wrap gap-2">
-                {prompts.map((p) => (
+                {AUDIT_PROMPTS.map((p) => (
+                  <button
+                    key={`audit-${p}`}
+                    type="button"
+                    data-testid={`forge-coach-chip-${p.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/-$/, "")}`}
+                    onClick={() => ask(p)}
+                    className="min-h-12 px-3 border border-[#C9A227]/70 text-[#C9A227] text-xs uppercase tracking-wider hover:border-[#C9A227] hover:bg-[#C9A227]/10"
+                  >
+                    {p}
+                  </button>
+                ))}
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {prompts.filter((p) => !AUDIT_PROMPTS.includes(p)).map((p) => (
                   <button
                     key={p}
                     type="button"
@@ -303,7 +316,7 @@ export default function ForgeCoach() {
                   data-testid="forge-coach-input"
                   value={draft}
                   onChange={(e) => setDraft(e.target.value)}
-                  placeholder="Ask the plant coach…"
+                  placeholder="Ask what needs to be fixed…"
                   className="flex-1 min-h-12 bg-[#0A0C10] border border-[#1C2230] px-3 text-sm"
                 />
                 <button type="button" onClick={toggleMic} className="min-h-12 min-w-12 border border-[#1C2230] flex items-center justify-center" aria-label="Voice input" data-testid="forge-coach-mic">
@@ -325,7 +338,7 @@ export default function ForgeCoach() {
         className={`fixed z-40 min-h-12 px-4 border border-[#C9A227] bg-[#0F1218]/90 backdrop-blur text-[#C9A227] font-semibold uppercase tracking-wider text-xs flex items-center gap-2 hover:bg-[#C9A227] hover:text-black ${
           field ? "right-3 bottom-20" : "right-6 bottom-6"
         }`}
-        aria-label="Ask Forge Coach"
+        aria-label="Ask Expert"
       >
         <Sparkles className="w-4 h-4" /> Ask Expert
       </button>

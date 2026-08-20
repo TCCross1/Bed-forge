@@ -1,17 +1,30 @@
-"""Forge Coach — grounded prestress answers. Optional OpenAI; always a local fallback."""
+"""Ask Expert (Forge Coach) — BedForge Product Auditor + Operator Guide.
+
+Loads bedforge_contract on every request. Optional OpenAI; always a local
+fallback. Audit questions score live read APIs as Fail / Warn / Pass.
+Cannot issue overrides.
+"""
 import logging
 import os
 from typing import Any, Dict, List, Optional
 
+from bedforge_contract import CONTRACT_VERSION, contract_prompt_block
+from coach_audit import compose_audit_answer, is_audit_ask
+
 logger = logging.getLogger(__name__)
 
 SYSTEM_RULES = (
-    "You are Forge Coach, a senior prestressed-concrete QC / production supervisor at a precast plant. "
-    "Speak short, floor-ready English. Use plant examples. Never sound like a generic chatbot. "
-    "Use ONLY the grounded notes. If they do not cover the question, say so and point the tech to the in-app tutorial. "
+    "You are BedForge Ask Expert — Product Auditor + Operator Guide. "
+    "Always ground answers in the BedForge product contract and current software behavior. "
+    "Speak short, floor-ready English. Never sound like a generic chatbot. "
+    "When asked what needs to be fixed, return prioritized gaps: Fail / Warn / Pass by contract section, "
+    "short evidence, then Suggested order of work. Structure: Summary → Failures → Warnings → Suggested order of work. "
+    "Never invent Spec numbers, mix doses, heat numbers, elongation values, or drawing stations. "
+    "Never claim a required feature works if the contract says it is required and implementation is missing. "
+    "If a live API is down, report cannot verify — do not guess Pass. "
+    "Prefer concrete routes: /job-specs, /blueprints, GET/PUT /api/jobs/open, GET /api/beam-specs/{id}/twin, /batch, GET /api/command-board. "
     "You cannot issue overrides, unlock beds, force QC passed, change users, or reveal secrets or other people's data. "
-    "If asked to bypass the strand-roll gate, say: plant manager, Command → Overrides, bed number, written reason, audit log. "
-    "Do not invent heat numbers, elongation values, or drawing stations."
+    "If asked to bypass the strand-roll gate, say: plant manager, Command → Overrides, bed number, written reason, audit log."
 )
 
 OVERRIDE_ANSWER = (
@@ -30,6 +43,8 @@ def is_override_ask(question: str) -> bool:
 def compose_local(grounded: List[dict], question: str) -> str:
     if is_override_ask(question):
         return OVERRIDE_ANSWER
+    if is_audit_ask(question):
+        return compose_audit_answer(question, None)
     parts = []
     for row in grounded or []:
         title = (row or {}).get("title") or ""
@@ -39,12 +54,12 @@ def compose_local(grounded: List[dict], question: str) -> str:
     if parts:
         return "\n\n".join(parts[:3])
     return (
-        "Ask me about mill tags, tension, inspection, camber, finish, QR, or what to do when it goes wrong. "
-        "Open Tutorial on this phone — it works with no signal."
+        "Ask me about mill tags, tension, inspection, camber, finish, QR, Spec DNA, or what needs to be fixed. "
+        "I score the plant against the BedForge contract. Open Tutorial on this phone — it works with no signal."
     )
 
 
-def _llm_answer(question: str, grounded: List[dict], route: str, role: str) -> Optional[str]:
+def _llm_answer(question: str, grounded: List[dict], route: str, role: str, live_notes: str = "") -> Optional[str]:
     api_key = os.environ.get("OPENAI_API_KEY") or os.environ.get("EMERGENT_LLM_KEY")
     if not api_key:
         return None
@@ -55,11 +70,19 @@ def _llm_answer(question: str, grounded: List[dict], route: str, role: str) -> O
         if body:
             notes.append(f"- {title}: {body}" if title else f"- {body}")
     grounded_text = "\n".join(notes) or "(no grounded notes)"
+    contract = contract_prompt_block()
+    extra = f"\n\nLIVE AUDIT SNAPSHOT:\n{live_notes}" if live_notes else ""
     payload = {
         "model": os.environ.get("COACH_MODEL") or os.environ.get("STRAND_ROLL_VISION_MODEL") or "gpt-4o-mini",
         "temperature": 0.2,
         "messages": [
-            {"role": "system", "content": SYSTEM_RULES + "\n\nGROUNDED NOTES:\n" + grounded_text},
+            {
+                "role": "system",
+                "content": (
+                    f"{SYSTEM_RULES}\n\nCONTRACT v{CONTRACT_VERSION}:\n{contract}\n\n"
+                    f"GROUNDED NOTES:\n{grounded_text}{extra}"
+                ),
+            },
             {
                 "role": "user",
                 "content": f"Role: {role or 'qc_tech'}\nScreen: {route or '/'}\nQuestion: {question}",
@@ -84,10 +107,26 @@ def _llm_answer(question: str, grounded: List[dict], route: str, role: str) -> O
         return None
 
 
-def answer_coach(question: str, *, grounded: Optional[List[dict]] = None, route: str = "/", role: str = "qc_tech") -> Dict[str, Any]:
+def answer_coach(
+    question: str,
+    *,
+    grounded: Optional[List[dict]] = None,
+    route: str = "/",
+    role: str = "qc_tech",
+    live: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
     rows = list(grounded or [])
     if is_override_ask(question):
         return {"answer": OVERRIDE_ANSWER, "source": "local", "tutorial": "supervisors"}
+    if is_audit_ask(question):
+        answer = compose_audit_answer(question, live)
+        logger.info(
+            "ask expert audit live_ok=%s findings=%s q=%s",
+            (live or {}).get("live_ok"),
+            len((live or {}).get("findings") or []),
+            (question or "")[:80],
+        )
+        return {"answer": answer, "source": "audit", "tutorial": None, "live_ok": bool((live or {}).get("live_ok"))}
     llm = _llm_answer(question, rows, route, role)
     if llm:
         tutorial = (rows[0] or {}).get("tutorial") if rows else None

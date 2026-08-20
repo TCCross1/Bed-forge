@@ -5,10 +5,11 @@ import Layout, { PageHeader, cardClass, ARMeasureLink } from "../components/Layo
 import PlantFloor from "../components/PlantFloor";
 import { bedState, productionStatus, qcState, releaseForecast } from "../lib/constants";
 import { isoToday } from "../lib/bedLayout";
-import { Activity, Layers, CheckCircle2, AlertTriangle, XCircle, Loader2, RefreshCw, Box, LayoutGrid, ScanLine } from "lucide-react";
+import { Activity, Layers, CheckCircle2, AlertTriangle, XCircle, Loader2, RefreshCw, Box, LayoutGrid, ScanLine, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { useDevice } from "../context/DeviceContext";
 import { useSync } from "../context/SyncContext";
+import { useAuth } from "../context/AuthContext";
 import { useOpenJob } from "../context/OpenJobContext";
 import { jobListParams } from "../lib/jobAccess";
 
@@ -82,6 +83,7 @@ function BedCard({ bed, onOpen, onOpenBeam }) {
 
 export default function Dashboard() {
   const device = useDevice();
+  const { user } = useAuth();
   const { events, measurements } = useSync();
   const { openJob } = useOpenJob();
   const [data, setData] = useState(null);
@@ -154,6 +156,16 @@ export default function Dashboard() {
                 <LayoutGrid className="w-4 h-4 inline mr-1" /> Cards
               </button>
             </div>
+            {(user?.role === "admin" || user?.role === "executive") && (
+              <button
+                type="button"
+                data-testid="forge-coach-open-dashboard"
+                onClick={() => window.dispatchEvent(new CustomEvent("bf-coach-open"))}
+                className="min-h-12 px-4 border border-[#C9A227] text-[#C9A227] rounded-none flex items-center gap-2 text-sm font-semibold uppercase tracking-wider hover:bg-[#C9A227] hover:text-black"
+              >
+                <Sparkles className="w-4 h-4" /> Ask Expert
+              </button>
+            )}
             <button
               type="button"
               data-testid="board-scan-qr"
