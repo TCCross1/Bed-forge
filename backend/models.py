@@ -165,6 +165,7 @@ class Beam(BaseModel):
     pour_id: Optional[str] = None
     job_id: Optional[str] = None
     product_type_id: Optional[str] = None
+    spec_id: Optional[str] = None
     twin_type: str = "i_beam"  # i_beam | box_beam
     length_ft: float = 100.0
     position_on_bed: int = 1
@@ -182,6 +183,7 @@ class BeamCreate(BaseModel):
     pour_id: Optional[str] = None
     job_id: Optional[str] = None
     product_type_id: Optional[str] = None
+    spec_id: Optional[str] = None
     twin_type: str = "i_beam"
     length_ft: float = 100.0
     position_on_bed: int = 1
@@ -193,6 +195,7 @@ class BeamCreate(BaseModel):
 class BeamUpdate(BaseModel):
     status: Optional[str] = None
     qc_state: Optional[str] = None
+    spec_id: Optional[str] = None
     traceability: Optional[Dict[str, Any]] = None
     blueprint_document_id: Optional[str] = None
     locked_blueprint_revision_id: Optional[str] = None

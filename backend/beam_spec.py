@@ -338,6 +338,60 @@ def strand_engine_stale(spec: Optional[Dict[str, Any]]) -> bool:
     return not path.get("routing") or "end_treatments" not in strand
 
 
+def beam_record_from_locked_spec(
+    spec: Dict[str, Any],
+    *,
+    bed_id: str,
+    pour_id: Optional[str] = None,
+    position_on_bed: int = 1,
+) -> Optional[Dict[str, Any]]:
+    """Build a plant beam row from locked Spec DNA. Does not invent stations or pull."""
+    if not spec or spec.get("status") != "locked":
+        return None
+    mark = str(spec.get("beam_mark") or "").strip()
+    job_id = spec.get("job_id")
+    if not mark or mark.upper() == "UNCONFIRMED" or not job_id:
+        return None
+    geometry = spec.get("geometry") or {}
+    identity = spec.get("identity") or {}
+    blueprint = spec.get("blueprint") or {}
+    length = geometry.get("length_ft")
+    if length is None:
+        length = blueprint.get("length")
+    if length is None:
+        logger.info("Skip beam materialize mark=%s — Spec DNA has no overall_length_ft", mark)
+        return None
+    depth = geometry.get("depth_in")
+    if depth is None:
+        depth = (blueprint.get("cross_section") or {}).get("overall_depth_in")
+    traceability: Dict[str, Any] = {}
+    for key, value in (
+        ("county", identity.get("county")),
+        ("route", identity.get("route")),
+        ("cid", identity.get("cid")),
+        ("bridge_id", identity.get("bridge_id")),
+        ("overall_depth_in", depth),
+    ):
+        if value not in (None, ""):
+            traceability[key] = value
+    family = spec.get("product_family") or geometry.get("twin_type") or "i_beam"
+    return {
+        "mark": mark,
+        "bed_id": bed_id,
+        "pour_id": pour_id,
+        "job_id": job_id,
+        "spec_id": spec.get("id"),
+        "twin_type": family,
+        "length_ft": float(length),
+        "position_on_bed": int(position_on_bed or 1),
+        "status": "casting",
+        "qc_state": "pending",
+        "traceability": traceability,
+        "blueprint_document_id": spec.get("document_id"),
+        "locked_blueprint_revision_id": spec.get("locked_revision_id"),
+    }
+
+
 def twin_beam_from_spec(spec: Dict[str, Any]) -> Dict[str, Any]:
     """Synthetic beam payload so the Digital Twin can render Spec DNA without seed geometry."""
     geometry = spec.get("geometry") or {}

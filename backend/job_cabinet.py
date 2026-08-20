@@ -13,9 +13,10 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from fastapi import Depends, HTTPException, UploadFile
-from models import Job, JobCreate, Pour, new_id, now_iso
+from models import Beam, Job, JobCreate, Pour, new_id, now_iso
 from db import db
 from auth import get_current_user, verify_password
+from beam_spec import beam_record_from_locked_spec
 
 logger = logging.getLogger(__name__)
 
@@ -207,6 +208,119 @@ async def revoke_override(user: Dict[str, Any]) -> Dict[str, Any]:
         raise
 
 
+async def _cast_home_for_job(job_id: str) -> tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
+    """Resolve an existing plant bed and the job pour. Does not invent a bed."""
+    pour = None
+    bed = None
+    try:
+        pour = await db.pours.find_one({"job_id": job_id}, {"_id": 0})
+        if pour and pour.get("id"):
+            bed = await db.beds.find_one({"current_pour_id": pour["id"]}, {"_id": 0})
+        if not bed:
+            beds = await db.beds.find({}, {"_id": 0}).to_list(50)
+            beds = sorted(beds, key=lambda item: item.get("bed_number") or 0)
+            bed = beds[0] if beds else None
+    except Exception:
+        logger.exception("Failed to resolve bed/pour for beam materialize job_id=%s", job_id)
+        raise
+    return bed, pour
+
+
+async def materialize_beams_from_locked_specs(specs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Create one beam row per locked Spec mark. Idempotent on job_id + mark."""
+    created_or_linked: List[Dict[str, Any]] = []
+    locked = [
+        spec for spec in (specs or [])
+        if spec and spec.get("status") == "locked" and spec.get("beam_mark") and spec.get("job_id")
+    ]
+    locked.sort(key=lambda spec: str(spec.get("beam_mark") or ""))
+    homes: Dict[str, tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]]]] = {}
+    next_position: Dict[str, int] = {}
+    try:
+        for spec in locked:
+            job_id = spec.get("job_id")
+            mark = str(spec.get("beam_mark") or "").strip()
+            if job_id not in homes:
+                homes[job_id] = await _cast_home_for_job(job_id)
+            bed, pour = homes[job_id]
+            if not bed or not bed.get("id"):
+                logger.error("Cannot materialize beam mark=%s job_id=%s — no plant bed exists", mark, job_id)
+                continue
+            existing = None
+            if spec.get("beam_id"):
+                existing = await db.beams.find_one({"id": spec["beam_id"]}, {"_id": 0})
+            if not existing:
+                existing = await db.beams.find_one({"job_id": job_id, "mark": mark}, {"_id": 0})
+            if existing:
+                payload = beam_record_from_locked_spec(
+                    spec,
+                    bed_id=existing.get("bed_id") or bed["id"],
+                    pour_id=existing.get("pour_id") or (pour or {}).get("id"),
+                    position_on_bed=existing.get("position_on_bed") or 1,
+                )
+                if not payload:
+                    continue
+                updates = {
+                    "spec_id": payload.get("spec_id"),
+                    "job_id": job_id,
+                    "twin_type": payload.get("twin_type"),
+                    "length_ft": payload.get("length_ft"),
+                    "traceability": payload.get("traceability") or existing.get("traceability") or {},
+                    "blueprint_document_id": payload.get("blueprint_document_id"),
+                    "locked_blueprint_revision_id": payload.get("locked_blueprint_revision_id"),
+                }
+                await db.beams.update_one({"id": existing["id"]}, {"$set": updates})
+                beam_id = existing["id"]
+            else:
+                if job_id not in next_position:
+                    existing_on_job = await db.beams.find({"job_id": job_id}, {"_id": 0, "position_on_bed": 1}).to_list(500)
+                    used = [int(item.get("position_on_bed") or 0) for item in existing_on_job]
+                    next_position[job_id] = (max(used) if used else 0) + 1
+                payload = beam_record_from_locked_spec(
+                    spec,
+                    bed_id=bed["id"],
+                    pour_id=(pour or {}).get("id"),
+                    position_on_bed=next_position[job_id],
+                )
+                if not payload:
+                    continue
+                beam = Beam(**payload)
+                await db.beams.insert_one(beam.model_dump())
+                beam_id = beam.id
+                next_position[job_id] += 1
+                logger.info("Materialized beam id=%s mark=%s job_id=%s spec_id=%s", beam_id, mark, job_id, spec.get("id"))
+            if spec.get("beam_id") != beam_id:
+                await db.beam_specs.update_one({"id": spec["id"]}, {"$set": {"beam_id": beam_id, "updated_at": now_iso()}})
+                spec["beam_id"] = beam_id
+            created_or_linked.append({"id": beam_id, "mark": mark, "spec_id": spec.get("id"), "job_id": job_id})
+        logger.info("Beam materialize from locked specs count=%s marks=%s", len(created_or_linked), [item["mark"] for item in created_or_linked])
+        return created_or_linked
+    except Exception:
+        logger.exception("Failed to materialize beams from locked Spec DNA")
+        raise
+
+
+async def materialize_beams_for_job(job_id: str) -> List[Dict[str, Any]]:
+    """One-shot / repeatable backfill: locked Specs on this job become beam rows."""
+    try:
+        job = await db.jobs.find_one({"id": job_id}, {"_id": 0})
+        if not job:
+            return []
+        query: Dict[str, Any] = {"status": "locked"}
+        clauses = [{"job_id": job_id}]
+        if job.get("job_number"):
+            clauses.append({"job_number": job["job_number"]})
+        query["$or"] = clauses
+        specs = await db.beam_specs.find(query, {"_id": 0}).to_list(500)
+        for spec in specs:
+            if not spec.get("job_id"):
+                spec["job_id"] = job_id
+        return await materialize_beams_from_locked_specs(specs)
+    except Exception:
+        logger.exception("Failed to backfill beams for job_id=%s", job_id)
+        raise
+
+
 async def ensure_l25390_job() -> Dict[str, Any]:
     """Create or attach Job L25390 so locked Specs have an Open Job cabinet."""
     try:
@@ -285,6 +399,10 @@ async def ensure_l25390_job() -> Dict[str, Any]:
             updates["updated_at"] = now_iso()
             await db.jobs.update_one({"id": job["id"]}, {"$set": updates})
             job.update(updates)
+        try:
+            await materialize_beams_for_job(job["id"])
+        except Exception:
+            logger.exception("L25390 beam backfill failed job_id=%s", job.get("id"))
         return decorate_job(job)
     except Exception:
         logger.exception("Failed to ensure Open Job L25390")

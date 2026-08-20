@@ -45,6 +45,8 @@ from job_cabinet import (
     list_jobs_decorated,
     list_qc_photos,
     list_rolls,
+    materialize_beams_for_job,
+    materialize_beams_from_locked_specs,
     patch_job_record,
     privileges_for,
     require_job_editor,
@@ -208,18 +210,34 @@ async def materialize_specs_for_revision(document: dict, extraction: dict, revis
         revision=revision,
         beam_ids_by_mark=beam_ids_by_mark,
     )
-    return await upsert_beam_specs(specs)
+    saved = await upsert_beam_specs(specs)
+    try:
+        await materialize_beams_from_locked_specs(saved)
+    except Exception:
+        logger.exception(
+            "Locked Spec DNA saved but beam rows failed document_id=%s",
+            (document or {}).get("id"),
+        )
+    return saved
 
 
 async def attach_beam_spec(data: dict, locked_revision: dict | None = None) -> dict:
     spec = None
     try:
-        if data.get("id"):
+        if data.get("spec_id"):
+            spec = await db.beam_specs.find_one({"id": data["spec_id"]}, {"_id": 0})
+        if spec is None and data.get("id"):
             spec = await db.beam_specs.find_one({"beam_id": data["id"]}, {"_id": 0})
         if spec is None and locked_revision and data.get("mark"):
             spec = await db.beam_specs.find_one({
                 "locked_revision_id": locked_revision.get("id"),
                 "beam_mark": str(data.get("mark")),
+            }, {"_id": 0})
+        if spec is None and data.get("job_id") and data.get("mark"):
+            spec = await db.beam_specs.find_one({
+                "job_id": data["job_id"],
+                "beam_mark": str(data.get("mark")),
+                "status": "locked",
             }, {"_id": 0})
     except Exception:
         logger.exception("Failed to load beam spec for beam_id=%s", data.get("id"))
@@ -1409,9 +1427,17 @@ async def command_board(user=Depends(require_feature("command_board"))):
 # ---------------- Beams ----------------
 @api.get("/beams")
 async def list_beams(job_id: str | None = None, user=Depends(get_current_user)):
-    query = {"job_id": job_id} if job_id else {}
-    beams = await db.beams.find(query, {"_id": 0}).to_list(1000)
-    return [await enrich_beam(beam) for beam in beams]
+    try:
+        if job_id:
+            await materialize_beams_for_job(job_id)
+        query = {"job_id": job_id} if job_id else {}
+        beams = await db.beams.find(query, {"_id": 0}).to_list(1000)
+        beams.sort(key=lambda item: str(item.get("mark") or ""))
+        logger.info("Listed %s beams job_id=%s user=%s", len(beams), job_id, user.get("email"))
+        return [await enrich_beam(beam) for beam in beams]
+    except Exception:
+        logger.exception("Failed to list beams job_id=%s", job_id)
+        raise HTTPException(status_code=500, detail="Failed to list beams")
 
 
 @api.post("/beams")

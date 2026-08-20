@@ -1,7 +1,7 @@
 """Beam Spec DNA materialization from locked/confirmed extraction."""
 from models import BlueprintField
 from blueprint_pipeline import extract_structured_fields, normalize_locked_blueprint
-from beam_spec import materialize_job_beam_specs, strand_engine_stale, twin_beam_from_spec
+from beam_spec import materialize_job_beam_specs, strand_engine_stale, twin_beam_from_spec, beam_record_from_locked_spec
 from tests.test_blueprint_extraction import L25390_FIXTURE
 
 
@@ -162,3 +162,87 @@ def test_strand_engine_stale_detects_legacy_specs_without_inventing_hardware():
     assert spec["strand"]["path_model"]["routing"] == "end_hold_down_end"
     hold_hardware = [item for item in spec["hardware"] if item.get("kind") == "hold_down"]
     assert hold_hardware == []
+
+
+def test_beam_record_from_locked_spec_copies_dna_only():
+    spec = {
+        "id": "spec-201",
+        "status": "locked",
+        "job_id": "job-l25390",
+        "beam_mark": "201",
+        "document_id": "doc-1",
+        "locked_revision_id": "rev-1",
+        "product_family": "i_beam",
+        "identity": {"county": "Larue County, Kentucky", "route": "KY 61", "cid": "255390"},
+        "geometry": {"length_ft": 47.25, "depth_in": 36.0, "twin_type": "i_beam"},
+        "blueprint": {"length": 47.25, "hold_downs": [], "lift_loops": []},
+        "strand": {"final_pull_lb": None},
+        "hardware": [],
+    }
+    row = beam_record_from_locked_spec(spec, bed_id="bed-1", pour_id="pour-1", position_on_bed=1)
+    assert row["mark"] == "201"
+    assert row["job_id"] == "job-l25390"
+    assert row["spec_id"] == "spec-201"
+    assert row["length_ft"] == 47.25
+    assert row["twin_type"] == "i_beam"
+    assert row["traceability"]["overall_depth_in"] == 36.0
+    assert row["traceability"]["county"] == "Larue County, Kentucky"
+    assert row["traceability"]["route"] == "KY 61"
+    assert row["traceability"]["cid"] == "255390"
+    assert "hold_downs" not in row
+    assert "final_pull" not in str(row)
+    again = beam_record_from_locked_spec(spec, bed_id="bed-1", pour_id="pour-1", position_on_bed=1)
+    assert again["mark"] == row["mark"] and again["length_ft"] == row["length_ft"]
+    assert beam_record_from_locked_spec({**spec, "status": "extracted"}, bed_id="bed-1") is None
+    assert beam_record_from_locked_spec({**spec, "job_id": None}, bed_id="bed-1") is None
+    assert beam_record_from_locked_spec({**spec, "geometry": {}, "blueprint": {}}, bed_id="bed-1") is None
+
+
+def test_materialize_beams_from_locked_specs_idempotent():
+    import asyncio
+    from models import Bed, Job, Pour
+    from db import db
+    from job_cabinet import materialize_beams_from_locked_specs, materialize_beams_for_job
+
+    async def run():
+        job = Job(job_number="L25390-BEAM-TEST", name="beam materialize", customer="KYTC", status="open").model_dump()
+        bed = Bed(bed_number=99, name="Test Bed", length_ft=400).model_dump()
+        pour = Pour(job_id=job["id"], pour_number="P-TEST", pour_date="2026-08-20", status="active").model_dump()
+        await db.jobs.insert_one(dict(job))
+        await db.beds.insert_one(dict(bed))
+        await db.pours.insert_one(dict(pour))
+        specs = []
+        lengths = {"201": 47.25, "202": 47.25, "203": 47.25, "204": 52.0, "205": 52.0, "206": 52.0, "207": 47.25, "208": 47.25, "209": 47.25}
+        for mark, length in lengths.items():
+            spec = {
+                "id": f"spec-{job['id']}-{mark}",
+                "status": "locked",
+                "job_id": job["id"],
+                "job_number": "L25390-BEAM-TEST",
+                "beam_mark": mark,
+                "document_id": "doc-test",
+                "locked_revision_id": "rev-test",
+                "product_family": "i_beam",
+                "identity": {"county": "Larue County, Kentucky"},
+                "geometry": {"length_ft": length, "depth_in": 36.0},
+                "blueprint": {"length": length},
+            }
+            specs.append(spec)
+            await db.beam_specs.insert_one(dict(spec))
+        first = await materialize_beams_from_locked_specs(specs)
+        assert [item["mark"] for item in first] == ["201", "202", "203", "204", "205", "206", "207", "208", "209"]
+        rows = await db.beams.find({"job_id": job["id"]}, {"_id": 0}).to_list(50)
+        assert len(rows) == 9
+        by_mark = {item["mark"]: item for item in rows}
+        assert by_mark["201"]["length_ft"] == 47.25
+        assert by_mark["204"]["length_ft"] == 52.0
+        assert by_mark["201"]["spec_id"] == f"spec-{job['id']}-201"
+        assert by_mark["201"]["traceability"]["overall_depth_in"] == 36.0
+        assert "hold_down" not in str(by_mark["201"].get("traceability"))
+        second = await materialize_beams_for_job(job["id"])
+        rows_again = await db.beams.find({"job_id": job["id"]}, {"_id": 0}).to_list(50)
+        assert len(rows_again) == 9
+        assert {item["id"] for item in rows} == {item["id"] for item in rows_again}
+        assert len(second) == 9
+
+    asyncio.run(run())
