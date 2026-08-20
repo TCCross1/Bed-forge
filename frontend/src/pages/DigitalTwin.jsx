@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import api from "../lib/api";
 import Layout, { PageHeader } from "../components/Layout";
+import { Drawer, DrawerContent, DrawerHeader, DrawerTitle } from "../components/ui/drawer";
 import BeamTwinViewer, { BedTwinViewer } from "../components/BeamViewer";
 import { bedState, qcState } from "../lib/constants";
 import { toast } from "sonner";
