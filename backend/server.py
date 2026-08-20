@@ -10,13 +10,14 @@ import secrets
 from collections import Counter
 from datetime import date, datetime, timezone, timedelta
 from fastapi import Response, FastAPI, APIRouter, Depends, HTTPException, File, Form, UploadFile
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from starlette.middleware.cors import CORSMiddleware
 import io
 
 from db import db, client
 from models import (
-    ProductType, ProductTypeCreate, Job, JobCreate, Pour, PourCreate,
+    ProductType, ProductTypeCreate, Job, JobCreate, JobPatch, OpenJobInput, JobOverrideInput,
+    Pour, PourCreate, StrandRollConfirm, StrandRollAssign,
     Bed, BedUpdate, Beam, BeamCreate, BeamUpdate,
     Inspection, InspectionCreate, TensionReport, TensionReportCreate, TensionCalcInput,
     CamberReading, CamberReadingCreate, Anomaly, AnomalyCreate,
@@ -26,6 +27,31 @@ from models import (
 )
 from beam_spec import materialize_job_beam_specs, strand_engine_stale, twin_beam_from_spec
 from auth import router as auth_router, get_current_user, require_roles, seed_admin
+from job_cabinet import (
+    QC_PHOTO_KINDS,
+    ROLL_STORAGE_DIR,
+    QC_PHOTO_STORAGE_DIR,
+    assign_roll,
+    confirm_roll,
+    create_job_record,
+    create_roll_from_photos,
+    can_edit_job_structure,
+    ensure_l25390_job,
+    get_open_job_for_user,
+    issue_override,
+    job_cabinet,
+    list_jobs_decorated,
+    list_qc_photos,
+    list_rolls,
+    patch_job_record,
+    privileges_for,
+    require_job_editor,
+    resolve_open_job_and_pour,
+    revoke_override,
+    role_can_open_blueprint_studio,
+    set_open_job_for_user,
+    upsert_qc_photo,
+)
 from tension import run_tension_calc, calc_theoretical_elongation, evaluate_tension
 from seed import seed_plant
 import excel_export
@@ -459,12 +485,16 @@ async def create_product_type(payload: ProductTypeCreate, user=Depends(get_curre
 # ---------------- Blueprint Intelligence ----------------
 @api.get("/blueprints")
 async def list_blueprints(user=Depends(require_feature("blueprint_intelligence"))):
+    if not role_can_open_blueprint_studio(user.get("role")):
+        raise HTTPException(status_code=403, detail="Blueprint administration is limited to Plant Manager and QC Supervisor.")
     documents = await db.blueprint_documents.find({}, {"_id": 0}).sort("created_at", -1).to_list(500)
     return [await blueprint_detail(item["id"]) for item in documents]
 
 
 @api.get("/blueprints/{document_id}")
 async def get_blueprint(document_id: str, user=Depends(require_feature("blueprint_intelligence"))):
+    if not role_can_open_blueprint_studio(user.get("role")):
+        raise HTTPException(status_code=403, detail="Blueprint administration is limited to Plant Manager and QC Supervisor.")
     return await blueprint_detail(document_id)
 
 
@@ -479,6 +509,8 @@ async def upload_blueprint(
     project_name_hint: str | None = Form(default=""),
     user=Depends(require_feature("blueprint_intelligence")),
 ):
+    if not role_can_open_blueprint_studio(user.get("role")):
+        raise HTTPException(status_code=403, detail="Blueprint administration is limited to Plant Manager and QC Supervisor.")
     filename = file.filename or "blueprint.pdf"
     if not filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only PDF blueprint uploads are supported")
@@ -620,6 +652,9 @@ async def extract_blueprint(document_id: str, user=Depends(require_feature("blue
 
 @api.patch("/blueprints/{document_id}/extraction")
 async def patch_blueprint_extraction(document_id: str, payload: BlueprintExtractionPatch, user=Depends(require_feature("blueprint_intelligence", "qc_supervisor", "admin"))):
+    if not await can_edit_job_structure(user):
+        logger.info("Blocked Spec DNA patch role=%s user=%s", user.get("role"), user.get("email"))
+        raise HTTPException(status_code=403, detail="Spec DNA edits require Plant Manager authorization or an approved QC Supervisor override.")
     document = await fetch_blueprint_document(document_id)
     if not document.get("latest_extraction_id"):
         raise HTTPException(status_code=400, detail="Blueprint has not been extracted yet")
@@ -670,6 +705,9 @@ async def patch_blueprint_extraction(document_id: str, payload: BlueprintExtract
 
 @api.post("/blueprints/{document_id}/lock")
 async def lock_blueprint(document_id: str, payload: BlueprintLockInput, user=Depends(require_feature("blueprint_intelligence", "qc_supervisor", "admin"))):
+    if not await can_edit_job_structure(user):
+        logger.info("Blocked blueprint lock role=%s user=%s", user.get("role"), user.get("email"))
+        raise HTTPException(status_code=403, detail="Locking Spec DNA requires Plant Manager authorization or an approved QC Supervisor override.")
     document = await fetch_blueprint_document(document_id)
     if not document.get("latest_extraction_id"):
         raise HTTPException(status_code=400, detail="Blueprint must be extracted before it can be locked")
@@ -758,10 +796,15 @@ async def list_beam_specs(
                         revision.get("document_id"),
                     )
         query = {}
+        job_clauses = []
         if job_id:
-            query["job_id"] = job_id
+            job_clauses.append({"job_id": job_id})
         if job_number:
-            query["job_number"] = job_number
+            job_clauses.append({"job_number": job_number})
+        if len(job_clauses) == 1:
+            query.update(job_clauses[0])
+        elif len(job_clauses) > 1:
+            query["$or"] = job_clauses
         if document_id:
             query["document_id"] = document_id
         if beam_id:
@@ -816,20 +859,102 @@ async def get_beam_spec_twin(spec_id: str, user=Depends(get_current_user)):
 # ---------------- Jobs ----------------
 @api.get("/jobs")
 async def list_jobs(user=Depends(get_current_user)):
-    return await db.jobs.find({}, {"_id": 0}).to_list(500)
+    try:
+        return await list_jobs_decorated()
+    except Exception:
+        logger.exception("Failed to list jobs")
+        raise HTTPException(status_code=500, detail="Failed to list jobs")
+
+
+@api.get("/jobs/open")
+async def get_open_job(user=Depends(get_current_user)):
+    try:
+        return await get_open_job_for_user(user)
+    except Exception:
+        logger.exception("Failed to load open job user=%s", user.get("email"))
+        raise HTTPException(status_code=500, detail="Failed to load open job")
+
+
+@api.put("/jobs/open")
+async def put_open_job(payload: OpenJobInput, user=Depends(get_current_user)):
+    try:
+        return await set_open_job_for_user(user, payload.job_id)
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("Failed to set open job user=%s", user.get("email"))
+        raise HTTPException(status_code=500, detail="Failed to open job")
+
+
+@api.get("/jobs/{job_id}/cabinet")
+async def get_job_cabinet(job_id: str, user=Depends(get_current_user)):
+    try:
+        return await job_cabinet(job_id)
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("Failed to load job cabinet job_id=%s", job_id)
+        raise HTTPException(status_code=500, detail="Failed to load job cabinet")
 
 
 @api.post("/jobs")
-async def create_job(payload: JobCreate, user=Depends(get_current_user)):
-    job = Job(**payload.model_dump())
-    await db.jobs.insert_one(job.model_dump())
-    return job.model_dump()
+async def create_job(payload: JobCreate, user=Depends(require_job_editor)):
+    try:
+        return await create_job_record(payload, user)
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("Failed to create job")
+        raise HTTPException(status_code=500, detail="Failed to create job")
+
+
+@api.patch("/jobs/{job_id}")
+async def patch_job(job_id: str, payload: JobPatch, user=Depends(require_job_editor)):
+    try:
+        return await patch_job_record(job_id, payload.model_dump(), user)
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("Failed to patch job_id=%s", job_id)
+        raise HTTPException(status_code=500, detail="Failed to update job")
+
+
+@api.get("/job-privileges")
+async def get_job_privileges(user=Depends(get_current_user)):
+    try:
+        return await privileges_for(user)
+    except Exception:
+        logger.exception("Failed to load job privileges")
+        raise HTTPException(status_code=500, detail="Failed to load job privileges")
+
+
+@api.post("/job-overrides")
+async def create_job_override(payload: JobOverrideInput, user=Depends(get_current_user)):
+    try:
+        record = await issue_override(user, payload.note, payload.manager_email, payload.manager_password)
+        return {"override": record, "privileges": await privileges_for(user)}
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("Failed to issue job override")
+        raise HTTPException(status_code=500, detail="Failed to issue override")
+
+
+@api.delete("/job-overrides")
+async def delete_job_override(user=Depends(get_current_user)):
+    try:
+        await revoke_override(user)
+        return {"ok": True, "privileges": await privileges_for(user)}
+    except Exception:
+        logger.exception("Failed to revoke job override")
+        raise HTTPException(status_code=500, detail="Failed to revoke override")
 
 
 # ---------------- Pours ----------------
 @api.get("/pours")
-async def list_pours(user=Depends(get_current_user)):
-    return await db.pours.find({}, {"_id": 0}).to_list(500)
+async def list_pours(job_id: str | None = None, user=Depends(get_current_user)):
+    query = {"job_id": job_id} if job_id else {}
+    return await db.pours.find(query, {"_id": 0}).to_list(500)
 
 
 @api.post("/pours")
@@ -837,6 +962,117 @@ async def create_pour(payload: PourCreate, user=Depends(get_current_user)):
     pour = Pour(**payload.model_dump())
     await db.pours.insert_one(pour.model_dump())
     return pour.model_dump()
+
+
+# ---------------- Strand rolls & QC photos ----------------
+@api.get("/strand-rolls")
+async def get_strand_rolls(job_id: str | None = None, pour_date: str | None = None, user=Depends(get_current_user)):
+    try:
+        if not job_id:
+            opened = await get_open_job_for_user(user)
+            job_id = (opened.get("job") or {}).get("id")
+            if not pour_date:
+                pours = opened.get("pours") or []
+                active = next((item for item in pours if item.get("status") == "active"), None) or (pours[0] if pours else None)
+                pour_date = (active or {}).get("pour_date")
+        return await list_rolls(job_id, pour_date)
+    except Exception:
+        logger.exception("Failed to list strand rolls")
+        raise HTTPException(status_code=500, detail="Failed to list strand rolls")
+
+
+@api.post("/strand-rolls/extract")
+async def extract_strand_rolls(
+    photos: list[UploadFile] = File(default=[]),
+    kinds: str = Form(default=""),
+    job_id: str | None = Form(default=None),
+    pour_date: str | None = Form(default=None),
+    user=Depends(get_current_user),
+):
+    try:
+        job, pour = await resolve_open_job_and_pour(user, job_id, pour_date)
+        return await create_roll_from_photos(photos, kinds, user, job, pour)
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("Failed to extract strand roll")
+        raise HTTPException(status_code=500, detail="Failed to store mill-tag photos")
+
+
+@api.post("/strand-rolls/{roll_id}/confirm")
+async def confirm_strand_roll(roll_id: str, payload: StrandRollConfirm, user=Depends(get_current_user)):
+    try:
+        return await confirm_roll(roll_id, payload.model_dump(), user)
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("Failed to confirm strand roll roll_id=%s", roll_id)
+        raise HTTPException(status_code=500, detail="Failed to confirm strand roll")
+
+
+@api.post("/strand-rolls/{roll_id}/assign")
+async def assign_strand_roll(roll_id: str, payload: StrandRollAssign, user=Depends(get_current_user)):
+    try:
+        return await assign_roll(roll_id, payload.bed_id, user)
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("Failed to assign strand roll roll_id=%s", roll_id)
+        raise HTTPException(status_code=500, detail="Failed to assign strand roll")
+
+
+@api.get("/strand-rolls/{roll_id}/photos/{filename}")
+async def get_strand_roll_photo(roll_id: str, filename: str, user=Depends(get_current_user)):
+    safe = Path(filename).name
+    path = ROLL_STORAGE_DIR / roll_id / safe
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Photo not found")
+    return FileResponse(path)
+
+
+@api.get("/job-qc-photos")
+async def get_job_qc_photos(job_id: str | None = None, pour_date: str | None = None, user=Depends(get_current_user)):
+    try:
+        job, pour = await resolve_open_job_and_pour(user, job_id, pour_date)
+        if not job:
+            return []
+        return await list_qc_photos(job["id"], (pour or {}).get("pour_date") if not pour_date else pour_date)
+    except Exception:
+        logger.exception("Failed to list QC photos")
+        raise HTTPException(status_code=500, detail="Failed to list QC photos")
+
+
+@api.post("/job-qc-photos")
+async def post_job_qc_photo(
+    kind: str = Form(...),
+    pour_date: str = Form(...),
+    job_id: str | None = Form(default=None),
+    photo: UploadFile = File(...),
+    user=Depends(get_current_user),
+):
+    try:
+        if kind not in QC_PHOTO_KINDS:
+            raise HTTPException(status_code=400, detail="Unknown QC photo kind")
+        job, _pour = await resolve_open_job_and_pour(user, job_id, pour_date)
+        if not job:
+            raise HTTPException(status_code=400, detail="Open a job before attaching QC photos")
+        return await upsert_qc_photo(job, pour_date, kind, photo, user)
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("Failed to upload QC photo")
+        raise HTTPException(status_code=500, detail="Failed to upload QC photo")
+
+
+@api.get("/job-qc-photos/{photo_id}/file")
+async def get_job_qc_photo_file(photo_id: str, user=Depends(get_current_user)):
+    row = await db.job_qc_photos.find_one({"id": photo_id}, {"_id": 0})
+    if not row or not row.get("storage_path"):
+        raise HTTPException(status_code=404, detail="Photo not found")
+    path = Path(row["storage_path"])
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Photo file missing")
+    return FileResponse(path)
 
 
 # ---------------- Beds & Dashboard ----------------
@@ -940,10 +1176,11 @@ async def update_bed(bed_id: str, payload: BedUpdate, user=Depends(get_current_u
 
 
 @api.get("/dashboard")
-async def dashboard(user=Depends(get_current_user)):
+async def dashboard(job_id: str | None = None, user=Depends(get_current_user)):
     beds = await db.beds.find({}, {"_id": 0}).sort("bed_number", 1).to_list(50)
-    beams = await db.beams.find({}, {"_id": 0}).to_list(1000)
-    pours = await db.pours.find({}, {"_id": 0}).to_list(500)
+    beam_query = {"job_id": job_id} if job_id else {}
+    beams = await db.beams.find(beam_query, {"_id": 0}).to_list(1000)
+    pours = await db.pours.find({"job_id": job_id} if job_id else {}, {"_id": 0}).to_list(500)
     pour_map = {p["id"]: p for p in pours}
 
     beams_by_bed = {}
@@ -1159,8 +1396,9 @@ async def command_board(user=Depends(require_feature("command_board"))):
 
 # ---------------- Beams ----------------
 @api.get("/beams")
-async def list_beams(user=Depends(get_current_user)):
-    beams = await db.beams.find({}, {"_id": 0}).to_list(1000)
+async def list_beams(job_id: str | None = None, user=Depends(get_current_user)):
+    query = {"job_id": job_id} if job_id else {}
+    beams = await db.beams.find(query, {"_id": 0}).to_list(1000)
     return [await enrich_beam(beam) for beam in beams]
 
 
@@ -1438,8 +1676,15 @@ async def startup():
     await db.blueprint_audit_events.create_index("document_id")
     await db.beam_specs.create_index("document_id")
     await db.beam_specs.create_index("beam_mark")
+    await db.jobs.create_index("job_number")
+    await db.user_open_jobs.create_index("user_id", unique=True)
+    await db.strand_rolls.create_index("job_id")
+    await db.job_qc_photos.create_index([("job_id", 1), ("pour_date", 1), ("kind", 1)])
+    ROLL_STORAGE_DIR.mkdir(parents=True, exist_ok=True)
+    QC_PHOTO_STORAGE_DIR.mkdir(parents=True, exist_ok=True)
     await seed_admin()
     await seed_plant()
+    await ensure_l25390_job()
     logger.info("BedForge QC startup complete.")
 
 

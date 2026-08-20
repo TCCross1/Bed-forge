@@ -300,3 +300,64 @@ class TestBlueprintPipeline:
         twin = requests.get(f"{API}/beam-specs/{spec_rows[0]['id']}/twin", headers=auth_headers, timeout=30)
         assert twin.status_code == 200, twin.text
         assert twin.json()["mark"] == "B9-01"
+
+
+class TestOpenJob:
+    def _token(self, email, password):
+        r = requests.post(f"{API}/auth/login", json={"email": email, "password": password}, timeout=30)
+        assert r.status_code == 200, r.text
+        return r.json()["access_token"]
+
+    def test_l25390_is_open_job_for_admin(self, auth_headers):
+        jobs = requests.get(f"{API}/jobs", headers=auth_headers, timeout=30)
+        assert jobs.status_code == 200, jobs.text
+        numbers = [item.get("job_number") for item in jobs.json()]
+        assert "L25390" in numbers
+        opened = requests.get(f"{API}/jobs/open", headers=auth_headers, timeout=30)
+        assert opened.status_code == 200, opened.text
+        data = opened.json()
+        assert data["job"]["job_number"] == "L25390"
+        assert data["privileges"]["can_edit_job"] is True
+
+    def test_qc_tech_cannot_create_or_patch_job(self):
+        token = self._token("qc@bedforge.com", "qc123")
+        headers = {"Authorization": f"Bearer {token}"}
+        opened = requests.get(f"{API}/jobs/open", headers=headers, timeout=30)
+        assert opened.status_code == 200, opened.text
+        assert opened.json()["privileges"]["can_edit_job"] is False
+        created = requests.post(
+            f"{API}/jobs",
+            headers=headers,
+            json={"job_number": "X-FORBIDDEN", "name": "Nope", "customer": "Nope"},
+            timeout=30,
+        )
+        assert created.status_code == 403
+        job_id = opened.json()["job"]["id"]
+        patched = requests.patch(f"{API}/jobs/{job_id}", headers=headers, json={"notes": "tech edit"}, timeout=30)
+        assert patched.status_code == 403
+        blueprints = requests.get(f"{API}/blueprints", headers=headers, timeout=30)
+        assert blueprints.status_code == 403
+
+    def test_supervisor_needs_override_to_patch_job(self):
+        token = self._token("supervisor@bedforge.com", "super123")
+        headers = {"Authorization": f"Bearer {token}"}
+        opened = requests.get(f"{API}/jobs/open", headers=headers, timeout=30)
+        assert opened.status_code == 200, opened.text
+        job_id = opened.json()["job"]["id"]
+        blocked = requests.patch(f"{API}/jobs/{job_id}", headers=headers, json={"notes": "no override"}, timeout=30)
+        assert blocked.status_code == 403
+        override = requests.post(
+            f"{API}/job-overrides",
+            headers=headers,
+            json={
+                "note": "Shop drawing revision confirmed on bed with Plant Manager.",
+                "manager_email": "admin@bedforge.com",
+                "manager_password": "admin123",
+            },
+            timeout=30,
+        )
+        assert override.status_code == 200, override.text
+        assert override.json()["privileges"]["can_edit_job"] is True
+        patched = requests.patch(f"{API}/jobs/{job_id}", headers=headers, json={"notes": "override edit"}, timeout=30)
+        assert patched.status_code == 200, patched.text
+        requests.delete(f"{API}/job-overrides", headers=headers, timeout=30)
