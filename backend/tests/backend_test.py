@@ -361,3 +361,35 @@ class TestOpenJob:
         patched = requests.patch(f"{API}/jobs/{job_id}", headers=headers, json={"notes": "override edit"}, timeout=30)
         assert patched.status_code == 200, patched.text
         requests.delete(f"{API}/job-overrides", headers=headers, timeout=30)
+
+
+class TestInstrumentReadings:
+    def test_evaluate_and_create_and_override(self, auth_headers):
+        preview = requests.post(
+            f"{API}/instrument-readings/evaluate",
+            headers=auth_headers,
+            json={"measured_in": 120.5, "target_in": 120.0, "tolerance_in": 0.125},
+            timeout=30,
+        )
+        assert preview.status_code == 200, preview.text
+        assert preview.json()["status"] == "fail"
+        created = requests.post(
+            f"{API}/instrument-readings",
+            headers=auth_headers,
+            json={"purpose": "length", "source": "manual", "measured_in": 120.5, "target_in": 120.0, "tolerance_in": 0.125},
+            timeout=30,
+        )
+        assert created.status_code == 200, created.text
+        row = created.json()
+        assert row["status"] == "fail"
+        listed = requests.get(f"{API}/instrument-readings", headers=auth_headers, timeout=30)
+        assert listed.status_code == 200, listed.text
+        assert any(item["id"] == row["id"] for item in listed.json())
+        overridden = requests.post(
+            f"{API}/instrument-readings/{row['id']}/override",
+            headers=auth_headers,
+            json={"note": "Plant manager accepted laser shot after re-check on bed."},
+            timeout=30,
+        )
+        assert overridden.status_code == 200, overridden.text
+        assert overridden.json()["status"] == "override"

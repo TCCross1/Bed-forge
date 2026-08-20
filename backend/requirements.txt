@@ -17,3 +17,6 @@ reportlab==4.2.2
 requests==2.34.2
 starlette==0.37.2
 uvicorn==0.25.0
+cryptography==44.0.3
+qrcode==8.2
+pytest-xdist==3.8.0

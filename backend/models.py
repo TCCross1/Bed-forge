@@ -533,3 +533,547 @@ class JobBeamSpec(BaseModel):
     locked_at: Optional[str] = None
     created_at: str = Field(default_factory=now_iso)
     updated_at: str = Field(default_factory=now_iso)
+
+
+LEVEL_TOLERANCE_IN = 0.125
+ROLL_STATUSES = ["draft", "extracted", "confirmed", "assigned", "depleted"]
+LOW_CONFIDENCE = 0.72
+
+
+class UserAdminCreate(BaseModel):
+    email: EmailStr
+    password: str = Field(min_length=10)
+    name: str
+    role: str = "qc_tech"
+
+
+class UserAdminUpdate(BaseModel):
+    name: Optional[str] = None
+    role: Optional[str] = None
+    disabled: Optional[bool] = None
+    must_change_password: Optional[bool] = None
+
+
+class OverrideRequest(BaseModel):
+    kind: str
+    target_id: str
+    reason: str = Field(min_length=8)
+    hours: int = 8
+
+
+class SecuritySettingsUpdate(BaseModel):
+    session_minutes: Optional[int] = None
+    idle_minutes: Optional[int] = None
+    ip_allowlist: Optional[List[str]] = None
+    office_ip_enforced: Optional[bool] = None
+    bind_device: Optional[bool] = None
+    retention_days: Optional[int] = None
+    camber_tolerance_in: Optional[float] = None
+    length_tolerance_in: Optional[float] = None
+    legal_hold: Optional[bool] = None
+    ncr_cost_usd: Optional[float] = None
+    scrap_cost_usd: Optional[float] = None
+    bed_day_cost_usd: Optional[float] = None
+    overtime_hold_usd: Optional[float] = None
+    required_release_psi: Optional[float] = None
+    maturity_su_psi: Optional[float] = None
+    maturity_k_hours: Optional[float] = None
+
+
+class FreshConcreteTest(BaseModel):
+    id: str = Field(default_factory=new_id)
+    job_id: str
+    pour_id: str
+    beam_ids: List[str] = Field(default_factory=list)
+    bed_id: Optional[str] = None
+    test_types: List[str] = Field(default_factory=lambda: ["spread"])
+    mix_ticket: str = ""
+    load_number: str = ""
+    concrete_temp_f: Optional[float] = None
+    air_content_pct: Optional[float] = None
+    time_sampled: str = Field(default_factory=now_iso)
+    spread_d1_in: Optional[float] = None
+    spread_d2_in: Optional[float] = None
+    spread_avg_in: Optional[float] = None
+    t50_sec: Optional[float] = None
+    visual_stability: Optional[str] = None
+    spread_spec_min_in: Optional[float] = None
+    spread_spec_max_in: Optional[float] = None
+    slump_in: Optional[float] = None
+    slump_spec_min_in: Optional[float] = None
+    slump_spec_max_in: Optional[float] = None
+    unconstrained_avg_in: Optional[float] = None
+    jring_d1_in: Optional[float] = None
+    jring_d2_in: Optional[float] = None
+    jring_avg_in: Optional[float] = None
+    blocking_delta_in: Optional[float] = None
+    blocking_assessment: Optional[str] = None
+    blocking_label: Optional[str] = None
+    blocking_detail: Optional[str] = None
+    jring_note: str = "standard J-ring"
+    gate: str = "hold"
+    notes: str = ""
+    inspector: str = ""
+    created_at: str = Field(default_factory=now_iso)
+
+
+class FreshConcreteTestCreate(BaseModel):
+    job_id: str
+    pour_id: str
+    beam_ids: List[str] = Field(default_factory=list)
+    bed_id: Optional[str] = None
+    test_types: List[str] = Field(default_factory=lambda: ["spread"])
+    mix_ticket: str = ""
+    load_number: str = ""
+    concrete_temp_f: Optional[float] = None
+    air_content_pct: Optional[float] = None
+    time_sampled: Optional[str] = None
+    spread_d1_in: Optional[float] = None
+    spread_d2_in: Optional[float] = None
+    t50_sec: Optional[float] = None
+    visual_stability: Optional[str] = None
+    spread_spec_min_in: Optional[float] = None
+    spread_spec_max_in: Optional[float] = None
+    slump_in: Optional[float] = None
+    slump_spec_min_in: Optional[float] = None
+    slump_spec_max_in: Optional[float] = None
+    unconstrained_avg_in: Optional[float] = None
+    jring_d1_in: Optional[float] = None
+    jring_d2_in: Optional[float] = None
+    jring_note: str = "standard J-ring"
+    gate: str = "hold"
+    notes: str = ""
+
+
+class MixDesign(BaseModel):
+    id: str = Field(default_factory=new_id)
+    mix_code: str
+    name: str = ""
+    target_strength_psi: Optional[float] = None
+    target_air_pct: Optional[float] = None
+    target_slump_in: Optional[float] = None
+    target_spread_in: Optional[float] = None
+    target_temp_f: Optional[float] = None
+    notes: str = ""
+    ingredients: List[Dict[str, Any]] = Field(default_factory=list)
+    created_by: str = ""
+    created_at: str = Field(default_factory=now_iso)
+
+
+class MixDesignCreate(BaseModel):
+    mix_code: str
+    name: str = ""
+    target_strength_psi: Optional[float] = None
+    target_air_pct: Optional[float] = None
+    target_slump_in: Optional[float] = None
+    target_spread_in: Optional[float] = None
+    target_temp_f: Optional[float] = None
+    notes: str = ""
+    ingredients: List[Dict[str, Any]] = Field(default_factory=list)
+
+
+class BatchRecordUpdate(BaseModel):
+    job_id: Optional[str] = None
+    pour_id: Optional[str] = None
+    bed_ids: Optional[List[str]] = None
+    beam_ids: Optional[List[str]] = None
+    batched_at: Optional[str] = None
+    mixer_operator: Optional[str] = None
+    mix_code: Optional[str] = None
+    mix_design_id: Optional[str] = None
+    target_strength_psi: Optional[float] = None
+    target_air_pct: Optional[float] = None
+    target_slump_in: Optional[float] = None
+    target_spread_in: Optional[float] = None
+    target_temp_f: Optional[float] = None
+    batch_size: Optional[float] = None
+    batch_unit: Optional[str] = None
+    mixing_time_sec: Optional[float] = None
+    sequence_notes: Optional[str] = None
+    truck_id: Optional[str] = None
+    deviations: Optional[str] = None
+    ingredients: Optional[List[Dict[str, Any]]] = None
+    environment: Optional[Dict[str, Any]] = None
+    fresh_test_ids: Optional[List[str]] = None
+    cylinder_ids: Optional[List[str]] = None
+
+
+class BatchAmendInput(BaseModel):
+    reason: str = Field(min_length=8)
+    patch: BatchRecordUpdate
+
+
+class BatchLinkQcInput(BaseModel):
+    fresh_test_ids: Optional[List[str]] = None
+    cylinder_ids: Optional[List[str]] = None
+
+
+class BedAssignment(BaseModel):
+    id: str = Field(default_factory=new_id)
+    bed_id: str
+    beam_id: str
+    job_id: Optional[str] = None
+    pour_id: Optional[str] = None
+    position_on_bed: int = 1
+    station_ft: float = 0.0
+    marked_end_toward: str = "header"
+    scheduled_date: str
+    scheduled_end_date: Optional[str] = None
+    actual_start: Optional[str] = None
+    actual_end: Optional[str] = None
+    production_status: str = "planned"
+    notes: str = ""
+    created_by: str = ""
+    created_at: str = Field(default_factory=now_iso)
+    updated_at: str = Field(default_factory=now_iso)
+
+
+class BedAssignmentCreate(BaseModel):
+    bed_id: str
+    beam_id: str
+    job_id: Optional[str] = None
+    pour_id: Optional[str] = None
+    position_on_bed: Optional[int] = None
+    marked_end_toward: str = "header"
+    scheduled_date: str
+    scheduled_end_date: Optional[str] = None
+    production_status: Optional[str] = None
+    notes: str = ""
+
+
+class BedAssignmentUpdate(BaseModel):
+    bed_id: Optional[str] = None
+    position_on_bed: Optional[int] = None
+    marked_end_toward: Optional[str] = None
+    scheduled_date: Optional[str] = None
+    scheduled_end_date: Optional[str] = None
+    actual_start: Optional[str] = None
+    actual_end: Optional[str] = None
+    production_status: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class BedReorder(BaseModel):
+    date: str
+    assignment_ids: List[str]
+
+
+class QrLabelRequest(BaseModel):
+    pour_id: Optional[str] = None
+    job_id: Optional[str] = None
+    beam_ids: Optional[List[str]] = None
+
+
+class ARMeasurement(BaseModel):
+    id: str = Field(default_factory=new_id)
+    beam_id: Optional[str] = None
+    bed_id: Optional[str] = None
+    purpose: str = "level"
+    point_a: Dict[str, float] = Field(default_factory=lambda: {"x": 0.0, "y": 0.0, "z": 0.0})
+    point_b: Dict[str, float] = Field(default_factory=lambda: {"x": 0.0, "y": 0.0, "z": 0.0})
+    distance_ft: float = 0.0
+    delta_height_in: float = 0.0
+    level: bool = False
+    forced: bool = False
+    confidence: float = 0.0
+    sample_count: int = 12
+    lidar: bool = False
+    engine: str = "web"
+    device_class: str = "field"
+    device_model: str = ""
+    warning: str = ""
+    note: str = ""
+    photo_data: str = ""
+    element_id: Optional[str] = None
+    run_id: Optional[str] = None
+    station_index: Optional[int] = None
+    origin_label: str = ""
+    device_id: str = ""
+    scale_factor: Optional[float] = None
+    created_by: str = ""
+    created_at: str = Field(default_factory=now_iso)
+
+
+class ARMeasurementCreate(BaseModel):
+    beam_id: Optional[str] = None
+    bed_id: Optional[str] = None
+    purpose: str = "level"
+    point_a: Dict[str, float]
+    point_b: Dict[str, float]
+    distance_ft: Optional[float] = None
+    delta_height_in: Optional[float] = None
+    level: Optional[bool] = None
+    forced: bool = False
+    confidence: float = 0.0
+    sample_count: int = 12
+    lidar: bool = False
+    engine: str = "web"
+    device_class: str = "field"
+    device_model: str = ""
+    warning: str = ""
+    note: str = ""
+    photo_data: str = ""
+    element_id: Optional[str] = None
+    run_id: Optional[str] = None
+    station_index: Optional[int] = None
+    origin_label: str = ""
+    device_id: str = ""
+
+
+class TapeShotIn(BaseModel):
+    station_index: int = 1
+    point_b: Dict[str, float] = Field(default_factory=lambda: {"x": 0.0, "y": 0.0, "z": 0.0})
+    distance_ft: Optional[float] = None
+    station_ft: Optional[float] = None
+    delta_height_in: Optional[float] = None
+    level: Optional[bool] = None
+    forced: bool = False
+    confidence: float = 0.0
+    sample_count: int = 12
+    note: str = ""
+    element_id: Optional[str] = None
+    warning: str = ""
+
+
+class TapeRunCreate(BaseModel):
+    beam_id: Optional[str] = None
+    bed_id: Optional[str] = None
+    purpose: str = "tape"
+    origin_label: str = "header"
+    point_a: Dict[str, float] = Field(default_factory=lambda: {"x": 0.0, "y": 0.0, "z": 0.0})
+    shots: List[TapeShotIn] = Field(default_factory=list)
+    engine: str = "web"
+    device_class: str = "field"
+    device_model: str = ""
+    lidar: bool = False
+    note: str = ""
+    device_id: str = ""
+
+
+class TapeRunPreview(BaseModel):
+    beam_id: Optional[str] = None
+    shots: List[TapeShotIn] = Field(default_factory=list)
+
+
+class DeviceRegistration(BaseModel):
+    id: str = Field(default_factory=new_id)
+    platform: str = "ios"
+    device_class: str = "field"
+    push_token: str = ""
+    model: str = ""
+    user_id: str = ""
+    created_at: str = Field(default_factory=now_iso)
+    updated_at: str = Field(default_factory=now_iso)
+
+
+class DeviceRegistrationCreate(BaseModel):
+    platform: str = "web"
+    device_class: str = "field"
+    push_token: str = ""
+    model: str = ""
+
+
+class TapeCalibrationCreate(BaseModel):
+    device_id: str = ""
+    known_length_ft: float
+    measured_length_ft: float
+    engine: str = "web"
+    lidar: bool = False
+    device_class: str = "field"
+    device_model: str = ""
+    note: str = ""
+
+
+class NCRTransition(BaseModel):
+    status: str
+    note: str = ""
+    root_cause: Optional[str] = None
+    corrective_action: Optional[str] = None
+    verification_by: Optional[str] = None
+    verification_how: Optional[str] = None
+    signoff: Optional[str] = None
+
+
+class StrandRollPhoto(BaseModel):
+    id: str = Field(default_factory=new_id)
+    kind: str = "tag"
+    filename: str = ""
+    url: str = ""
+    content_type: str = "image/jpeg"
+    captured_at: str = Field(default_factory=now_iso)
+
+
+class StrandRoll(BaseModel):
+    id: str = Field(default_factory=new_id)
+    reel_number: str = ""
+    heat_number: str = ""
+    lot_number: str = ""
+    pack_weight: str = ""
+    pack_length: str = ""
+    astm_standard: str = ""
+    strand_grade: str = ""
+    strand_type: str = "Low-Relaxation"
+    nominal_diameter: str = ""
+    area_in2: Optional[float] = None
+    cert_values: Dict[str, Any] = Field(default_factory=dict)
+    photos: List[StrandRollPhoto] = Field(default_factory=list)
+    mtc_url: str = ""
+    received_date: str = ""
+    status: str = "draft"
+    extractor: str = ""
+    extractor_confidence: float = 0.0
+    field_confidence: Dict[str, float] = Field(default_factory=dict)
+    raw_text: str = ""
+    notes: str = ""
+    logged_by: str = ""
+    logged_at: str = Field(default_factory=now_iso)
+    confirmed_by: str = ""
+    confirmed_at: Optional[str] = None
+    created_at: str = Field(default_factory=now_iso)
+    updated_at: str = Field(default_factory=now_iso)
+
+
+class StrandRollAssignment(BaseModel):
+    id: str = Field(default_factory=new_id)
+    roll_id: str
+    bed_id: str
+    pour_id: Optional[str] = None
+    beam_ids: List[str] = Field(default_factory=list)
+    allocated_length: Optional[float] = None
+    logged_by: str = ""
+    logged_at: str = Field(default_factory=now_iso)
+    created_at: str = Field(default_factory=now_iso)
+
+
+class StrandRollAssignInput(BaseModel):
+    bed_id: str
+    pour_id: Optional[str] = None
+    beam_ids: Optional[List[str]] = None
+    allocated_length: Optional[float] = None
+
+
+class CompanySettings(BaseModel):
+    id: str = "plant"
+    tenant_id: str = "default"
+    company_name: str = "PRESTRESS SERVICES INDUSTRIES LLC"
+    app_name: str = "BedForge QC"
+    tag_header: str = ""
+    logo_filename: str = ""
+    logo_content_type: str = ""
+    updated_by: str = ""
+    updated_at: str = Field(default_factory=now_iso)
+    created_at: str = Field(default_factory=now_iso)
+    session_minutes: int = 480
+    idle_minutes: int = 30
+    ip_allowlist: List[str] = Field(default_factory=list)
+    office_ip_enforced: bool = False
+    bind_device: bool = False
+    retention_days: int = 2555
+    camber_tolerance_in: float = 0.125
+    length_tolerance_in: float = 0.5
+    legal_hold: bool = False
+    ncr_cost_usd: float = 2500.0
+    scrap_cost_usd: float = 8000.0
+    bed_day_cost_usd: float = 3500.0
+    overtime_hold_usd: float = 1800.0
+    required_release_psi: float = 4000.0
+    maturity_su_psi: float = 8500.0
+    maturity_k_hours: float = 18.0
+
+
+class CompanySettingsUpdate(BaseModel):
+    company_name: Optional[str] = None
+    app_name: Optional[str] = None
+    tag_header: Optional[str] = None
+
+
+class CylinderJobSlot(BaseModel):
+    slot: int = 1
+    use_today: bool = False
+    qc_tech: str = ""
+    job_number: str = ""
+    job_id: Optional[str] = None
+    expected_beam_count: int = 0
+    pour_number: str = ""
+    pour_id: Optional[str] = None
+    pour_date: str = ""
+    cylinder_tags_needed: int = 0
+    beam_marks: List[str] = Field(default_factory=list)
+
+
+class CylinderTagRunInput(BaseModel):
+    run_date: Optional[str] = None
+    job_count: int = 1
+    slots: List[CylinderJobSlot] = Field(default_factory=list)
+    notes: str = ""
+
+
+class CylinderCrushInput(BaseModel):
+    crush_psi: Optional[float] = None
+    crush_date: Optional[str] = None
+    crush_age_days: Optional[int] = None
+    required_psi: Optional[float] = None
+    release_ok: Optional[bool] = None
+    notes: Optional[str] = None
+
+
+class MaturitySampleCreate(BaseModel):
+    pour_id: Optional[str] = None
+    bed_id: Optional[str] = None
+    beam_id: Optional[str] = None
+    temp_f: float
+    recorded_at: Optional[str] = None
+    source: str = "probe"
+    note: str = ""
+
+
+class OwnerPackageCreate(BaseModel):
+    pour_id: str
+    include_excel: bool = True
+    note: str = ""
+
+
+class InstrumentReading(BaseModel):
+    id: str = Field(default_factory=new_id)
+    job_id: Optional[str] = None
+    beam_id: Optional[str] = None
+    bed_id: Optional[str] = None
+    station: str = ""
+    purpose: str = "length"
+    source: str = "manual"
+    device_name: str = ""
+    measured_in: float
+    target_in: Optional[float] = None
+    tolerance_in: float = 0.125
+    delta_in: Optional[float] = None
+    within_tolerance: bool = True
+    status: str = "pass"
+    override_note: Optional[str] = None
+    override_by: Optional[str] = None
+    captured_by: str = ""
+    captured_at: str = Field(default_factory=now_iso)
+    created_at: str = Field(default_factory=now_iso)
+
+
+class InstrumentReadingCreate(BaseModel):
+    job_id: Optional[str] = None
+    beam_id: Optional[str] = None
+    bed_id: Optional[str] = None
+    station: str = ""
+    purpose: str = "length"
+    source: str = "manual"
+    device_name: str = ""
+    measured_in: float
+    target_in: Optional[float] = None
+    tolerance_in: float = 0.125
+    note: str = ""
+
+
+class InstrumentReadingEvaluateInput(BaseModel):
+    measured_in: float
+    target_in: Optional[float] = None
+    tolerance_in: float = 0.125
+
+
+class InstrumentReadingOverride(BaseModel):
+    note: str = Field(min_length=8, max_length=2000)

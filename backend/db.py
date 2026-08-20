@@ -8,7 +8,13 @@ logger = logging.getLogger(__name__)
 
 def _matches(document, query):
     query = query or {}
-    return all(document.get(key) == value for key, value in query.items())
+    for key, value in query.items():
+        if isinstance(value, dict) and "$in" in value:
+            if document.get(key) not in value["$in"]:
+                return False
+        elif document.get(key) != value:
+            return False
+    return True
 
 
 def _project(document, projection):

@@ -24,9 +24,11 @@ from models import (
     BatchRecord, BatchRecordCreate, NCR, NCRCreate, NCRUpdate, LicenseState, LicenseActivateInput, now_iso,
     BlueprintDocument, BlueprintExtraction, BlueprintExtractionPatch, BlueprintField, BlueprintAuditEvent,
     BlueprintLockInput, LockedBlueprintRevision,
+    InstrumentReading, InstrumentReadingCreate, InstrumentReadingEvaluateInput, InstrumentReadingOverride,
 )
 from beam_spec import materialize_job_beam_specs, strand_engine_stale, twin_beam_from_spec
 from auth import router as auth_router, get_current_user, require_roles, seed_admin
+from instrument_reading import can_override_instrument, evaluate_instrument_reading
 from job_cabinet import (
     QC_PHOTO_KINDS,
     ROLL_STORAGE_DIR,
@@ -1097,6 +1099,16 @@ async def beds_suggest(date: str | None = None, user=Depends(get_current_user)):
     return {"suggestions": [], "date": date}
 
 
+@api.get("/beds/plant-layout")
+async def plant_layout(user=Depends(get_current_user)):
+    try:
+        beds = await db.beds.find({}, {"_id": 0}).sort("bed_number", 1).to_list(20)
+        return {"date": now_iso()[:10], "beds": beds}
+    except Exception:
+        logger.exception("plant_layout failed")
+        raise HTTPException(status_code=500, detail="Failed to load plant bed twins")
+
+
 @api.get("/planner/pool")
 async def planner_pool(date: str | None = None, user=Depends(get_current_user)):
     try:
@@ -1478,11 +1490,109 @@ async def create_tension_report(payload: TensionReportCreate, user=Depends(get_c
 
 
 # ---------------- Camber ----------------
+@api.get("/camber-readings")
+async def list_camber(beam_id: str = None, user=Depends(get_current_user)):
+    try:
+        q = {"beam_id": beam_id} if beam_id else {}
+        return await db.camber_readings.find(q, {"_id": 0}).to_list(500)
+    except Exception:
+        logger.exception("Failed to list camber readings")
+        raise HTTPException(status_code=500, detail="Failed to list camber readings")
+
+
 @api.post("/camber-readings")
 async def create_camber(payload: CamberReadingCreate, user=Depends(get_current_user)):
     cr = CamberReading(**payload.model_dump())
     await db.camber_readings.insert_one(cr.model_dump())
     return cr.model_dump()
+
+
+# ---------------- DISTO / LDM ----------------
+@api.post("/instrument-readings/evaluate")
+async def evaluate_instrument(payload: InstrumentReadingEvaluateInput, user=Depends(get_current_user)):
+    try:
+        return evaluate_instrument_reading(payload.measured_in, payload.target_in, payload.tolerance_in)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception:
+        logger.exception("instrument evaluate failed user=%s", user.get("email"))
+        raise HTTPException(status_code=500, detail="Failed to evaluate instrument reading")
+
+
+@api.get("/instrument-readings")
+async def list_instrument_readings(
+    job_id: str | None = None,
+    beam_id: str | None = None,
+    user=Depends(get_current_user),
+):
+    try:
+        query = {}
+        if job_id:
+            query["job_id"] = job_id
+        if beam_id:
+            query["beam_id"] = beam_id
+        rows = await db.instrument_readings.find(query, {"_id": 0}).sort("captured_at", -1).to_list(500)
+        return rows
+    except Exception:
+        logger.exception("instrument list failed user=%s", user.get("email"))
+        raise HTTPException(status_code=500, detail="Failed to list instrument readings")
+
+
+@api.post("/instrument-readings")
+async def create_instrument_reading(payload: InstrumentReadingCreate, user=Depends(get_current_user)):
+    try:
+        gate = evaluate_instrument_reading(payload.measured_in, payload.target_in, payload.tolerance_in)
+        rec = InstrumentReading(
+            job_id=payload.job_id,
+            beam_id=payload.beam_id,
+            bed_id=payload.bed_id,
+            station=payload.station,
+            purpose=payload.purpose,
+            source=payload.source or "manual",
+            device_name=payload.device_name,
+            measured_in=gate["measured_in"],
+            target_in=gate["target_in"],
+            tolerance_in=gate["tolerance_in"],
+            delta_in=gate["delta_in"],
+            within_tolerance=gate["within_tolerance"],
+            status=gate["status"],
+            captured_by=user.get("name") or user.get("email") or "",
+        )
+        await db.instrument_readings.insert_one(rec.model_dump())
+        logger.info(
+            "instrument reading saved id=%s status=%s user=%s beam=%s",
+            rec.id, rec.status, user.get("email"), rec.beam_id,
+        )
+        return rec.model_dump()
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception:
+        logger.exception("instrument create failed user=%s", user.get("email"))
+        raise HTTPException(status_code=500, detail="Failed to save instrument reading")
+
+
+@api.post("/instrument-readings/{reading_id}/override")
+async def override_instrument_reading(reading_id: str, payload: InstrumentReadingOverride, user=Depends(get_current_user)):
+    try:
+        if not can_override_instrument(user.get("role")):
+            raise HTTPException(status_code=403, detail="Only a QC supervisor or plant manager can override a DISTO gate")
+        rec = await db.instrument_readings.find_one({"id": reading_id}, {"_id": 0})
+        if not rec:
+            raise HTTPException(status_code=404, detail="Instrument reading not found")
+        updates = {
+            "status": "override",
+            "override_note": payload.note.strip(),
+            "override_by": user.get("email") or user.get("name") or "",
+        }
+        await db.instrument_readings.update_one({"id": reading_id}, {"$set": updates})
+        rec.update(updates)
+        logger.info("instrument override id=%s user=%s", reading_id, user.get("email"))
+        return rec
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("instrument override failed id=%s user=%s", reading_id, user.get("email"))
+        raise HTTPException(status_code=500, detail="Failed to override instrument reading")
 
 
 # ---------------- Anomalies / Crack Map ----------------
@@ -1650,6 +1760,26 @@ async def export_package_pdf(
 
 app.include_router(auth_router)
 app.include_router(api)
+try:
+    from ar_routes import router as ar_router
+    from fresh_routes import router as fresh_router
+    from company_routes import router as company_router
+    from cylinder_routes import router as cylinder_router
+    from coach_routes import router as coach_router
+    from beam_qr_routes import router as beam_qr_router
+    from owner_routes import router as owner_router
+    from control_routes import router as control_router
+    app.include_router(ar_router)
+    app.include_router(fresh_router)
+    app.include_router(company_router)
+    app.include_router(cylinder_router)
+    app.include_router(coach_router)
+    app.include_router(beam_qr_router)
+    app.include_router(owner_router)
+    app.include_router(control_router)
+    logger.info("Mounted recovered feature routers (tape, fresh, company, cylinders, coach, QR, owner, control).")
+except Exception:
+    logger.exception("Failed to mount recovered feature routers; continuing with core API")
 
 app.add_middleware(
     CORSMiddleware,
@@ -1680,6 +1810,8 @@ async def startup():
     await db.user_open_jobs.create_index("user_id", unique=True)
     await db.strand_rolls.create_index("job_id")
     await db.job_qc_photos.create_index([("job_id", 1), ("pour_date", 1), ("kind", 1)])
+    await db.instrument_readings.create_index("job_id")
+    await db.instrument_readings.create_index("beam_id")
     ROLL_STORAGE_DIR.mkdir(parents=True, exist_ok=True)
     QC_PHOTO_STORAGE_DIR.mkdir(parents=True, exist_ok=True)
     await seed_admin()

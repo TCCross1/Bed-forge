@@ -103,6 +103,7 @@ export function isFieldWrite(url = "", method = "get") {
   if (/\/beams\/[^/]+$/.test(path) && verb === "patch") return true;
   if (path.includes("/ar-tape-runs")) return true;
   if (path.includes("/tape-calibration")) return true;
+  if (path.includes("/instrument-readings")) return true;
   if (path.includes("/cylinders/") && path.includes("/crush")) return true;
   if (/\/batches\/[^/]+$/.test(path) && verb === "patch") return true;
   if (/\/batches\/[^/]+\/link-qc$/.test(path)) return true;

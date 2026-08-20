@@ -18,6 +18,7 @@ import FormsExport from "./pages/FormsExport";
 import BedPlanner from "./pages/BedPlanner";
 import CylinderTags from "./pages/CylinderTags";
 import ARMeasure from "./pages/ARMeasure";
+import DistoMeasure from "./pages/DistoMeasure";
 import BeamDossier from "./pages/BeamDossier";
 import QrLabels from "./pages/QrLabels";
 import ScanBeam from "./pages/ScanBeam";
@@ -140,6 +141,7 @@ function AppRoutes() {
       <Route path="/qr" element={<Protected><QrLabels /></Protected>} />
       <Route path="/scan" element={<Protected><ScanBeam /></Protected>} />
       <Route path="/measure" element={<Protected><ARMeasure /></Protected>} />
+      <Route path="/disto" element={<Protected><DistoMeasure /></Protected>} />
       <Route path="/command-board" element={<Protected><CommandBoard /></Protected>} />
       <Route path="/command" element={<Navigate to="/command-board" replace />} />
       <Route path="/licensing" element={<Protected><Licensing /></Protected>} />

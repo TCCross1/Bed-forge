@@ -389,3 +389,63 @@ def build_package_pdf(context: dict) -> bytes:
     )
     buf.seek(0)
     return buf.read()
+
+
+def build_package_xlsx(ctx: dict) -> bytes:
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Border, Side, Alignment
+
+    wb = Workbook()
+    header_font = Font(bold=True, color="FFFFFF", name="Arial")
+    title_font = Font(bold=True, size=16, name="Arial")
+    fill = PatternFill("solid", fgColor="0F1218")
+    border = Border(
+        left=Side(style="thin", color="D0D7DE"),
+        right=Side(style="thin", color="D0D7DE"),
+        top=Side(style="thin", color="D0D7DE"),
+        bottom=Side(style="thin", color="D0D7DE"),
+    )
+    cover = wb.active
+    cover.title = "Cover"
+    company = (ctx.get("company") or {}).get("company_name") or BRAND
+    pour = ctx.get("pour") or {}
+    job = ctx.get("job") or {}
+    beams = ctx.get("beams") or []
+    cover["A1"] = company
+    cover["A1"].font = title_font
+    cover["A2"] = "DOT / OWNER QUALITY PACKAGE"
+    rows = [
+        ("Job", job.get("job_number") or ""),
+        ("Customer", job.get("customer") or ""),
+        ("Pour", pour.get("pour_number") or ""),
+        ("Pour date", pour.get("pour_date") or ""),
+        ("Beams", safe_join(beam.get("mark") for beam in beams) if beams else safe_join(ctx.get("beam_marks") or [])),
+        ("Generated", doc_stamp()),
+    ]
+    for idx, (label, value) in enumerate(rows, 4):
+        cover.cell(idx, 1, label)
+        cover.cell(idx, 2, value)
+
+    def sheet(name, headers, data_rows):
+        ws = wb.create_sheet(name[:31])
+        for i, h in enumerate(headers, 1):
+            c = ws.cell(row=1, column=i, value=h)
+            c.font = header_font
+            c.fill = fill
+            c.alignment = Alignment(horizontal="center")
+            c.border = border
+        for r, row in enumerate(data_rows, 2):
+            for i, val in enumerate(row, 1):
+                ws.cell(row=r, column=i, value=val).border = border
+        for col in "ABCDEFGHIJK":
+            ws.column_dimensions[col].width = 18
+
+    sheet("QIR", ["Beam", "Section", "Status", "Inspector", "Date"], [[i.get("beam_mark") or i.get("beam_id"), i.get("section"), i.get("status"), i.get("inspector"), str(i.get("created_at") or "")[:10]] for i in ctx.get("inspections") or []])
+    sheet("Tension", ["Bed", "Jack", "Elongation", "Within", "By"], [[t.get("bed_number"), t.get("jack_id") or t.get("jack"), t.get("measured_elongation_in") or t.get("elongation_in"), "YES" if t.get("within_tolerance") else "NO", t.get("created_by") or t.get("inspector") or ""] for t in ctx.get("tension_reports") or []])
+    sheet("Strength_Camber", ["Beam", "Required psi", "Release psi", "Measured", "Date"], [[c.get("beam_mark") or c.get("beam_id"), c.get("required_strength_psi"), c.get("release_strength_psi"), c.get("measured_camber_in") or c.get("midspan_in"), str(c.get("created_at") or c.get("reading_date") or "")[:10]] for c in ctx.get("camber_readings") or []])
+    sheet("Batch", ["Ticket", "Mix", "Ambient", "Concrete", "Wind", "Date"], [[b.get("ticket_number"), b.get("mix_design") or b.get("mix_code"), (b.get("environment") or {}).get("ambient_f") or b.get("ambient_temp_f"), (b.get("environment") or {}).get("mix_temp_f") or b.get("concrete_temp_f"), (b.get("environment") or {}).get("wind_mph") or b.get("wind_mph"), str(b.get("created_at") or b.get("batched_at") or "")[:10]] for b in ctx.get("batch_records") or ([ctx.get("batch_record")] if ctx.get("batch_record") else [])])
+    sheet("NCR", ["Code", "Title", "Status", "Severity", "Owner"], [[n.get("code"), n.get("title") or n.get("description"), n.get("status"), n.get("severity"), n.get("owner") or n.get("assigned_to")] for n in ctx.get("ncrs") or []])
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return buf.read()

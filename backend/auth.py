@@ -73,12 +73,27 @@ async def get_current_user(request: Request) -> dict:
         raise HTTPException(status_code=401, detail="Invalid token")
 
 
+async def get_optional_user(request: Request) -> dict | None:
+    """Return the user when a valid JWT is present; otherwise None. Never 401."""
+    try:
+        return await get_current_user(request)
+    except HTTPException:
+        return None
+    except Exception:
+        logger.exception("Optional auth lookup failed")
+        return None
+
+
 def require_roles(*roles):
     async def checker(user: dict = Depends(get_current_user)):
         if user["role"] not in roles:
             raise HTTPException(status_code=403, detail="Insufficient permissions")
         return user
     return checker
+
+
+def require_exec():
+    return require_roles("admin", "executive")
 
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])

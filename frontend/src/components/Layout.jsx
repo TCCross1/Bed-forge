@@ -27,6 +27,7 @@ import {
   KeyRound,
   MonitorPlay,
   ScrollText,
+  Bluetooth,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { useDevice } from "../context/DeviceContext";
@@ -83,15 +84,16 @@ function navForRole(role) {
   const jobs = { to: "/jobs", label: "Open Job", icon: Briefcase, testid: "nav-jobs" };
   const specs = { to: "/job-specs", label: "JOB Specs / Drawings", icon: Box, testid: "nav-twin", feature: "digital_twin" };
   const tension = { to: "/tension", label: "Tension / Strands", icon: Calculator, testid: "nav-tension" };
+  const disto = { to: "/disto", label: "DISTO / LDM", icon: Bluetooth, testid: "nav-disto" };
   const inspect = { to: "/inspection", label: "Inspect", icon: ClipboardCheck, testid: "nav-inspection" };
   const tags = { to: "/tags", label: "Tags", icon: Tags, testid: "nav-tags" };
   const forms = { to: "/forms", label: "Forms", icon: FileSpreadsheet, testid: "nav-forms", feature: "package_export" };
   const packages = { to: "/packages", label: "Packages", icon: Package, testid: "nav-packages" };
   const fresh = { to: "/fresh", label: "Fresh Test", icon: FlaskConical, testid: "nav-fresh", accent: true };
   const batch = { to: "/batch", label: "Batch Plant", icon: Factory, testid: "nav-batch", feature: "batch_plant" };
-  if (role === "qc_tech") return [board, specs, inspect, tension, tags, forms, fresh];
-  if (role === "production") return [board, specs, tension, tags, fresh, ...(canSeeBatch(role) ? [batch] : [])];
-  return [board, jobs, specs, tension, inspect, tags, forms, packages, fresh, batch];
+  if (role === "qc_tech") return [board, specs, inspect, tension, disto, tags, forms, fresh];
+  if (role === "production") return [board, specs, tension, disto, tags, fresh, ...(canSeeBatch(role) ? [batch] : [])];
+  return [board, jobs, specs, tension, disto, inspect, tags, forms, packages, fresh, batch];
 }
 
 function fieldNav() {
@@ -99,6 +101,7 @@ function fieldNav() {
     { to: "/", label: "Board", icon: LayoutGrid, testid: "nav-dashboard" },
     { to: "/job-specs", label: "Specs", icon: Box, testid: "nav-twin", feature: "digital_twin" },
     { to: "/tension", label: "Tension", icon: Calculator, testid: "nav-tension" },
+    { to: "/disto", label: "DISTO", icon: Bluetooth, testid: "nav-disto" },
     { to: "/inspection", label: "Inspect", icon: ClipboardCheck, testid: "nav-inspection" },
     { to: "/fresh", label: "Fresh", icon: FlaskConical, testid: "nav-fresh", accent: true },
   ];
@@ -115,6 +118,7 @@ function secondaryNav(role) {
     { to: "/finish", label: "Finish", icon: Sparkles, testid: "nav-finish" },
     { to: "/release", label: "Release", icon: Truck, testid: "nav-release" },
     { to: "/measure", label: "Digital Tape", icon: ScanLine, testid: "nav-measure" },
+    { to: "/disto", label: "DISTO / LDM", icon: Bluetooth, testid: "nav-disto-more" },
     { to: "/scan", label: "Scan QR", icon: ScanLine, testid: "nav-scan" },
     { to: "/qr", label: "QR Labels", icon: QrCode, testid: "nav-qr" },
     { to: "/guide", label: "Tutorial", icon: BookOpen, testid: "nav-guide" },
@@ -208,6 +212,7 @@ export default function Layout({ children }) {
     { to: "/forms", label: "Forms", icon: FileSpreadsheet, testid: "nav-forms", feature: "package_export" },
     ...(canSeePackages(user?.role) ? [{ to: "/packages", label: "Packages", icon: Package, testid: "nav-packages" }] : []),
     { to: "/measure", label: "Digital Tape", icon: ScanLine, testid: "nav-measure" },
+    { to: "/disto", label: "DISTO / LDM", icon: Bluetooth, testid: "nav-disto-sheet" },
     { to: "/camber", label: "Camber", icon: Ruler, testid: "nav-camber" },
     { to: "/finish", label: "Finish", icon: Sparkles, testid: "nav-finish" },
     { to: "/release", label: "Release", icon: Truck, testid: "nav-release" },
