@@ -2,6 +2,7 @@ import React, { Suspense, useCallback, useEffect, useMemo, useRef, useState } fr
 import { Canvas, useThree } from "@react-three/fiber";
 import { Html, Line, OrbitControls } from "@react-three/drei";
 import * as THREE from "three";
+import { collectEmbeddedHardware, ELEMENT_COLORS, unconfirmedParkingZ } from "../lib/beamSpec";
 
 const inchesToFeet = (value = 0) => value / 12;
 const concreteBase = "#C5CBD4";
@@ -300,6 +301,69 @@ function clickHardware(event, payload, onHardwareSelect) {
   onHardwareSelect?.(payload);
 }
 
+const EMBED_KIND_SLOT = {
+  lift_loop: 0,
+  insert: 1,
+  tube: 2,
+  tie_rod: 3,
+  drain: 4,
+  hold_down: 5,
+  grout_groove: 6,
+  bituminous_zone: 7,
+};
+
+function specEmbeds(beam, kind) {
+  return collectEmbeddedHardware(beam, kind);
+}
+
+function embedRenderZ(spec, item, index, kind) {
+  if (!item?.position_unconfirmed) {
+    const stationed = finiteNumber(item?.station_ft);
+    if (stationed != null) return stationed;
+  }
+  return unconfirmedParkingZ(spec.length, index, EMBED_KIND_SLOT[kind] || 0);
+}
+
+function inspectorPayload(beam, item, typeLabel) {
+  return {
+    id: item.id,
+    type: typeLabel,
+    beamMark: beam.mark,
+    spec: {
+      type: item.type_code || item.name || typeLabel,
+      station_ft: item.position_unconfirmed ? null : item.station_ft,
+      position: item.position_unconfirmed ? "unconfirmed" : (item.station_ft != null ? `STA ${item.station_ft}` : "unconfirmed"),
+      face: item.face || item.side || "",
+      size: item.size || "",
+      notes: item.position_unconfirmed ? (item.notes ? `${item.notes} · position unconfirmed` : "position unconfirmed") : (item.notes || ""),
+    },
+  };
+}
+
+function UnconfirmedBadge({ position, label }) {
+  return (
+    <Html position={position} center distanceFactor={14} occlude={false}>
+      <div
+        data-testid={`twin-unconfirmed-${String(label || "hardware").toLowerCase().replace(/\s+/g, "-")}`}
+        style={{
+          background: "rgba(10,12,16,0.94)",
+          border: "1px solid #E8C872",
+          color: "#E8C872",
+          padding: "4px 8px",
+          fontSize: 11,
+          fontFamily: "JetBrains Mono, monospace",
+          letterSpacing: "0.12em",
+          textTransform: "uppercase",
+          whiteSpace: "nowrap",
+          boxShadow: "0 0 18px rgba(232,200,114,0.28)",
+        }}
+      >
+        UNCONFIRMED · {label}
+      </div>
+    </Html>
+  );
+}
+
 function CalloutTag({ position, color, label }) {
   return (
     <Html position={position} distanceFactor={16}>
@@ -386,9 +450,8 @@ function SectionRevealLines({ beam, spec }) {
 }
 
 function LiftLoops({ beam, spec, onHardwareSelect }) {
-  return (spec.blueprint.lift_loops || []).map((item, index) => {
-    const station = stationValue(item);
-    if (station == null) return null;
+  return specEmbeds(beam, "lift_loop").map((item, index) => {
+    const station = embedRenderZ(spec, item, index, "lift_loop");
     const radius = Math.max(inchesToFeet(item.diameter_in || 0) / 2, spec.width * 0.2, 0.38);
     const legHeight = Math.max(radius * 1.35, 0.55);
     const spread = Math.max(radius * 0.58, 0.22);
@@ -400,15 +463,16 @@ function LiftLoops({ beam, spec, onHardwareSelect }) {
       [spread * 0.86, legHeight * 0.54, 0],
       [spread, 0, 0],
     ];
-    const payload = { id: `lift-loop-${index}`, type: "Lift loop", beamMark: beam.mark, spec: item };
+    const payload = inspectorPayload(beam, item, "Lift loop");
+    const color = item.position_unconfirmed ? brassGold : steelBright;
     return (
-      <group key={payload.id} position={[0, spec.depth + 0.05, station]} onClick={(event) => clickHardware(event, payload, onHardwareSelect)}>
-        <Line points={arch} color={steelBright} lineWidth={3.4} />
+      <group key={payload.id} position={[0, spec.depth + 0.05, station]} onClick={(event) => clickHardware(event, payload, onHardwareSelect)} renderOrder={5}>
+        <Line points={arch} color={color} lineWidth={3.4} />
         {[-spread, spread].map((offset) => (
           <React.Fragment key={offset}>
             <mesh position={[offset, 0.11, 0]}>
               <cylinderGeometry args={[cable, cable, 0.24, 12]} />
-              <meshStandardMaterial color={steelBright} roughness={0.34} metalness={0.72} />
+              <meshStandardMaterial color={color} roughness={0.34} metalness={0.72} />
             </mesh>
             <mesh position={[offset, -0.02, 0]}>
               <cylinderGeometry args={[cable * 1.55, cable * 1.55, 0.08, 16]} />
@@ -416,55 +480,64 @@ function LiftLoops({ beam, spec, onHardwareSelect }) {
             </mesh>
           </React.Fragment>
         ))}
+        {item.position_unconfirmed && <UnconfirmedBadge position={[0, legHeight + 0.18, 0]} label="LIFT LOOP" />}
       </group>
     );
   });
 }
 
 function SideInserts({ beam, spec, onHardwareSelect }) {
-  return (spec.blueprint.inserts || []).map((item, index) => {
-    const station = stationValue(item);
-    if (station == null) return null;
-    const side = item.side === "right" ? 1 : -1;
-    const radius = Math.max(inchesToFeet(item.diameter_in || 2) / 2, spec.width * 0.038);
-    const x = side * (spec.width / 2 + radius * 0.28);
-    const payload = { id: `insert-${index}`, type: "Side insert", beamMark: beam.mark, spec: item };
+  return specEmbeds(beam, "insert").map((item, index) => {
+    const station = embedRenderZ(spec, item, index, "insert");
+    const face = String(item.face || item.side || "").toLowerCase();
+    const typeText = `${item.type_code || ""} ${item.name || ""}`;
+    const topMounted = item.position_unconfirmed || face === "top" || /f-64/i.test(typeText);
+    const right = face === "right" || face === "web_right" || item.side === "right";
+    const side = right ? 1 : -1;
+    const radius = Math.max(inchesToFeet(Number(item.diameter_in) || 3) / 2, 0.28);
+    const offsetFt = inchesToFeet(Number(item.offset_in) || 0);
+    const heightIn = finiteNumber(item.height_from_soffit_in);
+    const y = topMounted
+      ? spec.depth + radius * 0.35
+      : (heightIn != null && heightIn > 0 ? inchesToFeet(heightIn) : spec.depth * 0.7);
+    const x = topMounted ? offsetFt : side * (spec.width / 2 + radius * 0.55);
+    const payload = inspectorPayload(beam, item, "Insert");
+    const color = item.position_unconfirmed ? brassGold : ELEMENT_COLORS.insert;
     return (
-      <group key={payload.id} position={[x, spec.depth * 0.7, station]} onClick={(event) => clickHardware(event, payload, onHardwareSelect)}>
-        <mesh position={[-side * radius * 0.32, 0, 0]}>
-          <boxGeometry args={[radius * 0.55, radius * 1.8, radius * 1.8]} />
-          <meshStandardMaterial color="#525B67" roughness={0.55} metalness={0.42} />
+      <group key={payload.id} position={[x, y, station]} onClick={(event) => clickHardware(event, payload, onHardwareSelect)} renderOrder={6}>
+        <mesh position={topMounted ? [0, -radius * 0.15, 0] : [-side * radius * 0.2, 0, 0]}>
+          <boxGeometry args={[radius * 1.35, radius * 0.7, radius * 1.35]} />
+          <meshStandardMaterial color="#3D4654" roughness={0.5} metalness={0.42} depthTest={!item.position_unconfirmed} />
         </mesh>
-        <mesh rotation={[0, 0, Math.PI / 2]}>
-          <cylinderGeometry args={[radius, radius, spec.width * 0.14, 18]} />
-          <meshStandardMaterial color="#D18C1B" roughness={0.34} metalness={0.52} />
+        <mesh rotation={topMounted ? [0, 0, 0] : [0, 0, Math.PI / 2]}>
+          <cylinderGeometry args={[radius, radius, spec.width * 0.22, 20]} />
+          <meshStandardMaterial color={color} roughness={0.32} metalness={0.58} emissive={color} emissiveIntensity={0.18} depthTest={!item.position_unconfirmed} />
         </mesh>
-        <mesh position={[side * radius * 0.52, 0, 0]} rotation={[0, Math.PI / 2, 0]}>
-          <cylinderGeometry args={[radius * 0.88, radius * 0.88, radius * 0.5, 6]} />
-          <meshStandardMaterial color="#A9B3C0" roughness={0.32} metalness={0.74} />
+        <mesh position={topMounted ? [0, radius * 0.55, 0] : [side * radius * 0.7, 0, 0]} rotation={topMounted ? [0, 0, 0] : [0, Math.PI / 2, 0]}>
+          <cylinderGeometry args={[radius * 0.55, radius * 0.55, radius * 0.42, 16]} />
+          <meshStandardMaterial color="#A9B3C0" roughness={0.28} metalness={0.78} depthTest={!item.position_unconfirmed} />
         </mesh>
-        <mesh position={[side * radius * 0.86, 0, 0]} rotation={[0, Math.PI / 2, 0]}>
-          <cylinderGeometry args={[radius * 0.36, radius * 0.36, radius * 0.18, 16]} />
-          <meshStandardMaterial color="#202632" roughness={0.62} metalness={0.24} />
-        </mesh>
+        {item.position_unconfirmed && <UnconfirmedBadge position={[0, radius + 0.22, 0]} label="INSERT" />}
       </group>
     );
   });
 }
 
-function CylindricalOpenings({ beam, spec, items, type, color, y, onHardwareSelect }) {
-  return (items || []).map((item, index) => {
-    const station = stationValue(item);
-    if (station == null) return null;
-    const radius = Math.max(inchesToFeet(item.diameter_in || 2) / 2, 0.08);
+function CylindricalOpenings({ beam, spec, kind, type, color, y, onHardwareSelect }) {
+  return specEmbeds(beam, kind).map((item, index) => {
+    const station = embedRenderZ(spec, item, index, kind);
+    const radius = Math.max(inchesToFeet(item.diameter_in || 2) / 2, item.position_unconfirmed ? 0.16 : 0.08);
+    const heightIn = finiteNumber(item.height_from_soffit_in);
+    const lift = heightIn != null && heightIn > 0 ? inchesToFeet(heightIn) : y;
     const isDrain = type.toLowerCase().includes("drain");
     const isTie = type.toLowerCase().includes("tie");
-    const payload = { id: `${type}-${index}`, type, beamMark: beam.mark, spec: item };
+    const payload = inspectorPayload(beam, item, type);
+    const body = item.position_unconfirmed ? brassGold : color;
     return (
-      <group key={payload.id} position={[0, y, station]} onClick={(event) => clickHardware(event, payload, onHardwareSelect)}>
+      <group key={payload.id} position={[0, lift, station]} onClick={(event) => clickHardware(event, payload, onHardwareSelect)} renderOrder={5}>
         <mesh rotation={[0, 0, Math.PI / 2]}>
-          <cylinderGeometry args={[radius, radius, spec.width * 1.02, 22]} />
-          <meshStandardMaterial color={color} roughness={0.78} metalness={0.1} />
+          <cylinderGeometry args={[radius, radius, spec.width * 1.08, 22]} />
+          <meshStandardMaterial color={body} roughness={0.78} metalness={0.1} depthTest={!item.position_unconfirmed} />
         </mesh>
         {[-spec.width / 2, spec.width / 2].map((x) => (
           <mesh key={x} position={[x, 0, 0]} rotation={[0, 0, Math.PI / 2]}>
@@ -498,6 +571,7 @@ function CylindricalOpenings({ beam, spec, items, type, color, y, onHardwareSele
             </mesh>
           </group>
         ))}
+        {item.position_unconfirmed && <UnconfirmedBadge position={[0, radius + 0.28, 0]} label={type} />}
       </group>
     );
   });
@@ -505,23 +579,47 @@ function CylindricalOpenings({ beam, spec, items, type, color, y, onHardwareSele
 
 function HoldDowns({ beam, spec, onHardwareSelect, stations, parametric = false }) {
   if (beam.twin_type !== "i_beam") return null;
-  const resolved = stations || (spec.blueprint.hold_downs || []).map((item) => stationValue(item)).filter((value) => value != null);
   const layout = strandLayout(spec, beam);
   const holdY = inchesToFeet(layout.path.hold_down_elevation_in || 5);
   const width = Math.max(spec.width * 0.42, 0.62);
   const height = Math.max(inchesToFeet(12), spec.depth * 0.24);
-  return resolved.map((station, index) => {
-    const payload = {
-      id: `hold-down-${parametric ? "p-" : ""}${index}`,
-      type: parametric ? "Hold-down (parametric)" : "Hold-down",
-      beamMark: beam.mark,
-      spec: { x_ft: station, type: layout.holdDownType, parametric, source: layout.path.source },
-    };
+  if (stations) {
+    return stations.map((station, index) => {
+      const payload = {
+        id: `hold-down-${parametric ? "p-" : ""}${index}`,
+        type: parametric ? "Hold-down (parametric)" : "Hold-down",
+        beamMark: beam.mark,
+        spec: { x_ft: station, type: layout.holdDownType, parametric, source: layout.path.source },
+      };
+      return (
+        <group key={payload.id} position={[0, holdY, station]} onClick={(event) => clickHardware(event, payload, onHardwareSelect)}>
+          <mesh>
+            <boxGeometry args={[spec.width * 0.48, height * 0.2, width]} />
+            <meshStandardMaterial color={holdDownBronze} roughness={0.34} metalness={0.58} />
+          </mesh>
+          {[-width * 0.3, width * 0.3].map((x) => (
+            <mesh key={x} position={[x, height * 0.32, 0]}>
+              <boxGeometry args={[0.12, height, width * 0.3]} />
+              <meshStandardMaterial color={holdDownClamp} roughness={0.3} metalness={0.64} />
+            </mesh>
+          ))}
+          <mesh position={[0, height * 0.46, 0]} rotation={[0, 0, Math.PI / 2]}>
+            <cylinderGeometry args={[0.08, 0.08, spec.width * 0.4, 12]} />
+            <meshStandardMaterial color={brassGold} roughness={0.26} metalness={0.72} />
+          </mesh>
+        </group>
+      );
+    });
+  }
+  return specEmbeds(beam, "hold_down").map((item, index) => {
+    const station = embedRenderZ(spec, item, index, "hold_down");
+    const payload = inspectorPayload(beam, item, "Hold-down");
+    const body = item.position_unconfirmed ? brassGold : holdDownBronze;
     return (
-      <group key={payload.id} position={[0, holdY, station]} onClick={(event) => clickHardware(event, payload, onHardwareSelect)}>
+      <group key={payload.id} position={[0, holdY, station]} onClick={(event) => clickHardware(event, payload, onHardwareSelect)} renderOrder={5}>
         <mesh>
           <boxGeometry args={[spec.width * 0.48, height * 0.2, width]} />
-          <meshStandardMaterial color={holdDownBronze} roughness={0.34} metalness={0.58} />
+          <meshStandardMaterial color={body} roughness={0.34} metalness={0.58} depthTest={!item.position_unconfirmed} />
         </mesh>
         {[-width * 0.3, width * 0.3].map((x) => (
           <mesh key={x} position={[x, height * 0.32, 0]}>
@@ -533,26 +631,29 @@ function HoldDowns({ beam, spec, onHardwareSelect, stations, parametric = false 
           <cylinderGeometry args={[0.08, 0.08, spec.width * 0.4, 12]} />
           <meshStandardMaterial color={brassGold} roughness={0.26} metalness={0.72} />
         </mesh>
+        {item.position_unconfirmed && <UnconfirmedBadge position={[0, height + 0.2, 0]} label="HOLD-DOWN" />}
       </group>
     );
   });
 }
 
 function BituminousEnds({ beam, spec, onHardwareSelect }) {
-  return (spec.blueprint.bituminous_ends || []).map((item, index) => {
-    const length = inchesToFeet(item.length_in || 18);
-    const z = item.end === "end" ? spec.length - length / 2 : length / 2;
-    const payload = { id: `bituminous-${index}`, type: "Bituminous pocket", beamMark: beam.mark, spec: item };
+  return specEmbeds(beam, "bituminous_zone").map((item, index) => {
+    const pocketIn = finiteNumber(item.length_in);
+    const length = item.position_unconfirmed || pocketIn == null ? Math.max(spec.width * 0.9, 1.1) : inchesToFeet(pocketIn);
+    const station = embedRenderZ(spec, item, index, "bituminous_zone");
+    const payload = inspectorPayload(beam, item, "Bituminous pocket");
     return (
-      <group key={payload.id} position={[0, spec.depth * 0.18, z]} onClick={(event) => clickHardware(event, payload, onHardwareSelect)}>
+      <group key={payload.id} position={[0, spec.depth * 0.18, station]} onClick={(event) => clickHardware(event, payload, onHardwareSelect)} renderOrder={5}>
         <mesh>
-          <boxGeometry args={[spec.width * 0.96, spec.depth * 0.28, length]} />
-          <meshStandardMaterial color={asphaltBlack} roughness={1} metalness={0} />
+          <boxGeometry args={[spec.width * 0.96, spec.depth * 0.28, Math.max(length, 0.6)]} />
+          <meshStandardMaterial color={item.position_unconfirmed ? "#3A3428" : asphaltBlack} roughness={1} metalness={0} depthTest={!item.position_unconfirmed} />
         </mesh>
         <mesh position={[0, spec.depth * 0.18, 0]}>
-          <boxGeometry args={[spec.width * 0.82, 0.03, length]} />
+          <boxGeometry args={[spec.width * 0.82, 0.03, Math.max(length, 0.5)]} />
           <meshStandardMaterial color="#2A2A2A" roughness={0.94} metalness={0.02} />
         </mesh>
+        {item.position_unconfirmed && <UnconfirmedBadge position={[0, spec.depth * 0.28, 0]} label="BITUMINOUS" />}
       </group>
     );
   });
@@ -560,12 +661,11 @@ function BituminousEnds({ beam, spec, onHardwareSelect }) {
 
 function GroutGrooves({ beam, spec, onHardwareSelect }) {
   if (beam.twin_type !== "box_beam") return null;
-  return (spec.blueprint.grout_grooves || []).map((item, index) => {
-    const station = stationValue(item);
-    if (station == null) return null;
-    const payload = { id: `grout-groove-${index}`, type: "Grout groove", beamMark: beam.mark, spec: item };
+  return specEmbeds(beam, "grout_groove").map((item, index) => {
+    const station = embedRenderZ(spec, item, index, "grout_groove");
+    const payload = inspectorPayload(beam, item, "Grout groove");
     return (
-      <group key={payload.id} position={[0, spec.depth + 0.01, station]} onClick={(event) => clickHardware(event, payload, onHardwareSelect)}>
+      <group key={payload.id} position={[0, spec.depth + 0.01, station]} onClick={(event) => clickHardware(event, payload, onHardwareSelect)} renderOrder={5}>
         <mesh>
           <boxGeometry args={[spec.width * 0.84, 0.035, 0.24]} />
           <meshStandardMaterial color="#586272" roughness={0.76} metalness={0.05} />
@@ -574,6 +674,7 @@ function GroutGrooves({ beam, spec, onHardwareSelect }) {
           <boxGeometry args={[spec.width * 0.72, 0.018, 0.18]} />
           <meshStandardMaterial color="#2B313B" roughness={0.82} metalness={0.04} />
         </mesh>
+        {item.position_unconfirmed && <UnconfirmedBadge position={[0, 0.18, 0]} label="GROOVE" />}
       </group>
     );
   });
@@ -1150,29 +1251,32 @@ function EngineeringDimensions({ beam, spec, showOverall = true, showStations = 
 
 function hardwareCalloutItems(beam, spec) {
   const items = [];
-  const pushStationed = (source, kind, color, anchorBuilder, labelBuilder) => {
-    (source || []).forEach((item, index) => {
-      const station = stationValue(item);
-      if (station == null) return;
-      items.push({ key: `${kind}-${index}`, category: kind, color, anchor: anchorBuilder(item, station), station, label: labelBuilder(item, station) });
+  const pushKind = (kind, category, color, anchorBuilder, labelBuilder) => {
+    specEmbeds(beam, kind).forEach((item, index) => {
+      const station = embedRenderZ(spec, item, index, kind);
+      const label = item.position_unconfirmed ? `${category.toUpperCase()} UNCONFIRMED` : labelBuilder(item, station);
+      items.push({
+        key: `${kind}-${item.id || index}`,
+        category,
+        color: item.position_unconfirmed ? "#E8C872" : color,
+        anchor: anchorBuilder(item, station),
+        station,
+        label,
+      });
     });
   };
-  pushStationed(spec.blueprint.lift_loops, "Lift loop", "#DCE6F2", (_item, station) => [0, spec.depth + 0.35, station], (_item, station) => `LIFT ${formatStation(station)}`);
-  (spec.blueprint.inserts || []).forEach((item, index) => {
-    const station = stationValue(item);
-    if (station == null) return;
-    const side = item.side === "right" ? 1 : -1;
-    items.push({ key: `insert-${index}`, category: "Insert", color: "#F4B652", anchor: [side * spec.width / 2, spec.depth * 0.7, station], station, label: `INSERT ${formatStation(station)}` });
-  });
-  pushStationed(spec.blueprint.tubes, "Tube", "#B1BCCB", (_item, station) => [0, spec.depth * 0.56, station], (_item, station) => `TUBE ${formatStation(station)}`);
-  pushStationed(spec.blueprint.tie_rod_openings, "Tie-rod", "#AEB8C6", (_item, station) => [0, spec.depth * 0.42, station], (_item, station) => `TIE ${formatStation(station)}`);
-  pushStationed(spec.blueprint.drain_holes, "Drain", "#9AA6B5", (_item, station) => [0, 0.18, station], (_item, station) => `DRAIN ${formatStation(station)}`);
-  pushStationed(spec.blueprint.hold_downs, "Hold-down", "#DFA26A", (_item, station) => [0, spec.depth + 0.35, station], (_item, station) => `HOLD-DOWN ${formatStation(station)}`);
-  pushStationed(spec.blueprint.grout_grooves, "Groove", "#C5D0DE", (_item, station) => [0, spec.depth + 0.1, station], (_item, station) => `GROOVE ${formatStation(station)}`);
-  (spec.blueprint.bituminous_ends || []).forEach((item, index) => {
-    const z = item.end === "end" ? spec.length - inchesToFeet(item.length_in || 18) / 2 : inchesToFeet(item.length_in || 18) / 2;
-    items.push({ key: `bit-${index}`, category: "Bituminous", color: "#E5E7EB", anchor: [0, spec.depth * 0.18, z], station: z, label: `BITUMEN ${item.end?.toUpperCase() || "END"} ${formatInches(item.length_in || 18)}` });
-  });
+  pushKind("lift_loop", "Lift loop", "#DCE6F2", (_item, station) => [0, spec.depth + 0.35, station], (_item, station) => `LIFT ${formatStation(station)}`);
+  pushKind("insert", "Insert", "#F4B652", (item, station) => {
+    const right = String(item.face || item.side || "").toLowerCase().includes("right");
+    const side = right ? 1 : -1;
+    return [item.position_unconfirmed ? 0 : side * spec.width / 2, spec.depth * (item.position_unconfirmed ? 1.05 : 0.7), station];
+  }, (_item, station) => `INSERT ${formatStation(station)}`);
+  pushKind("tube", "Tube", "#B1BCCB", (_item, station) => [0, spec.depth * 0.56, station], (_item, station) => `TUBE ${formatStation(station)}`);
+  pushKind("tie_rod", "Tie-rod", "#AEB8C6", (_item, station) => [0, spec.depth * 0.42, station], (_item, station) => `TIE ${formatStation(station)}`);
+  pushKind("drain", "Drain", "#9AA6B5", (_item, station) => [0, 0.18, station], (_item, station) => `DRAIN ${formatStation(station)}`);
+  pushKind("hold_down", "Hold-down", "#DFA26A", (_item, station) => [0, spec.depth + 0.35, station], (_item, station) => `HOLD-DOWN ${formatStation(station)}`);
+  pushKind("grout_groove", "Groove", "#C5D0DE", (_item, station) => [0, spec.depth + 0.1, station], (_item, station) => `GROOVE ${formatStation(station)}`);
+  pushKind("bituminous_zone", "Bituminous", "#E5E7EB", (_item, station) => [0, spec.depth * 0.18, station], (item, _station) => `BITUMEN ${String(item.end || "POCKET").toUpperCase()}${item.length_in ? ` ${formatInches(item.length_in)}` : ""}`);
   return items.sort((a, b) => a.station - b.station);
 }
 
@@ -1251,15 +1355,18 @@ function DimensionCallouts({ beam, spec }) {
   }
 
   if (inserts.length) {
-    const first = inserts[0]?.x_ft ?? 0;
-    const last = inserts[inserts.length - 1]?.x_ft ?? first;
-    items.push({
-      key: "inserts",
-      label: `INSERTS ${formatStation(first)} / ${formatStation(last)}`,
-      color: "#F4B652",
-      line: [[-spec.width * 0.52, spec.depth * 0.72, first], [-spec.width * 0.52, spec.depth * 0.72, last]],
-      tag: [-spec.width * 0.98, spec.depth * 0.88, (first + last) / 2],
-    });
+    const stationed = inserts.map((item) => stationValue(item)).filter((value) => value != null);
+    if (stationed.length) {
+      const first = stationed[0];
+      const last = stationed[stationed.length - 1];
+      items.push({
+        key: "inserts",
+        label: `INSERTS ${formatStation(first)} / ${formatStation(last)}`,
+        color: "#F4B652",
+        line: [[-spec.width * 0.52, spec.depth * 0.72, first], [-spec.width * 0.52, spec.depth * 0.72, last]],
+        tag: [-spec.width * 0.98, spec.depth * 0.88, (first + last) / 2],
+      });
+    }
   }
 
   if (drains.length) {
@@ -1395,21 +1502,21 @@ function BeamAssembly({ beam, anomalies = [], onSurfacePick, onHardwareSelect, s
     <group ref={groupRef} position={[0, -spec.depth / 2, -spec.length / 2]}>
       <Shell spec={spec} beam={beam} highlighted={highlighted} onSurfacePick={surfacePick} onBeamSelect={onBeamSelect} pourMode={pourMode} />
       {(prePour || activeLayers.dimensions) && <SectionRevealLines beam={beam} spec={spec} />}
-      {!prePour && activeLayers.hardware && <BituminousEnds beam={beam} spec={spec} onHardwareSelect={onHardwareSelect} />}
+      {activeLayers.hardware && <BituminousEnds beam={beam} spec={spec} onHardwareSelect={onHardwareSelect} />}
       <StrandSystem beam={beam} spec={spec} onHardwareSelect={onHardwareSelect} pourMode={pourMode} showPaths={prePour && activeLayers.strands} />
       {activeLayers.stirrups && <Stirrups beam={beam} spec={spec} onHardwareSelect={onHardwareSelect} />}
       {(activeLayers.hardware || activeLayers.stirrups) && <LiftLoops beam={beam} spec={spec} onHardwareSelect={onHardwareSelect} />}
       {activeLayers.hardware && <SideInserts beam={beam} spec={spec} onHardwareSelect={onHardwareSelect} />}
-      {activeLayers.hardware && <CylindricalOpenings beam={beam} spec={spec} items={spec.blueprint.tubes} type="Tube" color="#4F5968" y={spec.depth * 0.56} onHardwareSelect={onHardwareSelect} />}
-      {activeLayers.hardware && <CylindricalOpenings beam={beam} spec={spec} items={spec.blueprint.tie_rod_openings} type="Tie-rod opening" color="#0F172A" y={spec.depth * 0.42} onHardwareSelect={onHardwareSelect} />}
-      {activeLayers.hardware && <CylindricalOpenings beam={beam} spec={spec} items={spec.blueprint.drain_holes} type="Drain hole" color="#111827" y={0.18} onHardwareSelect={onHardwareSelect} />}
+      {activeLayers.hardware && <CylindricalOpenings beam={beam} spec={spec} kind="tube" type="Tube" color="#4F5968" y={spec.depth * 0.56} onHardwareSelect={onHardwareSelect} />}
+      {activeLayers.hardware && <CylindricalOpenings beam={beam} spec={spec} kind="tie_rod" type="Tie-rod opening" color="#0F172A" y={spec.depth * 0.42} onHardwareSelect={onHardwareSelect} />}
+      {activeLayers.hardware && <CylindricalOpenings beam={beam} spec={spec} kind="drain" type="Drain hole" color="#111827" y={0.18} onHardwareSelect={onHardwareSelect} />}
       {activeLayers.hardware && <HoldDowns beam={beam} spec={spec} onHardwareSelect={onHardwareSelect} />}
       {activeLayers.hardware && <GroutGrooves beam={beam} spec={spec} onHardwareSelect={onHardwareSelect} />}
       <MarkedEnd beam={beam} spec={spec} onHardwareSelect={onHardwareSelect} />
       {(activeLayers.dimensions || activeLayers.stations) && (
         <EngineeringDimensions beam={beam} spec={spec} showOverall={activeLayers.dimensions} showStations={activeLayers.stations} />
       )}
-      {!prePour && activeLayers.hardware && <SmartHardwareCallouts beam={beam} spec={spec} />}
+      {activeLayers.hardware && <SmartHardwareCallouts beam={beam} spec={spec} />}
       {activeLayers.anomalies && <Anomalies anomalies={anomalies} spec={spec} />}
     </group>
   );

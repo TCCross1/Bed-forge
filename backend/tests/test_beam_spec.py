@@ -7,6 +7,7 @@ from beam_spec import (
     twin_beam_from_spec,
     beam_record_from_locked_spec,
     tension_twin_payload,
+    embedded_hardware_for_twin,
 )
 from tests.test_blueprint_extraction import L25390_FIXTURE
 
@@ -275,3 +276,43 @@ def test_tension_twin_payload_copies_spec_dna_without_inventing_strands():
     assert payload["summary"]["strands_total"] == 0
     assert payload["bed_length_ft"] == 400
     assert "invent" not in str(payload).lower()
+
+
+def test_l25390_mk205_insert_without_station_is_unconfirmed():
+    result = extract_structured_fields(L25390_FIXTURE, page_sources=["text_layer"] * len(L25390_FIXTURE))
+    specs = materialize_job_beam_specs(
+        result.fields,
+        document={"id": "doc-l25390", "project_name_hint": "L25390"},
+        revision={"id": "rev-1", "product_family": "i_beam"},
+    )
+    spec = next(item for item in specs if item["beam_mark"] == "205")
+    twin = twin_beam_from_spec(spec)
+    inserts = twin["embedded_hardware"]["insert"]
+    assert len(inserts) == 1
+    assert inserts[0]["position_unconfirmed"] is True
+    assert inserts[0]["station_ft"] is None
+    assert "F-64" in str(inserts[0].get("type_code") or inserts[0].get("name"))
+    assert twin["embedded_hardware"]["lift_loop"] == []
+    assert spec["blueprint"].get("lift_loops") in ([], None)
+
+
+def test_embedded_hardware_uses_spec_stations_and_skips_zero_count():
+    stationed = embedded_hardware_for_twin({
+        "geometry": {"length_ft": 52},
+        "hardware": [{
+            "id": "insert-0",
+            "kind": "insert",
+            "name": "F-64 L1",
+            "type_code": "F-64",
+            "quantity": 1,
+            "position": {"station_ft": 12.5, "offset_in": -3.5, "face": "top"},
+        }],
+        "blueprint": {"inserts": [], "lift_loops": [], "length": 52},
+    })
+    assert len(stationed["insert"]) == 1
+    assert stationed["insert"][0]["station_ft"] == 12.5
+    assert stationed["insert"][0]["position_unconfirmed"] is False
+    empty = embedded_hardware_for_twin({"hardware": [], "blueprint": {}, "geometry": {"length_ft": 40}})
+    assert empty["insert"] == []
+    assert empty["lift_loop"] == []
+    assert empty["hold_down"] == []

@@ -7,6 +7,7 @@ import BeamTwinViewer, { BedTwinViewer } from "../components/BeamViewer";
 import { bedState, qcState } from "../lib/constants";
 import { toast } from "sonner";
 import { useOpenJob } from "../context/OpenJobContext";
+import { collectEmbeddedHardware, embedFeatureCounts, embedStationList } from "../lib/beamSpec";
 import { Layers3, Loader2, MapPin, Ruler, ScanLine, Box, Construction, Lock, AlertTriangle, SlidersHorizontal } from "lucide-react";
 
 function SpecRows({ spec }) {
@@ -19,8 +20,7 @@ function SpecRows({ spec }) {
 }
 
 function stationList(items = []) {
-  const stations = items.map((item) => item.x_ft ?? item.station_ft ?? item?.position?.station_ft).filter((value) => value != null && value !== "");
-  return stations.length ? stations.map((value) => `${Number(value).toFixed(1)}'`).join(" · ") : "unconfirmed";
+  return embedStationList(items);
 }
 
 const LAYER_OPTIONS = [
@@ -210,17 +210,7 @@ export default function DigitalTwin() {
   const specDnaActive = Boolean(beamSpec);
   const strandSystem = beamSpec?.strand || blueprint.strand_system || {};
   const strandCount = strandSystem.count || (blueprint.strand_pattern?.rows || []).reduce((sum, row) => sum + (row.count || 0), 0);
-  const featureCounts = [
-    ["Lift loops", blueprint.lift_loops?.length || 0],
-    ["Inserts", blueprint.inserts?.length || 0],
-    ["Tubes", blueprint.tubes?.length || 0],
-    ["Tie-rods", blueprint.tie_rod_openings?.length || 0],
-    ["Drain holes", blueprint.drain_holes?.length || 0],
-    ["Hold-downs", blueprint.hold_downs?.length || 0],
-    ["Stirrup zones", (beamSpec?.stirrup_zones || []).length],
-    ["Strand ends", strandCount * 2],
-    ["Bituminous pockets", Array.isArray(blueprint.bituminous_ends) ? blueprint.bituminous_ends.length : 0],
-  ];
+  const featureCounts = embedFeatureCounts(beam, strandCount);
   const quickDimensions = beam ? [
     ["OAL", beam.length_ft != null ? `${beam.length_ft} ft` : "unconfirmed"],
     ["Casting", beamSpec?.geometry?.casting_length_ft != null ? `${beamSpec.geometry.casting_length_ft} ft` : "unconfirmed"],
@@ -229,12 +219,12 @@ export default function DigitalTwin() {
     ["Section source", beamSpec?.section_source || blueprintSource.section_source || (specDnaActive ? "extracted" : "legacy seed")],
   ] : [];
   const qcStations = beam ? [
-    ["Lift loops", stationList(blueprint.lift_loops || [])],
-    ["Inserts", stationList(blueprint.inserts || [])],
-    ["Tubes", stationList(blueprint.tubes || [])],
-    ["Drains", stationList(blueprint.drain_holes || [])],
-    ["Hold-downs", stationList(blueprint.hold_downs || [])],
-    ["Grooves", stationList(blueprint.grout_grooves || [])],
+    ["Lift loops", stationList(collectEmbeddedHardware(beam, "lift_loop"))],
+    ["Inserts", stationList(collectEmbeddedHardware(beam, "insert"))],
+    ["Tubes", stationList(collectEmbeddedHardware(beam, "tube"))],
+    ["Drains", stationList(collectEmbeddedHardware(beam, "drain"))],
+    ["Hold-downs", stationList(collectEmbeddedHardware(beam, "hold_down"))],
+    ["Grooves", stationList(collectEmbeddedHardware(beam, "grout_groove"))],
   ] : [];
   const activeLayers = useMemo(() => ({
     ...layers,

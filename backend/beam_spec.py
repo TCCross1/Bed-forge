@@ -154,6 +154,116 @@ def _flatten_hardware(blueprint: Dict[str, Any]) -> List[Dict[str, Any]]:
     return items
 
 
+EMBED_KIND_KEYS = (
+    ("lift_loop", "lift_loops"),
+    ("insert", "inserts"),
+    ("tube", "tubes"),
+    ("tie_rod", "tie_rod_openings"),
+    ("drain", "drain_holes"),
+    ("hold_down", "hold_downs"),
+    ("grout_groove", "grout_grooves"),
+    ("bituminous_zone", "bituminous_ends"),
+)
+
+
+def _finite_station(value: Any) -> Optional[float]:
+    if value is None or value == "":
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    if number < 0 or number != number:
+        return None
+    return number
+
+
+def _embed_quantity(item: Dict[str, Any]) -> int:
+    raw = item.get("quantity")
+    try:
+        quantity = int(raw)
+    except (TypeError, ValueError):
+        quantity = 1
+    return quantity if quantity >= 1 else 1
+
+
+def _embed_station(item: Dict[str, Any]) -> Optional[float]:
+    position = item.get("position") if isinstance(item.get("position"), dict) else {}
+    for key in ("x_ft", "station_ft", "station_from_marked_end"):
+        station = _finite_station(item.get(key))
+        if station is not None:
+            return station
+    return _finite_station(position.get("station_ft"))
+
+
+def _bituminous_station(item: Dict[str, Any], length_ft: Optional[float]) -> Optional[float]:
+    stationed = _embed_station(item)
+    if stationed is not None:
+        return stationed
+    end = str(item.get("end") or "").strip().lower()
+    pocket = _finite_station(item.get("length_in"))
+    pocket_ft = (pocket or 0) / 12.0
+    span = _finite_station(length_ft)
+    if end in ("end", "ue", "unmarked"):
+        if span is None:
+            return None
+        return max(span - (pocket_ft / 2.0 if pocket_ft else 0.0), 0.0)
+    if end in ("start", "me", "marked"):
+        return pocket_ft / 2.0 if pocket_ft else 0.0
+    return None
+
+
+def _normalize_embed(kind: str, item: Dict[str, Any], index: int, copy_index: int, length_ft: Optional[float]) -> Dict[str, Any]:
+    position = item.get("position") if isinstance(item.get("position"), dict) else {}
+    station = _bituminous_station(item, length_ft) if kind == "bituminous_zone" else _embed_station(item)
+    face = str(item.get("face") or item.get("side") or position.get("face") or "")
+    offset = item.get("offset_in")
+    if offset is None:
+        offset = position.get("offset_in")
+    height = item.get("height_from_soffit_in")
+    if height is None:
+        height = position.get("height_from_soffit_in")
+    type_code = item.get("type_code") or item.get("type") or ""
+    name = item.get("name") or type_code or kind.replace("_", " ")
+    return {
+        "id": item.get("id") or f"{kind}-{index}-{copy_index}",
+        "kind": kind,
+        "name": name,
+        "type_code": type_code,
+        "size": str(item.get("size") or item.get("diameter_in") or ""),
+        "station_ft": station,
+        "position_unconfirmed": station is None,
+        "face": face,
+        "side": item.get("side") or "",
+        "offset_in": offset if offset not in (None, "") else 0,
+        "height_from_soffit_in": height,
+        "diameter_in": item.get("diameter_in"),
+        "end": item.get("end"),
+        "length_in": item.get("length_in"),
+        "notes": item.get("notes") or "",
+    }
+
+
+def embedded_hardware_for_twin(spec: Optional[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
+    """Spec embeds for the twin: count from DNA only. Missing stations stay unconfirmed, never invented."""
+    spec = spec or {}
+    blueprint = spec.get("blueprint") if isinstance(spec.get("blueprint"), dict) else {}
+    hardware = spec.get("hardware") if isinstance(spec.get("hardware"), list) else []
+    length_ft = (spec.get("geometry") or {}).get("length_ft") or blueprint.get("length")
+    payload: Dict[str, List[Dict[str, Any]]] = {}
+    for kind, blueprint_key in EMBED_KIND_KEYS:
+        from_hardware = [item for item in hardware if isinstance(item, dict) and item.get("kind") == kind]
+        from_blueprint = _station_items(blueprint.get(blueprint_key))
+        source = from_hardware if from_hardware else from_blueprint
+        items: List[Dict[str, Any]] = []
+        for index, item in enumerate(source):
+            quantity = _embed_quantity(item)
+            for copy_index in range(quantity):
+                items.append(_normalize_embed(kind, item, index, copy_index, length_ft))
+        payload[kind] = items
+    return payload
+
+
 def _stirrup_zones(blueprint: Dict[str, Any]) -> List[Dict[str, Any]]:
     stirrups = blueprint.get("stirrups") or {}
     if not isinstance(stirrups, dict) or not stirrups:
@@ -450,6 +560,7 @@ def twin_beam_from_spec(spec: Dict[str, Any]) -> Dict[str, Any]:
             "blueprint": blueprint,
         },
         "beam_spec": spec,
+        "embedded_hardware": embedded_hardware_for_twin(spec),
         "blueprint_source": {
             "status": "locked" if spec.get("status") == "locked" else "draft",
             "document_id": spec.get("document_id"),

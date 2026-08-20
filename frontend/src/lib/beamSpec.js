@@ -99,7 +99,10 @@ export function strandEndYIn(strand) {
 }
 
 export function strandHoldYIn(strand) {
-  if (isDraped(strand)) return Number(strand.hold_down_y_in ?? strand.soffit_in ?? 2);
+  if (isDraped(strand)) {
+    const hold = Number(strand.hold_down_y_in ?? strand.soffit_in);
+    if (Number.isFinite(hold)) return hold;
+  }
   return strandEndYIn(strand);
 }
 
@@ -108,8 +111,7 @@ export function drapeKeyStations(strand, lengthFt, holdDowns) {
   if (fromStrand.length) return fromStrand.slice().sort((a, b) => a - b);
   const fromHd = (holdDowns || []).map((h) => Number(h.station_from_marked_end)).filter((n) => Number.isFinite(n) && n > 0);
   if (fromHd.length) return fromHd.slice().sort((a, b) => a - b);
-  const length = Number(lengthFt) || 0;
-  return length ? [+(length * 0.4).toFixed(3), +(length * 0.6).toFixed(3)] : [];
+  return [];
 }
 
 export function strandElevationIn(strand, zFt, lengthFt, holdDowns) {
@@ -143,4 +145,124 @@ export function strandPathPoints(strand, lengthFt, holdDowns, steps = 48) {
     y: inchesToFt(strandElevationIn(strand, z, length, holdDowns)),
     z,
   }));
+}
+
+export const EMBED_KIND_KEYS = {
+  lift_loop: "lift_loops",
+  insert: "inserts",
+  tube: "tubes",
+  tie_rod: "tie_rod_openings",
+  drain: "drain_holes",
+  hold_down: "hold_downs",
+  grout_groove: "grout_grooves",
+  bituminous_zone: "bituminous_ends",
+};
+
+function finiteStation(value) {
+  if (value == null || value === "") return null;
+  const number = Number(value);
+  if (!Number.isFinite(number) || number < 0) return null;
+  return number;
+}
+
+function embedQuantity(item) {
+  const quantity = Number(item?.quantity);
+  if (Number.isFinite(quantity) && quantity >= 1) return Math.floor(quantity);
+  return 1;
+}
+
+function embedStation(item) {
+  if (!item || typeof item !== "object") return null;
+  const position = item.position && typeof item.position === "object" ? item.position : {};
+  return finiteStation(item.x_ft) ?? finiteStation(item.station_ft) ?? finiteStation(item.station_from_marked_end) ?? finiteStation(position.station_ft);
+}
+
+function bituminousStation(item, lengthFt) {
+  const stationed = embedStation(item);
+  if (stationed != null) return stationed;
+  const end = String(item?.end || "").trim().toLowerCase();
+  const pocketIn = finiteStation(item?.length_in);
+  const pocketFt = (pocketIn || 0) / 12;
+  const span = finiteStation(lengthFt);
+  if (end === "end" || end === "ue" || end === "unmarked") {
+    if (span == null) return null;
+    return Math.max(span - (pocketFt ? pocketFt / 2 : 0), 0);
+  }
+  if (end === "start" || end === "me" || end === "marked") {
+    return pocketFt ? pocketFt / 2 : 0;
+  }
+  return null;
+}
+
+function normalizeEmbed(kind, item, index, copyIndex, lengthFt) {
+  const position = item.position && typeof item.position === "object" ? item.position : {};
+  const station = kind === "bituminous_zone" ? bituminousStation(item, lengthFt) : embedStation(item);
+  const typeCode = item.type_code || item.type || "";
+  return {
+    id: item.id || `${kind}-${index}-${copyIndex}`,
+    kind,
+    name: item.name || typeCode || kind.replace(/_/g, " "),
+    type_code: typeCode,
+    size: String(item.size || item.diameter_in || ""),
+    station_ft: station,
+    position_unconfirmed: station == null,
+    face: String(item.face || item.side || position.face || ""),
+    side: item.side || "",
+    offset_in: item.offset_in ?? position.offset_in ?? 0,
+    height_from_soffit_in: item.height_from_soffit_in ?? position.height_from_soffit_in ?? null,
+    diameter_in: item.diameter_in ?? null,
+    end: item.end,
+    length_in: item.length_in,
+    notes: item.notes || "",
+  };
+}
+
+export function collectEmbeddedHardware(beam, kind) {
+  const fromApi = beam?.embedded_hardware?.[kind];
+  if (Array.isArray(fromApi) && fromApi.length) return fromApi;
+  const spec = beam?.beam_spec || {};
+  const blueprint = spec.blueprint || beam?.product_type?.blueprint || {};
+  const lengthFt = spec.geometry?.length_ft || blueprint.length || beam?.length_ft;
+  const hardware = Array.isArray(spec.hardware) ? spec.hardware.filter((item) => item && item.kind === kind) : [];
+  const blueprintKey = EMBED_KIND_KEYS[kind];
+  const fromBlueprint = Array.isArray(blueprint[blueprintKey])
+    ? blueprint[blueprintKey].filter((item) => item && typeof item === "object")
+    : [];
+  const source = hardware.length ? hardware : fromBlueprint;
+  const items = [];
+  source.forEach((item, index) => {
+    const quantity = embedQuantity(item);
+    for (let copyIndex = 0; copyIndex < quantity; copyIndex += 1) {
+      items.push(normalizeEmbed(kind, item, index, copyIndex, lengthFt));
+    }
+  });
+  return items;
+}
+
+export function unconfirmedParkingZ(lengthFt, index = 0, kindSlot = 0) {
+  const length = Number(lengthFt) || 40;
+  const cluster = Math.min(Math.max(length * 0.5, 3.5), Math.max(length - 3.5, 3.5));
+  return cluster + index * 1.2 + kindSlot * 0.04;
+}
+
+export function embedFeatureCounts(beam, strandCount = 0) {
+  const strands = Number(strandCount) || 0;
+  return [
+    ["Lift loops", collectEmbeddedHardware(beam, "lift_loop").length],
+    ["Inserts", collectEmbeddedHardware(beam, "insert").length],
+    ["Tubes", collectEmbeddedHardware(beam, "tube").length],
+    ["Tie-rods", collectEmbeddedHardware(beam, "tie_rod").length],
+    ["Drain holes", collectEmbeddedHardware(beam, "drain").length],
+    ["Hold-downs", collectEmbeddedHardware(beam, "hold_down").length],
+    ["Stirrup zones", Array.isArray(beam?.beam_spec?.stirrup_zones) ? beam.beam_spec.stirrup_zones.length : 0],
+    ["Strand ends", strands > 0 ? strands * 2 : 0],
+    ["Bituminous pockets", collectEmbeddedHardware(beam, "bituminous_zone").length],
+  ];
+}
+
+export function embedStationList(items = []) {
+  const stations = (items || [])
+    .map((item) => item.station_ft ?? item.x_ft ?? item?.position?.station_ft)
+    .filter((value) => value != null && value !== "");
+  return stations.length ? stations.map((value) => `${Number(value).toFixed(1)}'`).join(" · ") : "unconfirmed";
 }
