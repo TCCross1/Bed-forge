@@ -392,6 +392,38 @@ def beam_record_from_locked_spec(
     }
 
 
+def tension_twin_payload(
+    beam: Dict[str, Any],
+    spec: Dict[str, Any],
+    *,
+    bed: Optional[Dict[str, Any]] = None,
+    strand_gate: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Tension page payload from locked Spec DNA. Does not invent strand counts or stations."""
+    spec = dict(spec or {})
+    geometry = spec.get("geometry") or {}
+    strands = spec.get("strands") if isinstance(spec.get("strands"), list) else []
+    hold_downs = spec.get("hold_downs") if isinstance(spec.get("hold_downs"), list) else []
+    spec["product_name"] = spec.get("product_type") or spec.get("product_name") or spec.get("beam_mark")
+    length = (bed or {}).get("length_ft") or geometry.get("length_ft") or beam.get("length_ft") or 0
+    return {
+        "beam": beam,
+        "spec": spec,
+        "bed": bed,
+        "bed_length_ft": float(length or 0),
+        "strands": strands,
+        "hold_downs": hold_downs,
+        "summary": {
+            "strands_complete": sum(1 for item in strands if item.get("na") or item.get("measured_elongation") is not None),
+            "strands_total": len(strands),
+            "hold_downs_verified": sum(1 for item in hold_downs if item.get("status") in ("verified", "inspected")),
+            "hold_downs_total": len(hold_downs),
+            "hold_downs_issue": sum(1 for item in hold_downs if item.get("status") == "issue"),
+        },
+        "strand_gate": strand_gate or {"ok": True, "blocked": False, "rolls": [], "message": ""},
+    }
+
+
 def twin_beam_from_spec(spec: Dict[str, Any]) -> Dict[str, Any]:
     """Synthetic beam payload so the Digital Twin can render Spec DNA without seed geometry."""
     geometry = spec.get("geometry") or {}

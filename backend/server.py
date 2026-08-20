@@ -26,7 +26,7 @@ from models import (
     BlueprintLockInput, LockedBlueprintRevision,
     InstrumentReading, InstrumentReadingCreate, InstrumentReadingEvaluateInput, InstrumentReadingOverride,
 )
-from beam_spec import materialize_job_beam_specs, strand_engine_stale, twin_beam_from_spec
+from beam_spec import materialize_job_beam_specs, strand_engine_stale, tension_twin_payload, twin_beam_from_spec
 from auth import router as auth_router, get_current_user, require_roles, seed_admin
 from instrument_reading import can_override_instrument, evaluate_instrument_reading
 from job_cabinet import (
@@ -1438,6 +1438,43 @@ async def list_beams(job_id: str | None = None, user=Depends(get_current_user)):
     except Exception:
         logger.exception("Failed to list beams job_id=%s", job_id)
         raise HTTPException(status_code=500, detail="Failed to list beams")
+
+
+@api.get("/beams/{beam_id}/tension-twin")
+async def get_beam_tension_twin(beam_id: str, user=Depends(get_current_user)):
+    try:
+        beam = await db.beams.find_one({"id": beam_id}, {"_id": 0})
+        if not beam:
+            raise HTTPException(status_code=404, detail="Beam not found")
+        beam = await enrich_beam(beam)
+        spec = beam.get("beam_spec")
+        if not spec and beam.get("spec_id"):
+            spec = await db.beam_specs.find_one({"id": beam["spec_id"]}, {"_id": 0})
+        if not spec and beam.get("job_id") and beam.get("mark"):
+            spec = await db.beam_specs.find_one({
+                "job_id": beam["job_id"],
+                "beam_mark": str(beam.get("mark")),
+                "status": "locked",
+            }, {"_id": 0})
+        if not spec:
+            raise HTTPException(status_code=404, detail="No locked BeamSpec for this beam. Upload a shop drawing and Verify & Lock.")
+        bed = None
+        if beam.get("bed_id"):
+            bed = await db.beds.find_one({"id": beam["bed_id"]}, {"_id": 0})
+        strand_gate = {"ok": True, "blocked": False, "rolls": [], "message": ""}
+        try:
+            from strand_roll_routes import bed_tension_gate
+            strand_gate = await bed_tension_gate(beam.get("bed_id") or "", beam.get("pour_id"))
+        except Exception:
+            logger.exception("Tension gate lookup failed beam_id=%s", beam_id)
+        payload = tension_twin_payload(beam, spec, bed=bed, strand_gate=strand_gate)
+        logger.info("Tension twin beam_id=%s mark=%s spec_id=%s", beam_id, beam.get("mark"), spec.get("id"))
+        return payload
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("Failed to load tension twin beam_id=%s", beam_id)
+        raise HTTPException(status_code=500, detail="Failed to load tension twin")
 
 
 @api.post("/beams")

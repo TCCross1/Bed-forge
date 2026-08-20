@@ -4,6 +4,20 @@ export const HEADER_SETBACK_FT = 8;
 export const GAP_FT = 2.5;
 export const COMPACT_HARDWARE_KINDS = ["lift_loop", "bearing_plate", "bituminous_zone", "hold_down", "projecting_rebar"];
 
+/** Casting-lane soffit width in feet. I-beam beds are narrower than box beds. */
+export function plannerLaneWidthFt(twinType) {
+  return twinType === "box_beam" ? 22 : 16;
+}
+
+export function plannerTwinType(layout) {
+  return (
+    layout?.bed?.twin_type
+    || layout?.assignments?.[0]?.beam?.twin_type
+    || layout?.assignments?.[0]?.spec?.geometry?.twin_type
+    || "i_beam"
+  );
+}
+
 export function statusColor(status) {
   return productionStatus(status).color;
 }

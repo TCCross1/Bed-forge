@@ -1,7 +1,13 @@
 """Beam Spec DNA materialization from locked/confirmed extraction."""
 from models import BlueprintField
 from blueprint_pipeline import extract_structured_fields, normalize_locked_blueprint
-from beam_spec import materialize_job_beam_specs, strand_engine_stale, twin_beam_from_spec, beam_record_from_locked_spec
+from beam_spec import (
+    materialize_job_beam_specs,
+    strand_engine_stale,
+    twin_beam_from_spec,
+    beam_record_from_locked_spec,
+    tension_twin_payload,
+)
 from tests.test_blueprint_extraction import L25390_FIXTURE
 
 
@@ -246,3 +252,26 @@ def test_materialize_beams_from_locked_specs_idempotent():
         assert len(second) == 9
 
     asyncio.run(run())
+
+
+def test_tension_twin_payload_copies_spec_dna_without_inventing_strands():
+    beam = {"id": "beam-201", "mark": "201", "job_id": "job-l25390", "spec_id": "spec-201", "length_ft": 47.25}
+    spec = {
+        "id": "spec-201",
+        "beam_mark": "201",
+        "product_type": "Type 2 I-Beam",
+        "product_family": "i_beam",
+        "geometry": {"length_ft": 47.25, "depth_in": 36.0, "twin_type": "i_beam"},
+        "strands": None,
+        "hold_downs": None,
+        "strand": {"final_pull_lb": None},
+    }
+    payload = tension_twin_payload(beam, spec, bed={"id": "bed-1", "length_ft": 400})
+    assert payload["spec"]["beam_mark"] == "201"
+    assert payload["spec"]["product_name"] == "Type 2 I-Beam"
+    assert payload["beam"]["mark"] == "201"
+    assert payload["strands"] == []
+    assert payload["hold_downs"] == []
+    assert payload["summary"]["strands_total"] == 0
+    assert payload["bed_length_ft"] == 400
+    assert "invent" not in str(payload).lower()

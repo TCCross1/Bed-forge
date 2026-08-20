@@ -1,11 +1,11 @@
 import React, { Suspense } from "react";
 import { Canvas } from "@react-three/fiber";
 import { OrbitControls } from "@react-three/drei";
-import { statusColor } from "../lib/bedLayout";
+import { plannerLaneWidthFt, plannerTwinType, statusColor } from "../lib/bedLayout";
 import { bedState } from "../lib/constants";
 import { MarkedEndMarker, TwinBadge } from "./MarkedEndMarker";
 
-const BED_SPACING = 18;
+const BED_SPACING = 30;
 
 function SimpleBeam({ row, x, active, onSelect }) {
   const length = Number(row.length_ft) || 80;
@@ -50,8 +50,10 @@ function SimpleBeam({ row, x, active, onSelect }) {
 function PlantBed({ layout, index, onSelectBed, onSelectBeam }) {
   const bed = layout.bed || {};
   const lengthFt = Number(bed.length_ft) || 300;
+  const width = plannerLaneWidthFt(plannerTwinType(layout));
   const x = (index - 3.5) * BED_SPACING;
   const st = bedState(bed.status);
+  const headerDepth = 3.4;
   return (
     <group
       onClick={(e) => {
@@ -59,19 +61,24 @@ function PlantBed({ layout, index, onSelectBed, onSelectBeam }) {
         if (onSelectBed) onSelectBed(bed);
       }}
     >
-      <mesh position={[x, -0.2, lengthFt / 2]}>
-        <boxGeometry args={[8, 0.4, lengthFt]} />
+      <mesh position={[x, -0.22, lengthFt / 2]}>
+        <boxGeometry args={[width, 0.44, lengthFt]} />
         <meshStandardMaterial color="#161B24" />
       </mesh>
-      <mesh position={[x, 1.6, 0.5]}>
-        <boxGeometry args={[8.4, 3.2, 1]} />
-        <meshStandardMaterial color="#2979FF" emissive="#2979FF" emissiveIntensity={0.08} />
+      <mesh position={[x, 0.08, 3.5]}>
+        <boxGeometry args={[width * 0.9, 0.1, 7]} />
+        <meshStandardMaterial color="#2979FF" emissive="#2979FF" emissiveIntensity={0.28} />
       </mesh>
-      <mesh position={[x, 1.6, lengthFt - 0.5]}>
-        <boxGeometry args={[8.4, 3.2, 1]} />
-        <meshStandardMaterial color="#C9A227" />
+      <mesh position={[x, 2.2, headerDepth / 2]}>
+        <boxGeometry args={[width + 2.2, 4.4, headerDepth]} />
+        <meshStandardMaterial color="#2979FF" emissive="#2979FF" emissiveIntensity={0.14} />
       </mesh>
-      <TwinBadge text={`BED ${bed.bed_number}`} color={st.color} compact position={[x, 4.2, 2]} />
+      <mesh position={[x, 2.0, lengthFt - 1.6]}>
+        <boxGeometry args={[width + 1.6, 4.0, 3.2]} />
+        <meshStandardMaterial color="#C9A227" emissive="#C9A227" emissiveIntensity={0.08} />
+      </mesh>
+      <TwinBadge text={`BED ${bed.bed_number} · MARKED END`} color="#2979FF" position={[x, 5.4, headerDepth / 2]} />
+      <TwinBadge text={st.label || `BED ${bed.bed_number}`} color={st.color} compact position={[x, 5.8, 14]} />
       {(layout.assignments || []).map((row) => (
         <SimpleBeam
           key={row.id}
@@ -90,7 +97,7 @@ export default function PlantFloor({ plant, onSelectBed, onSelectBeam, height = 
   return (
     <div style={{ width: "100%", height, background: "#0A0C10" }} data-testid="plant-floor-canvas">
       <Canvas
-        camera={{ position: [0, 90, -40], fov: 42 }}
+        camera={{ position: [0, 110, -48], fov: 40 }}
         dpr={[1, 1.5]}
         gl={{ antialias: true, powerPreference: "high-performance" }}
       >
@@ -107,7 +114,7 @@ export default function PlantFloor({ plant, onSelectBed, onSelectBeam, height = 
               onSelectBeam={onSelectBeam}
             />
           ))}
-          <gridHelper args={[Math.max(180, longest + 40), 36, "#1C2230", "#12151C"]} position={[0, 0, longest / 2]} />
+          <gridHelper args={[Math.max(240, longest + 40), 36, "#1C2230", "#12151C"]} position={[0, 0, longest / 2]} />
           <OrbitControls target={[0, 0, longest / 2]} enablePan enableZoom enableRotate makeDefault />
         </Suspense>
       </Canvas>

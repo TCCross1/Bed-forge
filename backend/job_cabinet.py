@@ -231,15 +231,32 @@ async def materialize_beams_from_locked_specs(specs: List[Dict[str, Any]]) -> Li
     created_or_linked: List[Dict[str, Any]] = []
     locked = [
         spec for spec in (specs or [])
-        if spec and spec.get("status") == "locked" and spec.get("beam_mark") and spec.get("job_id")
+        if spec
+        and spec.get("status") == "locked"
+        and spec.get("beam_mark")
+        and str(spec.get("beam_mark") or "").strip().upper() != "UNCONFIRMED"
+        and (spec.get("job_id") or spec.get("job_number"))
     ]
     locked.sort(key=lambda spec: str(spec.get("beam_mark") or ""))
     homes: Dict[str, tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]]]] = {}
     next_position: Dict[str, int] = {}
+    jobs_by_number: Dict[str, Optional[Dict[str, Any]]] = {}
     try:
         for spec in locked:
             job_id = spec.get("job_id")
+            if not job_id:
+                job_number = spec.get("job_number")
+                if job_number not in jobs_by_number:
+                    jobs_by_number[job_number] = await db.jobs.find_one({"job_number": job_number}, {"_id": 0})
+                job = jobs_by_number.get(job_number)
+                if job and job.get("id"):
+                    job_id = job["id"]
+                    spec["job_id"] = job_id
+                    await db.beam_specs.update_one({"id": spec["id"]}, {"$set": {"job_id": job_id, "updated_at": now_iso()}})
             mark = str(spec.get("beam_mark") or "").strip()
+            if not job_id:
+                logger.error("Cannot materialize beam mark=%s — Spec DNA has no job_id", mark)
+                continue
             if job_id not in homes:
                 homes[job_id] = await _cast_home_for_job(job_id)
             bed, pour = homes[job_id]
@@ -315,6 +332,10 @@ async def materialize_beams_for_job(job_id: str) -> List[Dict[str, Any]]:
         for spec in specs:
             if not spec.get("job_id"):
                 spec["job_id"] = job_id
+                await db.beam_specs.update_one(
+                    {"id": spec["id"]},
+                    {"$set": {"job_id": job_id, "updated_at": now_iso()}},
+                )
         return await materialize_beams_from_locked_specs(specs)
     except Exception:
         logger.exception("Failed to backfill beams for job_id=%s", job_id)
