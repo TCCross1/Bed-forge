@@ -1,18 +1,47 @@
 import copy
 import logging
 import os
+import re
 from collections import defaultdict
 
 logger = logging.getLogger(__name__)
 
 
+class MemoryWriteResult:
+    def __init__(self, matched_count=0, modified_count=0, deleted_count=0):
+        self.matched_count = matched_count
+        self.modified_count = modified_count
+        self.deleted_count = deleted_count
+
+
+def _clause_matches(document, key, value):
+    if isinstance(value, dict):
+        if "$in" in value and document.get(key) not in value["$in"]:
+            return False
+        if "$nin" in value and document.get(key) in value["$nin"]:
+            return False
+        if "$exists" in value:
+            exists = key in document and document.get(key) is not None
+            if bool(value["$exists"]) != exists:
+                return False
+        if "$regex" in value:
+            flags = re.I if "i" in str(value.get("$options") or "") else 0
+            if not re.search(str(value["$regex"]), str(document.get(key) or ""), flags):
+                return False
+        return True
+    return document.get(key) == value
+
+
 def _matches(document, query):
     query = query or {}
+    if "$or" in query:
+        rest = {key: value for key, value in query.items() if key != "$or"}
+        if rest and not _matches(document, rest):
+            return False
+        clauses = query.get("$or") or []
+        return any(_matches(document, clause) for clause in clauses)
     for key, value in query.items():
-        if isinstance(value, dict) and "$in" in value:
-            if document.get(key) not in value["$in"]:
-                return False
-        elif document.get(key) != value:
+        if not _clause_matches(document, key, value):
             return False
     return True
 
@@ -71,8 +100,31 @@ class MemoryCollection:
         for document in self.documents:
             if _matches(document, query):
                 document.update(copy.deepcopy(updates))
-                return {"matched_count": 1, "modified_count": 1}
-        return {"matched_count": 0, "modified_count": 0}
+                return MemoryWriteResult(1, 1)
+        return MemoryWriteResult(0, 0)
+
+    async def update_many(self, query, update):
+        updates = update.get("$set", {})
+        matched = 0
+        modified = 0
+        for document in self.documents:
+            if _matches(document, query):
+                matched += 1
+                if updates:
+                    document.update(copy.deepcopy(updates))
+                    modified += 1
+        return MemoryWriteResult(matched, modified)
+
+    async def delete_many(self, query):
+        kept = []
+        deleted = 0
+        for document in self.documents:
+            if _matches(document, query):
+                deleted += 1
+            else:
+                kept.append(document)
+        self.documents = kept
+        return MemoryWriteResult(deleted, 0, deleted)
 
     async def count_documents(self, query):
         return len([doc for doc in self.documents if _matches(doc, query)])
