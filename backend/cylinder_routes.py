@@ -315,6 +315,16 @@ async def record_cylinder_crush(cylinder_id: str, payload: CylinderCrushInput, r
             ))
             if marks:
                 saved["ncr_prompt"]["description"] = saved["ncr_prompt"]["description"] + f" · {', '.join(marks[:4])}"
+            try:
+                from command_wall import emit_from_cylinder
+                await emit_from_cylinder(saved, user)
+            except Exception:
+                logger.exception("command alert from cylinder crush failed id=%s", cylinder_id)
+        try:
+            from batch_intelligence_routes import ingest_lab_document
+            await ingest_lab_document(source_type="cylinder", document=saved, user=user)
+        except Exception:
+            logger.exception("batch vault ingest failed for cylinder crush id=%s", cylinder_id)
         return saved
     except HTTPException:
         raise

@@ -162,4 +162,33 @@ export function readLastBatchIdentity() {
   }
 }
 
+export function emptyIntelligenceQuery(form = {}) {
+  return {
+    mix_code: form.mix_design || form.mix_code || "",
+    required_release_psi: form.required_release_psi || 4500,
+    required_7d_psi: form.required_7d_psi || "",
+    required_28d_psi: form.required_28d_psi || "",
+    target_air_pct: form.target_air_pct || 6,
+    target_slump_in: form.target_slump_in || 5.5,
+    ambient_f: form.ambient_temp_f || form.ambient_f || "",
+    rh_pct: form.humidity_pct || form.rh_pct || "",
+  };
+}
+
+export function formatEnvelopeLine(row) {
+  if (!row) return "";
+  const unit = row.unit || "";
+  return `${row.name}: ${row.min} / ${row.median} / ${row.max} ${unit}`.trim();
+}
+
+export function envelopeToTicketText(envelope) {
+  const materials = envelope?.materials || [];
+  const ingredients = materials.filter((row) => String(row.kind || "").toLowerCase() !== "admixture" && !String(row.unit || "").startsWith("oz"));
+  const admixtures = materials.filter((row) => String(row.kind || "").toLowerCase() === "admixture" || String(row.unit || "").startsWith("oz"));
+  return {
+    ingredientsText: ingredients.map((row) => `${row.name}|${row.median}|${row.median}`).join("\n"),
+    admixturesText: admixtures.map((row) => `${row.name}|${row.median}`).join("\n"),
+  };
+}
+
 export { num as parseBatchNumber };

@@ -291,6 +291,10 @@ export default function CylinderTags() {
         crush_date: form.crush_date || todayISO(),
         crush_age_days: form.crush_age_days === "" || form.crush_age_days == null ? null : parseInt(form.crush_age_days, 10),
         required_psi: form.required_psi === "" || form.required_psi == null ? null : parseFloat(form.required_psi),
+        break_load: form.break_load === "" || form.break_load == null ? null : parseFloat(form.break_load),
+        test_type: form.test_type || null,
+        batch_id: form.batch_id || cylinder.batch_id || null,
+        retest_of: form.retest_of || null,
         notes: form.notes || "",
       });
       setRun((cur) => ({
@@ -562,6 +566,10 @@ export default function CylinderTags() {
                     crush_date: cyl.crush_date || todayISO(),
                     crush_age_days: cyl.crush_age_days ?? "",
                     required_psi: cyl.required_psi ?? "",
+                    break_load: cyl.break_load ?? "",
+                    test_type: cyl.test_type || "release",
+                    batch_id: cyl.batch_id || "",
+                    retest_of: cyl.retest_of || "",
                     notes: cyl.notes || "",
                   };
                   return (
@@ -576,6 +584,15 @@ export default function CylinderTags() {
                         <input placeholder="Required psi" type="number" value={form.required_psi} onChange={(e) => setCrush((c) => ({ ...c, [cyl.id]: { ...form, required_psi: e.target.value } }))} className={inputClass} />
                         <input placeholder="Age days" type="number" value={form.crush_age_days} onChange={(e) => setCrush((c) => ({ ...c, [cyl.id]: { ...form, crush_age_days: e.target.value } }))} className={inputClass} />
                         <input type="date" value={form.crush_date} onChange={(e) => setCrush((c) => ({ ...c, [cyl.id]: { ...form, crush_date: e.target.value } }))} className={inputClass} />
+                        <input placeholder="Break load" type="number" value={form.break_load} onChange={(e) => setCrush((c) => ({ ...c, [cyl.id]: { ...form, break_load: e.target.value } }))} className={inputClass} />
+                        <select value={form.test_type} onChange={(e) => setCrush((c) => ({ ...c, [cyl.id]: { ...form, test_type: e.target.value } }))} className={inputClass}>
+                          <option value="release">Release</option>
+                          <option value="7d">7 day</option>
+                          <option value="28d">28 day</option>
+                          <option value="other">Other</option>
+                        </select>
+                        <input placeholder="Batch id" value={form.batch_id} onChange={(e) => setCrush((c) => ({ ...c, [cyl.id]: { ...form, batch_id: e.target.value } }))} className={inputClass} />
+                        <input placeholder="Retest of" value={form.retest_of} onChange={(e) => setCrush((c) => ({ ...c, [cyl.id]: { ...form, retest_of: e.target.value } }))} className={inputClass} />
                       </div>
                       <button type="button" onClick={() => saveCrush(cyl)} disabled={Boolean(busy)} className="min-h-12 px-4 border border-[#1C2230] font-mono text-xs uppercase hover:border-primary">
                         Record crush

@@ -36,6 +36,8 @@ const EMPTY_MEASURE = {
   load_number: "",
   concrete_temp_f: "",
   air_content_pct: "",
+  unit_weight_pcf: "",
+  retest_of: "",
   notes: "",
 };
 
@@ -68,6 +70,8 @@ export default function FreshTest() {
   const [pours, setPours] = useState([]);
   const [beams, setBeams] = useState([]);
   const [beds, setBeds] = useState([]);
+  const [batches, setBatches] = useState([]);
+  const [batchId, setBatchId] = useState("");
   const [jobId, setJobId] = useState("");
   const [pourId, setPourId] = useState("");
   const [beamIds, setBeamIds] = useState([]);
@@ -96,8 +100,9 @@ export default function FreshTest() {
       api.get("/beams"),
       api.get("/beds"),
       api.get("/beds/plant-layout"),
+      api.get("/batch-records"),
     ])
-      .then(([j, p, b, d, plant]) => {
+      .then(([j, p, b, d, plant, batchRes]) => {
         if (cancelled) return;
         const jobsList = j.data || [];
         const poursList = p.data || [];
@@ -107,6 +112,7 @@ export default function FreshTest() {
         setPours(poursList);
         setBeams(beamsList);
         setBeds(bedsList);
+        setBatches(batchRes.data || []);
         const picked = pickIdentity({
           jobs: jobsList,
           pours: poursList,
@@ -241,8 +247,11 @@ export default function FreshTest() {
         test_types: types,
         mix_ticket: form.mix_ticket || "",
         load_number: form.load_number || "",
+        batch_id: batchId || null,
         concrete_temp_f: num(form.concrete_temp_f),
         air_content_pct: num(form.air_content_pct),
+        unit_weight_pcf: num(form.unit_weight_pcf),
+        retest_of: form.retest_of || null,
         time_sampled: form.time_sampled || stampNowIso(),
         spread_d1_in: num(form.spread_d1_in),
         spread_d2_in: num(form.spread_d2_in),
@@ -518,6 +527,14 @@ export default function FreshTest() {
             <Field label="Mix / ticket number (optional)">
               <input data-testid="fresh-mix" value={form.mix_ticket} onChange={(e) => set("mix_ticket", e.target.value)} className={inputClass} />
             </Field>
+            <Field label="Batch ticket (links lab to pour / batch)">
+              <select data-testid="fresh-batch" value={batchId} onChange={(e) => setBatchId(e.target.value)} className={inputClass}>
+                <option value="">Latest ticket on this pour</option>
+                {batches.filter((row) => !pourId || row.pour_id === pourId).map((row) => (
+                  <option key={row.id} value={row.id}>{row.ticket_number || row.mix_design || row.id}</option>
+                ))}
+              </select>
+            </Field>
             <Field label="Load / truck number (optional)">
               <input data-testid="fresh-load" value={form.load_number} onChange={(e) => set("load_number", e.target.value)} className={inputClass} />
             </Field>
@@ -526,6 +543,12 @@ export default function FreshTest() {
             </Field>
             <Field label="Air content (%, optional)">
               <input data-testid="fresh-air" inputMode="decimal" type="number" step="0.1" value={form.air_content_pct} onChange={(e) => set("air_content_pct", e.target.value)} className={inputClass} />
+            </Field>
+            <Field label="Unit weight (pcf, optional)">
+              <input data-testid="fresh-unit-weight" inputMode="decimal" type="number" step="0.1" value={form.unit_weight_pcf} onChange={(e) => set("unit_weight_pcf", e.target.value)} className={inputClass} />
+            </Field>
+            <Field label="Retest of (prior fail id)">
+              <input data-testid="fresh-retest" value={form.retest_of} onChange={(e) => set("retest_of", e.target.value)} className={inputClass} placeholder="Prior lab / NCR id" />
             </Field>
           </div>
           <Field label="Time sampled">

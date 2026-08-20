@@ -87,6 +87,11 @@ async def create_fresh_test(payload: FreshConcreteTestCreate, user=Depends(get_c
             rec.gate,
             user.get("email"),
         )
+        try:
+            from batch_intelligence_routes import ingest_lab_document
+            await ingest_lab_document(source_type="fresh", document=stored, user=user)
+        except Exception:
+            logger.exception("batch vault ingest failed for fresh test id=%s", rec.id)
         if rec.gate == "fail" or rec.blocking_assessment == "blocking":
             from ncr import attach_prompt, build_prompt
             stored = attach_prompt(stored, build_prompt(
@@ -106,3 +111,10 @@ async def create_fresh_test(payload: FreshConcreteTestCreate, user=Depends(get_c
     except Exception:
         logger.exception("create_fresh_test failed")
         raise HTTPException(status_code=500, detail="Failed to save fresh concrete test")
+
+
+try:
+    from batch_intelligence_routes import router as batch_intelligence_router
+    router.include_router(batch_intelligence_router)
+except Exception:
+    logger.exception("Failed to mount batch intelligence router on fresh routes")

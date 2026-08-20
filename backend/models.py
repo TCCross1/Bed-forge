@@ -587,6 +587,7 @@ class FreshConcreteTest(BaseModel):
     id: str = Field(default_factory=new_id)
     job_id: str
     pour_id: str
+    batch_id: Optional[str] = None
     beam_ids: List[str] = Field(default_factory=list)
     bed_id: Optional[str] = None
     test_types: List[str] = Field(default_factory=lambda: ["spread"])
@@ -594,6 +595,9 @@ class FreshConcreteTest(BaseModel):
     load_number: str = ""
     concrete_temp_f: Optional[float] = None
     air_content_pct: Optional[float] = None
+    unit_weight_pcf: Optional[float] = None
+    retest_of: Optional[str] = None
+    ncr_ids: List[str] = Field(default_factory=list)
     time_sampled: str = Field(default_factory=now_iso)
     spread_d1_in: Optional[float] = None
     spread_d2_in: Optional[float] = None
@@ -623,6 +627,7 @@ class FreshConcreteTest(BaseModel):
 class FreshConcreteTestCreate(BaseModel):
     job_id: str
     pour_id: str
+    batch_id: Optional[str] = None
     beam_ids: List[str] = Field(default_factory=list)
     bed_id: Optional[str] = None
     test_types: List[str] = Field(default_factory=lambda: ["spread"])
@@ -630,6 +635,9 @@ class FreshConcreteTestCreate(BaseModel):
     load_number: str = ""
     concrete_temp_f: Optional[float] = None
     air_content_pct: Optional[float] = None
+    unit_weight_pcf: Optional[float] = None
+    retest_of: Optional[str] = None
+    ncr_ids: List[str] = Field(default_factory=list)
     time_sampled: Optional[str] = None
     spread_d1_in: Optional[float] = None
     spread_d2_in: Optional[float] = None
@@ -1018,6 +1026,13 @@ class CylinderCrushInput(BaseModel):
     required_psi: Optional[float] = None
     release_ok: Optional[bool] = None
     notes: Optional[str] = None
+    break_load: Optional[float] = None
+    test_type: Optional[str] = None
+    batch_id: Optional[str] = None
+    retest_of: Optional[str] = None
+    ncr_ids: Optional[List[str]] = None
+    unit_weight_pcf: Optional[float] = None
+    time_to_release_hours: Optional[float] = None
 
 
 class MaturitySampleCreate(BaseModel):
