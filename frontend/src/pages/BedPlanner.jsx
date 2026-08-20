@@ -370,7 +370,7 @@ export default function BedPlanner() {
                     layout={layout}
                     height={device.field ? 280 : 420}
                     onSelectBeam={(row) => {
-                      if (row?.beam_id) navigate(`/twin?beam=${row.beam_id}`);
+                      if (row?.beam_id) navigate(`/job-specs?beam=${row.beam_id}`);
                     }}
                   />
                 )}
@@ -406,7 +406,7 @@ export default function BedPlanner() {
                       <div className="flex items-center gap-2 min-w-0">
                         {plan && <GripVertical className="w-4 h-4 text-muted-foreground shrink-0" />}
                         <span className="font-mono text-xs text-muted-foreground">POS {row.position_on_bed}</span>
-                        <button type="button" className="font-mono font-bold text-sm truncate hover:text-primary" onClick={() => navigate(`/twin?beam=${row.beam_id}`)}>
+                        <button type="button" className="font-mono font-bold text-sm truncate hover:text-primary" onClick={() => navigate(`/job-specs?beam=${row.beam_id}`)}>
                           {row.beam?.mark || "BEAM"}
                         </button>
                         <span className="text-[10px] font-mono" style={{ color: st.color }}>{st.label}</span>

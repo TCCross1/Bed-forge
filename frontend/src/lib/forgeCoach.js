@@ -10,7 +10,7 @@ export const ARTICLES = [
     tags: ["roll", "heat", "mill", "tag", "strand", "gate", "ocr", "photo", "reel", "morning"],
     title: "Strand heat logs",
     tutorial: "morning",
-    route: "/rolls",
+    route: "/tension?tab=rolls",
     body: "Photograph the mill tag on Rolls → confirm heat/reel/grade with your eyes → assign to the bed. If you skip the heat number and a strand breaks, we cannot prove which heat was on the bed. Tensioning stays locked until at least one confirmed roll is linked. Do not invent a heat.",
   },
   {
@@ -138,7 +138,7 @@ export const ARTICLES = [
     tags: ["gloves", "dark", "flashlight", "iphone", "ipad", "tip"],
     title: "Floor tips",
     tutorial: "problems",
-    route: "/rolls",
+    route: "/tension?tab=rolls",
     body: "Gloves on: use the big buttons (48px). Dark bed: flashlight on Scan Tag and QR. iPhone is the field set (bottom nav). iPad/Mac is command (sidebar). If something looks wrong on the twin, stop and compare to the sheet — do not keep capturing.",
   },
   {
@@ -155,11 +155,11 @@ export const ROUTE_WALKS = {
   "/": [
     { testid: "plant-demo-path", label: "Today’s plant path — eight steps from mill tag to DOT package" },
     { testid: "board-scan-qr", label: "Scan a beam QR" },
-    { testid: "nav-rolls", label: "Rolls — start the morning here" },
+    { testid: "tension-tab-rolls", label: "Tension / Strands — Rolls tab for mill tags" },
   ],
-  "/rolls": [
-    { testid: "scan-tag", label: "Scan Tag — photograph the mill tag" },
-    { testid: "nav-tension", label: "After confirm + assign, go to Tension" },
+  "/job-specs": [
+    { testid: "twin-spec-select", label: "JOB Specs / Drawings — pick the open-job mark" },
+    { testid: "twin-open-job", label: "Open job identity on the twin" },
   ],
   "/tension": [
     { testid: "tension-twin-canvas", label: "Twin — tap a strand or hold-down" },
@@ -261,8 +261,8 @@ export function suggestedPrompts(route = "/", role = "qc_tech") {
     "/": ["Walk me through my first day", "Truck’s here — how do I log spread?", "Why do we log strand heats?"],
     "/fresh": ["Truck’s here — how do I log spread?", "What is J-ring?", "Walk me through this screen"],
     "/batch": ["How do I log a batch?", "Can the analyst change the mix?", "Who confirms a batch?"],
-    "/rolls": ["How do I log a mill tag?", "What if the camera cannot read the heat?", "Why is tension locked?"],
-    "/tension": ["Explain the L25390 strand pattern", "What is ±5%?", "Walk me through this screen"],
+    "/tension": ["How do I log a mill tag?", "What is ±5%?", "Explain the L25390 strand pattern"],
+    "/job-specs": ["How do I open L25390?", "Walk me through this screen", "What is Spec DNA?"],
     "/inspection": ["How do I run a QIR?", "What does HOLD mean?"],
     "/camber": ["Which camber points do I take?", "What if release strength is short?"],
     "/finish": ["What is Marked End ID?", "Walk me through this screen"],

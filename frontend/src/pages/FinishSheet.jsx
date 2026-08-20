@@ -5,6 +5,8 @@ import { toast } from "sonner";
 import { toastNcrFromResponse } from "../lib/ncr";
 import { Loader2, Sparkles } from "lucide-react";
 import { pickBeamId, useBeamQuery } from "../lib/useBeamQuery";
+import { useOpenJob } from "../context/OpenJobContext";
+import { jobListParams } from "../lib/jobAccess";
 
 const CHECKS = [
   { key: "strand_cut_flush", label: "Strands cut flush" },
@@ -37,6 +39,7 @@ const EMPTY = {
 
 export default function FinishSheet() {
   const queryBeam = useBeamQuery();
+  const { openJob } = useOpenJob();
   const [beams, setBeams] = useState([]);
   const [beamId, setBeamId] = useState(queryBeam);
   const [form, setForm] = useState(EMPTY);
@@ -45,7 +48,7 @@ export default function FinishSheet() {
 
   useEffect(() => {
     let cancelled = false;
-    api.get("/beams")
+    api.get("/beams", { params: jobListParams(openJob) })
       .then((r) => {
         if (cancelled) return;
         setBeams(r.data);
@@ -59,7 +62,7 @@ export default function FinishSheet() {
     return () => {
       cancelled = true;
     };
-  }, [queryBeam]);
+  }, [queryBeam, openJob?.id]);
 
   useEffect(() => {
     if (!beamId) return undefined;

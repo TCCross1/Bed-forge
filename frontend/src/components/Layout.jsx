@@ -12,10 +12,8 @@ import {
   Truck,
   Menu,
   X,
-  Upload,
   CalendarDays,
   ScanLine,
-  ScanBarcode,
   Tags,
   QrCode,
   BookOpen,
@@ -25,6 +23,7 @@ import {
   FlaskConical,
   Factory,
   AlertTriangle,
+  Briefcase,
   KeyRound,
   MonitorPlay,
   ScrollText,
@@ -32,7 +31,16 @@ import {
 import { useAuth } from "../context/AuthContext";
 import { useDevice } from "../context/DeviceContext";
 import { useCompany } from "../context/CompanyContext";
-import { ROLE_LABELS, isExec } from "../lib/constants";
+import { useOpenJob } from "../context/OpenJobContext";
+import { ROLE_LABELS } from "../lib/constants";
+import {
+  canSeeBatch,
+  canSeeBlueprints,
+  canSeeCommandTv,
+  canSeeFinance,
+  canSeePackages,
+  canSeePlanner,
+} from "../lib/jobAccess";
 import api from "../lib/api";
 import OfflineBanner from "./OfflineBanner";
 import ForgeCoach from "./ForgeCoach";
@@ -70,54 +78,49 @@ export function BrandLockup({ className = "h-12 w-auto", testid = "brand-lockup"
   );
 }
 
-const PRIMARY_NAV = [
-  { to: "/", label: "Board", icon: LayoutGrid, testid: "nav-dashboard" },
-  { to: "/twin", label: "Twin", icon: Box, testid: "nav-twin", feature: "digital_twin" },
-  { to: "/rolls", label: "Rolls", icon: ScanBarcode, testid: "nav-rolls" },
-  { to: "/fresh", label: "Fresh Test", icon: FlaskConical, testid: "nav-fresh", accent: true },
-  { to: "/batch", label: "Batch Plant", icon: Factory, testid: "nav-batch", feature: "batch_plant" },
-  { to: "/inspection", label: "Inspect", icon: ClipboardCheck, testid: "nav-inspection" },
-  { to: "/tags", label: "Tags", icon: Tags, testid: "nav-tags" },
-  { to: "/tension", label: "Tension", icon: Calculator, testid: "nav-tension" },
-  { to: "/forms", label: "Forms", icon: FileSpreadsheet, testid: "nav-forms", feature: "package_export" },
-  { to: "/packages", label: "Packages", icon: Package, testid: "nav-packages" },
-];
+function navForRole(role) {
+  const board = { to: "/", label: "Command Board", icon: LayoutGrid, testid: "nav-dashboard" };
+  const jobs = { to: "/jobs", label: "Open Job", icon: Briefcase, testid: "nav-jobs" };
+  const specs = { to: "/job-specs", label: "JOB Specs / Drawings", icon: Box, testid: "nav-twin", feature: "digital_twin" };
+  const tension = { to: "/tension", label: "Tension / Strands", icon: Calculator, testid: "nav-tension" };
+  const inspect = { to: "/inspection", label: "Inspect", icon: ClipboardCheck, testid: "nav-inspection" };
+  const tags = { to: "/tags", label: "Tags", icon: Tags, testid: "nav-tags" };
+  const forms = { to: "/forms", label: "Forms", icon: FileSpreadsheet, testid: "nav-forms", feature: "package_export" };
+  const packages = { to: "/packages", label: "Packages", icon: Package, testid: "nav-packages" };
+  const fresh = { to: "/fresh", label: "Fresh Test", icon: FlaskConical, testid: "nav-fresh", accent: true };
+  const batch = { to: "/batch", label: "Batch Plant", icon: Factory, testid: "nav-batch", feature: "batch_plant" };
+  if (role === "qc_tech") return [board, specs, inspect, tension, tags, forms, fresh];
+  if (role === "production") return [board, specs, tension, tags, fresh, ...(canSeeBatch(role) ? [batch] : [])];
+  return [board, jobs, specs, tension, inspect, tags, forms, packages, fresh, batch];
+}
 
-const FIELD_NAV = [
-  { to: "/", label: "Board", icon: LayoutGrid, testid: "nav-dashboard" },
-  { to: "/rolls", label: "Rolls", icon: ScanBarcode, testid: "nav-rolls" },
-  { to: "/fresh", label: "Fresh", icon: FlaskConical, testid: "nav-fresh", accent: true },
-  { to: "/twin", label: "Twin", icon: Box, testid: "nav-twin", feature: "digital_twin" },
-  { to: "/tension", label: "Tension", icon: Calculator, testid: "nav-tension" },
-];
+function fieldNav() {
+  return [
+    { to: "/", label: "Board", icon: LayoutGrid, testid: "nav-dashboard" },
+    { to: "/job-specs", label: "Specs", icon: Box, testid: "nav-twin", feature: "digital_twin" },
+    { to: "/tension", label: "Tension", icon: Calculator, testid: "nav-tension" },
+    { to: "/inspection", label: "Inspect", icon: ClipboardCheck, testid: "nav-inspection" },
+    { to: "/fresh", label: "Fresh", icon: FlaskConical, testid: "nav-fresh", accent: true },
+  ];
+}
 
-const SECONDARY_NAV = [
-  { to: "/ncr", label: "NCR Board", icon: AlertTriangle, testid: "nav-ncr", feature: "ncr" },
-  { to: "/planner", label: "Planner", icon: CalendarDays, testid: "nav-planner" },
-  { to: "/blueprints", label: "Blueprints", icon: ScrollText, testid: "nav-blueprints", feature: "blueprint_intelligence" },
-  { to: "/drawings", label: "Drawings", icon: Upload, testid: "nav-drawings" },
-  { to: "/camber", label: "Camber", icon: Ruler, testid: "nav-camber" },
-  { to: "/finish", label: "Finish", icon: Sparkles, testid: "nav-finish" },
-  { to: "/release", label: "Release", icon: Truck, testid: "nav-release" },
-  { to: "/measure", label: "Digital Tape", icon: ScanLine, testid: "nav-measure" },
-  { to: "/scan", label: "Scan QR", icon: ScanLine, testid: "nav-scan" },
-  { to: "/qr", label: "QR Labels", icon: QrCode, testid: "nav-qr" },
-  { to: "/guide", label: "Tutorial", icon: BookOpen, testid: "nav-guide" },
-];
-
-const COMMAND_SECONDARY = [
-  { to: "/ncr", label: "NCR Board", icon: AlertTriangle, testid: "nav-ncr", feature: "ncr" },
-  { to: "/planner", label: "Planner", icon: CalendarDays, testid: "nav-planner" },
-  { to: "/blueprints", label: "Blueprints", icon: ScrollText, testid: "nav-blueprints", feature: "blueprint_intelligence" },
-  { to: "/drawings", label: "Drawings", icon: Upload, testid: "nav-drawings" },
-  { to: "/camber", label: "Camber", icon: Ruler, testid: "nav-camber" },
-  { to: "/finish", label: "Finish", icon: Sparkles, testid: "nav-finish" },
-  { to: "/release", label: "Release", icon: Truck, testid: "nav-release" },
-  { to: "/measure", label: "Tape Review", icon: ScanLine, testid: "nav-measure" },
-  { to: "/scan", label: "Scan QR", icon: ScanLine, testid: "nav-scan" },
-  { to: "/qr", label: "QR Labels", icon: QrCode, testid: "nav-qr" },
-  { to: "/guide", label: "Tutorial", icon: BookOpen, testid: "nav-guide" },
-];
+function secondaryNav(role) {
+  const items = [
+    { to: "/ncr", label: "NCR Board", icon: AlertTriangle, testid: "nav-ncr", feature: "ncr" },
+  ];
+  if (canSeePlanner(role)) items.push({ to: "/planner", label: "Planner", icon: CalendarDays, testid: "nav-planner" });
+  if (canSeeBlueprints(role)) items.push({ to: "/blueprints", label: "Blueprints", icon: ScrollText, testid: "nav-blueprints", feature: "blueprint_intelligence" });
+  items.push(
+    { to: "/camber", label: "Camber", icon: Ruler, testid: "nav-camber" },
+    { to: "/finish", label: "Finish", icon: Sparkles, testid: "nav-finish" },
+    { to: "/release", label: "Release", icon: Truck, testid: "nav-release" },
+    { to: "/measure", label: "Digital Tape", icon: ScanLine, testid: "nav-measure" },
+    { to: "/scan", label: "Scan QR", icon: ScanLine, testid: "nav-scan" },
+    { to: "/qr", label: "QR Labels", icon: QrCode, testid: "nav-qr" },
+    { to: "/guide", label: "Tutorial", icon: BookOpen, testid: "nav-guide" },
+  );
+  return items;
+}
 
 function linkClass(isActive, accent) {
   if (isActive) {
@@ -167,6 +170,7 @@ export function ARMeasureLink({ beamId, purpose = "tape", compact = false }) {
 export default function Layout({ children }) {
   const { user, logout } = useAuth();
   const device = useDevice();
+  const { openJob, activeMark } = useOpenJob();
   const navigate = useNavigate();
   const location = useLocation();
   const [moreOpen, setMoreOpen] = useState(false);
@@ -178,32 +182,41 @@ export default function Layout({ children }) {
   }, [user]);
   const command = device.command;
   const field = device.field;
+  const primary = navForRole(user?.role);
   const secondary = [
-    ...(command ? COMMAND_SECONDARY : SECONDARY_NAV),
+    ...secondaryNav(user?.role),
     { to: "/licensing", label: "License", icon: KeyRound, testid: "nav-licensing", feature: "licensing" },
-    ...(isExec(user?.role) ? [
+    ...(canSeeCommandTv(user?.role) ? [
+      { to: "/command-board", label: "Command Wall", icon: MonitorPlay, testid: "nav-command-board", feature: "command_board" },
+    ] : []),
+    ...(canSeeFinance(user?.role) ? [
       { to: "/finance", label: "Dollars", icon: DollarSign, testid: "nav-finance" },
-      { to: "/command-board", label: "Command", icon: MonitorPlay, testid: "nav-command-board", feature: "command_board" },
     ] : []),
   ];
   const fieldMore = [
     { to: "/fresh", label: "Fresh Test — Spread / Slump", icon: FlaskConical, testid: "nav-fresh-more" },
     { to: "/ncr", label: "NCR — file / close", icon: AlertTriangle, testid: "nav-ncr-more" },
-    { to: "/batch", label: "Batch Plant", icon: Factory, testid: "nav-batch-more" },
+    { to: "/jobs", label: "Open Job", icon: Briefcase, testid: "nav-jobs-more" },
+    ...(canSeeBatch(user?.role) ? [{ to: "/batch", label: "Batch Plant", icon: Factory, testid: "nav-batch-more" }] : []),
     { to: "/guide", label: "Tutorial", icon: BookOpen, testid: "nav-guide" },
-    ...(isExec(user?.role) ? [
-      { to: "/finance", label: "Dollars", icon: DollarSign, testid: "nav-finance" },
-      { to: "/command-board", label: "Command", icon: MonitorPlay, testid: "nav-command-board", feature: "command_board" },
-    ] : []),
+    ...(canSeeCommandTv(user?.role) ? [{ to: "/command-board", label: "Command Wall", icon: MonitorPlay, testid: "nav-command-board", feature: "command_board" }] : []),
+    ...(canSeeFinance(user?.role) ? [{ to: "/finance", label: "Dollars", icon: DollarSign, testid: "nav-finance" }] : []),
     { to: "/scan", label: "Scan QR", icon: ScanLine, testid: "nav-scan" },
     { to: "/qr", label: "QR Labels", icon: QrCode, testid: "nav-qr" },
     { to: "/inspection", label: "Inspect", icon: ClipboardCheck, testid: "nav-inspection" },
     { to: "/tags", label: "Tags", icon: Tags, testid: "nav-tags" },
     { to: "/forms", label: "Forms", icon: FileSpreadsheet, testid: "nav-forms", feature: "package_export" },
-    { to: "/packages", label: "Packages", icon: Package, testid: "nav-packages" },
+    ...(canSeePackages(user?.role) ? [{ to: "/packages", label: "Packages", icon: Package, testid: "nav-packages" }] : []),
     { to: "/measure", label: "Digital Tape", icon: ScanLine, testid: "nav-measure" },
-    ...SECONDARY_NAV.filter((i) => !["/measure", "/scan", "/qr", "/guide", "/ncr"].includes(i.to)),
+    { to: "/camber", label: "Camber", icon: Ruler, testid: "nav-camber" },
+    { to: "/finish", label: "Finish", icon: Sparkles, testid: "nav-finish" },
+    { to: "/release", label: "Release", icon: Truck, testid: "nav-release" },
+    ...(canSeePlanner(user?.role) ? [{ to: "/planner", label: "Planner", icon: CalendarDays, testid: "nav-planner" }] : []),
+    ...(canSeeBlueprints(user?.role) ? [{ to: "/blueprints", label: "Blueprints", icon: ScrollText, testid: "nav-blueprints", feature: "blueprint_intelligence" }] : []),
   ];
+  const jobChip = openJob?.job_number
+    ? `${openJob.job_number}${activeMark ? ` · MK ${activeMark}` : ""}`
+    : "No open job";
 
   const signOut = () => {
     logout();
@@ -223,8 +236,15 @@ export default function Layout({ children }) {
         </div>
 
         <nav className="flex-1 py-4 flex flex-col gap-1 px-3 overflow-y-auto">
+          <div className="px-4 pb-3 pt-3">
+            <div className="text-[10px] font-mono uppercase tracking-[0.25em] text-muted-foreground">Open Job</div>
+            <Link to="/jobs" data-testid="open-job-chip" className="mt-1 block border border-primary/40 bg-primary/10 px-3 py-2 min-h-12">
+              <div className="font-display font-bold uppercase tracking-wider text-primary truncate">{jobChip}</div>
+              <div className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest">{(openJob?.status || "none").replace(/_/g, " ")}</div>
+            </Link>
+          </div>
           <div className="px-4 pb-2 text-[10px] font-mono uppercase tracking-[0.25em] text-muted-foreground">Command</div>
-          <NavItems items={PRIMARY_NAV} endHome license={license} />
+          <NavItems items={primary} endHome license={license} />
           <div className="px-4 pt-5 pb-2 text-[10px] font-mono uppercase tracking-[0.25em] text-muted-foreground">Review &amp; release</div>
           <NavItems items={secondary} license={license} />
         </nav>
@@ -255,7 +275,10 @@ export default function Layout({ children }) {
             <BrandMark className="h-10 w-auto" testid="mobile-brand-mark" />
           </NavLink>
           <div className="flex items-center justify-center min-w-0 px-2">
-            <BrandLockup className="h-9 w-auto max-w-full" testid="mobile-brand-lockup" />
+            <div className="min-w-0 text-center">
+              <BrandLockup className="h-9 w-auto max-w-full" testid="mobile-brand-lockup" />
+              <Link to="/jobs" className="text-[10px] font-mono uppercase tracking-[0.16em] text-primary truncate block" data-testid="open-job-chip-mobile">{jobChip}</Link>
+            </div>
           </div>
         </header>
 
@@ -307,7 +330,7 @@ export default function Layout({ children }) {
         data-testid="mobile-bottom-nav"
       >
         <div className="grid grid-cols-6">
-          {FIELD_NAV.map((item) => {
+          {fieldNav().map((item) => {
             const Icon = item.icon;
             const active = item.to === "/" ? location.pathname === "/" : location.pathname.startsWith(item.to);
             const idleColor = item.accent ? "text-[#C9A227]" : "text-muted-foreground";

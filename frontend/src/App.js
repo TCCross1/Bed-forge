@@ -15,9 +15,7 @@ import CamberSheet from "./pages/CamberSheet";
 import FinishSheet from "./pages/FinishSheet";
 import PreDelivery from "./pages/PreDelivery";
 import FormsExport from "./pages/FormsExport";
-import Drawings from "./pages/Drawings";
 import BedPlanner from "./pages/BedPlanner";
-import StrandRolls from "./pages/StrandRolls";
 import CylinderTags from "./pages/CylinderTags";
 import ARMeasure from "./pages/ARMeasure";
 import BeamDossier from "./pages/BeamDossier";
@@ -30,10 +28,11 @@ import NCRBoard from "./pages/NCRBoard";
 import BlueprintStudio from "./pages/BlueprintStudio";
 import Licensing from "./pages/Licensing";
 import CommandBoard from "./pages/CommandBoard";
-import CommandCenter from "./pages/CommandCenter";
 import OwnerPackages from "./pages/OwnerPackages";
 import Finance from "./pages/Finance";
 import { CompanyProvider } from "./context/CompanyContext";
+import OpenJobPage from "./pages/OpenJob";
+import { OpenJobProvider } from "./context/OpenJobContext";
 import { formatApiErrorDetail } from "./lib/api";
 
 function safeNextPath(search = "") {
@@ -101,6 +100,18 @@ function PasswordGate({ children }) {
   );
 }
 
+function RedirectTwin() {
+  const location = useLocation();
+  return <Navigate to={`/job-specs${location.search || ""}`} replace />;
+}
+
+function RedirectRolls() {
+  const location = useLocation();
+  const params = new URLSearchParams(location.search || "");
+  params.set("tab", "rolls");
+  return <Navigate to={`/tension?${params.toString()}`} replace />;
+}
+
 function AppRoutes() {
   return (
     <PasswordGate>
@@ -109,9 +120,11 @@ function AppRoutes() {
       <Route path="/guide" element={<Tutorial />} />
       <Route path="/login" element={<LoginOrHome />} />
       <Route path="/" element={<Protected><Dashboard /></Protected>} />
+      <Route path="/jobs" element={<Protected><OpenJobPage /></Protected>} />
       <Route path="/planner" element={<Protected><BedPlanner /></Protected>} />
-      <Route path="/twin" element={<Protected><DigitalTwin /></Protected>} />
-      <Route path="/drawings" element={<Protected><Drawings /></Protected>} />
+      <Route path="/job-specs" element={<Protected><DigitalTwin /></Protected>} />
+      <Route path="/twin" element={<RedirectTwin />} />
+      <Route path="/drawings" element={<RedirectTwin />} />
       <Route path="/blueprints" element={<Protected><BlueprintStudio /></Protected>} />
       <Route path="/inspection" element={<Protected><NewInspection /></Protected>} />
       <Route path="/fresh" element={<Protected><FreshTest /></Protected>} />
@@ -122,7 +135,7 @@ function AppRoutes() {
       <Route path="/finish" element={<Protected><FinishSheet /></Protected>} />
       <Route path="/release" element={<Protected><PreDelivery /></Protected>} />
       <Route path="/forms" element={<Protected><FormsExport /></Protected>} />
-      <Route path="/rolls" element={<Protected><StrandRolls /></Protected>} />
+      <Route path="/rolls" element={<RedirectRolls />} />
       <Route path="/tags" element={<Protected><CylinderTags /></Protected>} />
       <Route path="/qr" element={<Protected><QrLabels /></Protected>} />
       <Route path="/scan" element={<Protected><ScanBeam /></Protected>} />
@@ -145,9 +158,11 @@ function App() {
         <CompanyProvider>
         <AuthProvider>
           <BrowserRouter>
+            <OpenJobProvider>
             <SyncProvider>
               <AppRoutes />
             </SyncProvider>
+            </OpenJobProvider>
           </BrowserRouter>
           <Toaster theme="dark" position="top-right" richColors />
         </AuthProvider>

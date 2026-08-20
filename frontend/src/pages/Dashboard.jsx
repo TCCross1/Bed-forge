@@ -9,6 +9,8 @@ import { Activity, Layers, CheckCircle2, AlertTriangle, XCircle, Loader2, Refres
 import { toast } from "sonner";
 import { useDevice } from "../context/DeviceContext";
 import { useSync } from "../context/SyncContext";
+import { useOpenJob } from "../context/OpenJobContext";
+import { jobListParams } from "../lib/jobAccess";
 
 function Stat({ label, value, color, icon: Icon, testid }) {
   return (
@@ -81,6 +83,7 @@ function BedCard({ bed, onOpen, onOpenBeam }) {
 export default function Dashboard() {
   const device = useDevice();
   const { events, measurements } = useSync();
+  const { openJob } = useOpenJob();
   const [data, setData] = useState(null);
   const [plant, setPlant] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -91,7 +94,7 @@ export default function Dashboard() {
     setLoading(true);
     try {
       const [dash, floor] = await Promise.all([
-        api.get("/dashboard"),
+        api.get("/dashboard", { params: jobListParams(openJob) }),
         api.get("/beds/plant-layout", { params: { date: isoToday() } }),
       ]);
       setData(dash.data);
@@ -102,7 +105,7 @@ export default function Dashboard() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [openJob?.id]);
 
   useEffect(() => {
     load();
@@ -120,8 +123,8 @@ export default function Dashboard() {
   };
 
   const openBeam = (beam) => {
-    if (beam?.beam_id) navigate(`/twin?beam=${beam.beam_id}`);
-    else if (beam?.id) navigate(`/twin?beam=${beam.id}`);
+    if (beam?.beam_id) navigate(`/job-specs?beam=${beam.beam_id}`);
+    else if (beam?.id) navigate(`/job-specs?beam=${beam.id}`);
   };
 
   const s = data?.stats || {};
@@ -129,8 +132,8 @@ export default function Dashboard() {
   return (
     <Layout>
       <PageHeader
-        title="Multi-Bed Live Board"
-        subtitle="Real-time production sequence across all 8 casting beds"
+        title={openJob?.job_number ? `Command Board · ${openJob.job_number}` : "Command Board"}
+        subtitle={openJob?.job_number ? `Day production for the open job — Specs, tension, tags, and pours follow ${openJob.job_number}` : "Open a job to scope this board to one cabinet"}
         right={
           <div className="flex items-center gap-2">
             <div className={`${cardClass} p-1 grid grid-cols-2`}>
@@ -260,9 +263,9 @@ export default function Dashboard() {
               <div className="font-display font-bold uppercase tracking-wider mt-1 mb-3">One clean walk from mill tag to DOT package</div>
               <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-10 gap-2">
                 {[
-                  { n: "01", label: "Log rolls", to: "/rolls" },
+                  { n: "01", label: "Log rolls", to: "/tension?tab=rolls" },
                   { n: "02", label: "Assign beds", to: "/planner" },
-                  { n: "03", label: "Tension twin", to: "/tension" },
+                  { n: "03", label: "Tension / Strands", to: "/tension" },
                   { n: "04", label: "Fresh test", to: "/fresh" },
                   { n: "05", label: "Inspect", to: "/inspection" },
                   { n: "06", label: "NCR", to: "/ncr" },

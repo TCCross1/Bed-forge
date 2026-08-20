@@ -5,6 +5,8 @@ import { toast } from "sonner";
 import { CheckCircle2, XCircle, PauseCircle, ChevronRight, ChevronLeft, Loader2 } from "lucide-react";
 import { pickBeamId, useBeamQuery } from "../lib/useBeamQuery";
 import { toastNcrFromResponse } from "../lib/ncr";
+import { useOpenJob } from "../context/OpenJobContext";
+import { jobListParams } from "../lib/jobAccess";
 
 const SECTIONS = [
   {
@@ -109,6 +111,7 @@ const STATUS = [
 
 export default function NewInspection() {
   const queryBeam = useBeamQuery();
+  const { openJob } = useOpenJob();
   const [beams, setBeams] = useState([]);
   const [beamId, setBeamId] = useState(queryBeam);
   const [step, setStep] = useState(0);
@@ -119,7 +122,7 @@ export default function NewInspection() {
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    api.get("/beams")
+    api.get("/beams", { params: jobListParams(openJob) })
       .then((r) => {
         setBeams(r.data);
         setBeamId((current) => pickBeamId(current, queryBeam, r.data));
@@ -128,7 +131,7 @@ export default function NewInspection() {
         console.error("[inspection] beams load failed", err);
         toast.error(formatApiErrorDetail(err.response?.data?.detail) || "Failed to load beams");
       });
-  }, [queryBeam]);
+  }, [queryBeam, openJob?.id]);
 
   const section = SECTIONS[step];
   const sectionChecks = checks[section.key] || {};

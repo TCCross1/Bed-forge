@@ -5,7 +5,7 @@ import Layout, { PageHeader } from "../components/Layout";
 import BeamTwinViewer, { BedTwinViewer } from "../components/BeamViewer";
 import { bedState, qcState } from "../lib/constants";
 import { toast } from "sonner";
-import { Drawer, DrawerContent, DrawerHeader, DrawerTitle } from "../components/ui/drawer";
+import { useOpenJob } from "../context/OpenJobContext";
 import { Layers3, Loader2, MapPin, Ruler, ScanLine, Box, Construction, Lock, AlertTriangle, SlidersHorizontal } from "lucide-react";
 
 function SpecRows({ spec }) {
@@ -105,6 +105,7 @@ function layersForPour(mode) {
 
 export default function DigitalTwin() {
   const [params] = useSearchParams();
+  const { openJob, privileges, setActiveMark } = useOpenJob();
   const [beams, setBeams] = useState([]);
   const [beds, setBeds] = useState([]);
   const [specs, setSpecs] = useState([]);
@@ -123,18 +124,22 @@ export default function DigitalTwin() {
   const [form, setForm] = useState({ type: "crack", severity: "minor", note: "", length_in: 0 });
 
   useEffect(() => {
-    api.get("/beams").then((r) => {
-      setBeams(r.data);
+    const beamParams = openJob?.id ? { job_id: openJob.id } : {};
+    api.get("/beams", { params: beamParams }).then((r) => {
+      setBeams(r.data || []);
       setSelectedId((current) => current || r.data[0]?.id || "");
       setSelectedBedId((current) => current || r.data[0]?.bed_id || "");
-    });
-    api.get("/beds").then((r) => setBeds(r.data));
-    api.get("/beam-specs").then((r) => {
+    }).catch(() => setBeams([]));
+    api.get("/beds").then((r) => setBeds(r.data || [])).catch(() => setBeds([]));
+    const specParams = {};
+    if (openJob?.id) specParams.job_id = openJob.id;
+    if (openJob?.job_number) specParams.job_number = openJob.job_number;
+    api.get("/beam-specs", { params: specParams }).then((r) => {
       const list = Array.isArray(r.data) ? r.data : [];
       setSpecs(list);
       setSelectedSpecId((current) => current || (params.get("beam") ? "" : (list[0]?.id || "")));
     }).catch(() => setSpecs([]));
-  }, []);
+  }, [openJob?.id, openJob?.job_number]);
 
   useEffect(() => {
     if (selectedSpecId) {
@@ -155,6 +160,11 @@ export default function DigitalTwin() {
     if (!selectedBedId) return;
     api.get(`/beds/${selectedBedId}/twin`).then((r) => setBedTwin(r.data));
   }, [selectedBedId, selectedId]);
+
+  useEffect(() => {
+    const mark = beam?.mark || specs.find((item) => item.id === selectedSpecId)?.beam_mark || "";
+    setActiveMark(mark || "");
+  }, [beam?.mark, selectedSpecId, specs, setActiveMark]);
 
   const setPour = (next) => {
     setPourMode(next);
@@ -364,8 +374,8 @@ export default function DigitalTwin() {
   return (
     <Layout>
       <PageHeader
-        title="Digital Twin Viewer"
-        subtitle="Job Spec DNA drives unique per-beam twins — Pre-Pour cage vs Post-Pour finish"
+        title="JOB Specs / Drawings"
+        subtitle={`${openJob?.job_number || "Open a job"} · Spec DNA twins — Pre-Pour cage vs Post-Pour finish`}
         right={
           <div className="flex flex-wrap items-center justify-end gap-2">
             <button type="button" onClick={() => setControlsOpen(true)} className="lg:hidden min-h-11 px-3 rounded-sm border border-primary text-primary text-xs font-mono uppercase tracking-wider flex items-center gap-2">
@@ -426,6 +436,8 @@ export default function DigitalTwin() {
                 {blueprintSource.status === "draft" && <span className="font-mono text-xs font-bold tracking-widest px-3 py-1 rounded-sm border border-[#FFD60055] text-[#FFD600] flex items-center gap-2"><AlertTriangle className="w-3.5 h-3.5" /> DRAFT EXTRACTION</span>}
                 {bedStatus && <span className="font-mono text-xs font-bold tracking-widest px-3 py-1 rounded-sm" style={{ color: bedStatus.color, border: `1px solid ${bedStatus.color}55` }}>{bedStatus.label}</span>}
                 {beamState && <span className="font-mono text-xs font-bold tracking-widest px-3 py-1 rounded-sm" style={{ color: beamState.color, border: `1px solid ${beamState.color}55` }}>{beamState.label}</span>}
+                {openJob?.job_number && <span className="font-mono text-xs font-bold tracking-widest px-3 py-1 rounded-sm border border-[#E8C87255] text-[#E8C872]" data-testid="twin-open-job">{openJob.job_number}{beam?.mark ? ` · MK ${beam.mark}` : ""}</span>}
+                {!privileges.can_patch_spec && <span className="font-mono text-xs tracking-widest px-3 py-1 rounded-sm border border-border text-muted-foreground">VERIFY ONLY</span>}
               </div>
               <div className="hidden md:block">
                 <TwinLayerChips activeLayers={activeLayers} onToggle={(key) => setLayers((current) => ({ ...current, [key]: !current[key] }))} />

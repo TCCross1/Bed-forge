@@ -10,6 +10,7 @@ import {
   loadQueue,
 } from "../lib/strandRolls";
 import { useDevice } from "../context/DeviceContext";
+import { useOpenJob } from "../context/OpenJobContext";
 
 function emptyForm() {
   return Object.fromEntries(ROLL_FIELDS.map((f) => [f.key, ""]));
@@ -59,8 +60,9 @@ function RollThumb({ photo, tokenless }) {
   );
 }
 
-export default function StrandRolls() {
+export default function StrandRolls({ embedded = false }) {
   const device = useDevice();
+  const { openJob, pourDate } = useOpenJob();
   const [rolls, setRolls] = useState([]);
   const [beds, setBeds] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -78,7 +80,10 @@ export default function StrandRolls() {
 
   const loadRolls = useCallback(async () => {
     try {
-      const [rollRes, bedRes] = await Promise.all([api.get("/strand-rolls"), api.get("/beds")]);
+      const params = {};
+      if (openJob?.id) params.job_id = openJob.id;
+      if (pourDate) params.pour_date = pourDate;
+      const [rollRes, bedRes] = await Promise.all([api.get("/strand-rolls", { params }), api.get("/beds")]);
       setRolls(rollRes.data || []);
       setBeds(bedRes.data || []);
     } catch (err) {
@@ -87,7 +92,7 @@ export default function StrandRolls() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [openJob?.id, pourDate]);
 
   useEffect(() => {
     loadRolls();
@@ -142,6 +147,8 @@ export default function StrandRolls() {
     const body = new FormData();
     files.forEach((file) => body.append("photos", file));
     body.append("kinds", photoList.map((s) => s.kind || "tag").join(","));
+    if (openJob?.id) body.append("job_id", openJob.id);
+    if (pourDate) body.append("pour_date", pourDate);
     const { data } = await api.post("/strand-rolls/extract", body, { skipOfflineQueue: true });
     if (queuedId) setQueue(dequeueRollJob(queuedId));
     return data;
@@ -243,36 +250,54 @@ export default function StrandRolls() {
     setStep("confirm");
   };
 
-  return (
-    <Layout>
-      <PageHeader
-        title="Strand Rolls"
-        subtitle="Photograph the mill tag. Confirm heat, reel, and spec. Then assign to a bed."
-        right={
-          <div className="flex flex-wrap gap-2 justify-end">
-            {queue.length > 0 && (
-              <button
-                type="button"
-                onClick={flushQueue}
-                className="min-h-12 px-4 border border-[#FFD600] text-[#FFD600] font-mono text-xs uppercase"
-                data-testid="rolls-flush-queue"
-              >
-                Flush {queue.length} offline
-              </button>
-            )}
-            <button
-              type="button"
-              data-testid="scan-tag"
-              onClick={openScan}
-              className="min-h-12 px-4 bg-primary text-white font-display font-bold uppercase tracking-widest flex items-center gap-2"
-            >
-              <ScanBarcode className="w-4 h-4" /> Scan Tag
-            </button>
-          </div>
-        }
-      />
+  const scanButton = (
+    <button
+      type="button"
+      data-testid="scan-tag"
+      onClick={openScan}
+      className="min-h-12 px-4 bg-primary text-white font-display font-bold uppercase tracking-widest flex items-center gap-2"
+    >
+      <ScanBarcode className="w-4 h-4" /> Scan Tag
+    </button>
+  );
+  const flushButton = queue.length > 0 ? (
+    <button
+      type="button"
+      onClick={flushQueue}
+      className="min-h-12 px-4 border border-[#FFD600] text-[#FFD600] font-mono text-xs uppercase"
+      data-testid="rolls-flush-queue"
+    >
+      Flush {queue.length} offline
+    </button>
+  ) : null;
 
-      <div className="p-4 sm:p-6 lg:p-8 space-y-4">
+  const body = (
+    <>
+      {!embedded && (
+        <PageHeader
+          title="Strand Rolls"
+          subtitle={`${openJob?.job_number || "Open a job"} · mill tags for this pour day`}
+          right={
+            <div className="flex flex-wrap gap-2 justify-end">
+              {flushButton}
+              {scanButton}
+            </div>
+          }
+        />
+      )}
+
+      <div className={embedded ? "space-y-4" : "p-4 sm:p-6 lg:p-8 space-y-4"}>
+        {embedded && (
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="text-sm text-muted-foreground">
+              {openJob?.job_number || "No open job"} · pour {pourDate || "—"}
+            </div>
+            <div className="flex flex-wrap gap-2 justify-end">
+              {flushButton}
+              {scanButton}
+            </div>
+          </div>
+        )}
         {step === "scan" && (
           <div className={`${cardClass} overflow-hidden`} data-testid="roll-camera">
             <div className="relative bg-black min-h-[360px]">
@@ -428,6 +453,9 @@ export default function StrandRolls() {
           </div>
         )}
       </div>
-    </Layout>
+    </>
   );
+
+  if (embedded) return body;
+  return <Layout>{body}</Layout>;
 }

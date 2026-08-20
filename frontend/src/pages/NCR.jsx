@@ -5,6 +5,8 @@ import { toast } from "sonner";
 import api, { formatApiErrorDetail } from "../lib/api";
 import Layout, { Field, PageHeader, cardClass, inputClass } from "../components/Layout";
 import { useAuth } from "../context/AuthContext";
+import { useOpenJob } from "../context/OpenJobContext";
+import { jobListParams } from "../lib/jobAccess";
 import {
   NCR_CATEGORIES, NCR_SEVERITIES, NCR_STATUSES, canCloseNcr, canCreateNcr, canManageNcr, ncrPhotoPath,
 } from "../lib/ncr";
@@ -59,6 +61,7 @@ function PhotoThumb({ ncrId, filename }) {
 
 export default function NCRDesk() {
   const { user } = useAuth();
+  const { openJob } = useOpenJob();
   const [params] = useSearchParams();
   const manage = canManageNcr(user?.role);
   const canFile = canCreateNcr(user?.role);
@@ -104,8 +107,8 @@ export default function NCRDesk() {
     try {
       const [j, p, b, d, n, ins] = await Promise.all([
         api.get("/jobs"),
-        api.get("/pours"),
-        api.get("/beams"),
+        api.get("/pours", { params: jobListParams(openJob) }),
+        api.get("/beams", { params: jobListParams(openJob) }),
         api.get("/beds"),
         api.get("/ncrs", { params: { beam_id: query.beam || undefined } }),
         api.get("/ncrs/insights"),
@@ -122,7 +125,7 @@ export default function NCRDesk() {
     } finally {
       setLoading(false);
     }
-  }, [query.beam]);
+  }, [query.beam, openJob?.id]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -441,7 +444,7 @@ export default function NCRDesk() {
               </label>
               <button type="button" onClick={() => download("pdf")} className="min-h-12 px-4 border border-[#1C2230] text-xs font-semibold uppercase">PDF</button>
               <button type="button" onClick={() => download("csv")} className="min-h-12 px-4 border border-[#1C2230] text-xs font-semibold uppercase">CSV</button>
-              {form.beam_ids[0] && <Link to={`/twin?beam=${form.beam_ids[0]}`} className="min-h-12 px-4 border border-[#1C2230] flex items-center text-xs font-semibold uppercase">Twin</Link>}
+              {form.beam_ids[0] && <Link to={`/job-specs?beam=${form.beam_ids[0]}`} className="min-h-12 px-4 border border-[#1C2230] flex items-center text-xs font-semibold uppercase">Twin</Link>}
               {form.beam_ids[0] && <Link to={`/b/${beams.find((b) => b.id === form.beam_ids[0])?.qr_token || ""}`} className="min-h-12 px-4 border border-[#1C2230] flex items-center text-xs font-semibold uppercase">Dossier</Link>}
               {form.batch_id && <Link to={`/batch`} className="min-h-12 px-4 border border-[#1C2230] flex items-center text-xs font-semibold uppercase">Batch</Link>}
             </div>

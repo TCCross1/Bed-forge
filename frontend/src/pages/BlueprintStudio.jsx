@@ -1,11 +1,12 @@
 import React, { useEffect, useMemo, useState } from "react";
-import api from "../lib/api";
-import Layout, { PageHeader } from "../components/Layout";
+import api, { formatApiErrorDetail } from "../lib/api";
+import Layout, { PageHeader, Field, inputClass } from "../components/Layout";
 import { useAuth } from "../context/AuthContext";
+import { useOpenJob } from "../context/OpenJobContext";
 import { toast } from "sonner";
 import { Loader2, Lock, ScanSearch, Upload, AlertTriangle, CheckCircle2, Download } from "lucide-react";
 
-const ROLE_CAN_LOCK = ["qc_supervisor", "admin"];
+const ROLE_CAN_EXTRACT = ["qc_supervisor", "admin", "executive"];
 
 function prettyValue(value) {
   if (value == null) return "";
@@ -33,6 +34,10 @@ function toneForStatus(status) {
 
 export default function BlueprintStudio() {
   const { user } = useAuth();
+  const { openJob, privileges, refresh } = useOpenJob();
+  const canLock = Boolean(privileges.can_lock);
+  const canPatch = Boolean(privileges.can_patch_spec);
+  const canExtract = ROLE_CAN_EXTRACT.includes(user?.role);
   const [jobs, setJobs] = useState([]);
   const [beams, setBeams] = useState([]);
   const [productTypes, setProductTypes] = useState([]);
@@ -45,6 +50,10 @@ export default function BlueprintStudio() {
   const [saving, setSaving] = useState(false);
   const [locking, setLocking] = useState(false);
   const [file, setFile] = useState(null);
+  const [note, setNote] = useState("");
+  const [managerEmail, setManagerEmail] = useState("admin@bedforge.com");
+  const [managerPassword, setManagerPassword] = useState("");
+  const [overrideBusy, setOverrideBusy] = useState(false);
   const [uploadForm, setUploadForm] = useState({
     job_id: "",
     beam_id: "",
@@ -53,8 +62,6 @@ export default function BlueprintStudio() {
     beam_mark_hint: "",
     project_name_hint: "",
   });
-
-  const canLock = ROLE_CAN_LOCK.includes(user?.role);
 
   const loadAll = async (keepSelectedId) => {
     try {
@@ -78,7 +85,7 @@ export default function BlueprintStudio() {
       }
     } catch (err) {
       console.error("[blueprints] load failed", err);
-      toast.error(err.response?.data?.detail || "Failed to load blueprints");
+      toast.error(formatApiErrorDetail(err.response?.data?.detail) || "Failed to load blueprints");
     }
   };
 
@@ -86,6 +93,12 @@ export default function BlueprintStudio() {
     loadAll();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    if (!openJob?.id) return undefined;
+    setUploadForm((current) => ({ ...current, job_id: current.job_id || openJob.id }));
+    return undefined;
+  }, [openJob?.id]);
 
   useEffect(() => {
     if (!detail?.latest_extraction?.fields) {
@@ -134,7 +147,7 @@ export default function BlueprintStudio() {
       });
       await loadAll(data.id);
     } catch (err) {
-      toast.error(err.response?.data?.detail || "Upload failed");
+      toast.error(formatApiErrorDetail(err.response?.data?.detail) || "Upload failed");
     } finally {
       setUploading(false);
     }
@@ -149,7 +162,7 @@ export default function BlueprintStudio() {
       await loadAll(selectedId);
       toast.success("Controlled extraction complete");
     } catch (err) {
-      toast.error(err.response?.data?.detail || "Extraction failed");
+      toast.error(formatApiErrorDetail(err.response?.data?.detail) || "Extraction failed");
     } finally {
       setExtracting(false);
     }
@@ -177,11 +190,26 @@ export default function BlueprintStudio() {
       window.URL.revokeObjectURL(url);
       toast.success("Blueprint Assessment PDF downloaded");
     } catch (err) {
-      toast.error(err.response?.data?.detail || "Failed to download Blueprint Assessment PDF");
+      toast.error(formatApiErrorDetail(err.response?.data?.detail) || "Failed to download Blueprint Assessment PDF");
     }
   };
 
-const saveReview = async () => {
+  const requestOverride = async () => {
+    setOverrideBusy(true);
+    try {
+      await api.post("/job-overrides", { note, manager_email: managerEmail, manager_password: managerPassword });
+      setManagerPassword("");
+      await refresh();
+      toast.success("Override active — Spec DNA save and lock are logged");
+    } catch (err) {
+      console.error("[blueprints] override failed", err);
+      toast.error(formatApiErrorDetail(err.response?.data?.detail) || "Override was not accepted");
+    } finally {
+      setOverrideBusy(false);
+    }
+  };
+
+  const saveReview = async () => {
     if (!selectedId) return;
     setSaving(true);
     try {
@@ -204,7 +232,7 @@ const saveReview = async () => {
       await loadAll(selectedId);
       toast.success("Review changes saved");
     } catch (err) {
-      toast.error(err.response?.data?.detail || "Failed to save review edits");
+      toast.error(formatApiErrorDetail(err.response?.data?.detail) || "Failed to save review edits");
     } finally {
       setSaving(false);
     }
@@ -223,7 +251,7 @@ const saveReview = async () => {
       await loadAll(selectedId);
       toast.success("Blueprint revision locked — Spec DNA is ready on Digital Twin");
     } catch (err) {
-      toast.error(err.response?.data?.detail || "Unable to lock blueprint");
+      toast.error(formatApiErrorDetail(err.response?.data?.detail) || "Unable to lock blueprint");
     } finally {
       setLocking(false);
     }
@@ -236,7 +264,7 @@ const saveReview = async () => {
         subtitle="Controlled intake, extraction, review, and immutable lock workflow for prestress shop drawings"
         right={
           <div className="flex items-center gap-2 shrink-0">
-            <Badge tone={canLock ? "green" : "amber"}>{canLock ? "lock authority" : "review only"}</Badge>
+            <Badge tone={canLock ? "green" : "amber"}>{canLock ? "lock authority" : "Spec DNA gated"}</Badge>
             <Badge tone="blue">{user?.role || "user"}</Badge>
           </div>
         }
@@ -351,15 +379,33 @@ const saveReview = async () => {
                     )}
                   </div>
                   <div className="flex flex-col gap-3 w-full lg:w-[240px] shrink-0">
-                    <button onClick={runExtraction} disabled={extracting} className="w-full min-h-12 px-4 border border-border rounded-sm text-sm font-semibold uppercase tracking-wider flex items-center justify-center gap-2 hover:border-primary hover:text-primary disabled:opacity-60">
+                    <button onClick={runExtraction} disabled={!canExtract || extracting} className="w-full min-h-12 px-4 border border-border rounded-sm text-sm font-semibold uppercase tracking-wider flex items-center justify-center gap-2 hover:border-primary hover:text-primary disabled:opacity-60">
                       {extracting ? <Loader2 className="w-4 h-4 animate-spin" /> : <ScanSearch className="w-4 h-4" />} Extract
                     </button>
-                    <button onClick={saveReview} disabled={saving || !detail.latest_extraction} className="w-full min-h-12 px-4 border border-border rounded-sm text-sm font-semibold uppercase tracking-wider hover:border-primary hover:text-primary disabled:opacity-60">
+                    <button onClick={saveReview} disabled={!canPatch || saving || !detail.latest_extraction} className="w-full min-h-12 px-4 border border-border rounded-sm text-sm font-semibold uppercase tracking-wider hover:border-primary hover:text-primary disabled:opacity-60">
                       {saving ? "Saving…" : "Save Review"}
                     </button>
                     <button onClick={lockBlueprint} disabled={!canLock || locking || !detail.latest_extraction} className="w-full min-h-12 px-4 bg-primary text-white rounded-sm text-sm font-bold uppercase tracking-wider flex items-center justify-center gap-2 disabled:opacity-60">
                       {locking ? <Loader2 className="w-4 h-4 animate-spin" /> : <Lock className="w-4 h-4" />} Verify & Lock
                     </button>
+                    {privileges.can_request_override && (
+                      <div className="border border-[#E8C87255] p-3 space-y-2" data-testid="blueprint-override-gate">
+                        <div className="text-[10px] font-mono uppercase tracking-widest text-[#E8C872]">Plant Manager override</div>
+                        <p className="text-xs text-muted-foreground">QC Supervisor cannot save Spec DNA or lock without a proof note and Plant Manager password.</p>
+                        <Field label="Proof note">
+                          <textarea className={`${inputClass} min-h-[72px] py-2`} value={note} onChange={(e) => setNote(e.target.value)} />
+                        </Field>
+                        <Field label="Plant Manager email">
+                          <input className={inputClass} value={managerEmail} onChange={(e) => setManagerEmail(e.target.value)} />
+                        </Field>
+                        <Field label="Plant Manager password">
+                          <input type="password" className={inputClass} value={managerPassword} onChange={(e) => setManagerPassword(e.target.value)} autoComplete="off" />
+                        </Field>
+                        <button type="button" onClick={requestOverride} disabled={overrideBusy} className="w-full min-h-12 border border-border font-mono text-xs uppercase tracking-widest">
+                          {privileges.override_active ? "Refresh override" : "Request override"}
+                        </button>
+                      </div>
+                    )}
                     <button
                       type="button"
                       onClick={downloadAssessmentPdf}
@@ -399,18 +445,19 @@ const saveReview = async () => {
                               <textarea
                                 rows={typeof value === "string" && value.length > 80 ? 4 : 2}
                                 value={value}
+                                disabled={!canPatch}
                                 onChange={(e) => setFieldDrafts({ ...fieldDrafts, [key]: { ...draft, value: e.target.value } })}
-                                className="w-full bg-background border border-border rounded-sm px-3 py-2 font-mono text-sm"
+                                className="w-full bg-background border border-border rounded-sm px-3 py-2 font-mono text-sm disabled:opacity-60"
                               />
                               <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-                                <select value={draft.status || field?.status || "unconfirmed"} onChange={(e) => setFieldDrafts({ ...fieldDrafts, [key]: { ...draft, status: e.target.value } })} className="bg-background border border-border rounded-sm px-3 min-h-11 font-mono text-xs">
+                                <select disabled={!canPatch} value={draft.status || field?.status || "unconfirmed"} onChange={(e) => setFieldDrafts({ ...fieldDrafts, [key]: { ...draft, status: e.target.value } })} className="bg-background border border-border rounded-sm px-3 min-h-11 font-mono text-xs disabled:opacity-60">
                                   {["confirmed", "manually_confirmed", "unconfirmed", "not_applicable"].map((option) => <option key={option} value={option}>{option}</option>)}
                                 </select>
-                                <select value={draft.confidence || field?.confidence || "low"} onChange={(e) => setFieldDrafts({ ...fieldDrafts, [key]: { ...draft, confidence: e.target.value } })} className="bg-background border border-border rounded-sm px-3 min-h-11 font-mono text-xs">
+                                <select disabled={!canPatch} value={draft.confidence || field?.confidence || "low"} onChange={(e) => setFieldDrafts({ ...fieldDrafts, [key]: { ...draft, confidence: e.target.value } })} className="bg-background border border-border rounded-sm px-3 min-h-11 font-mono text-xs disabled:opacity-60">
                                   {["high", "medium", "low"].map((option) => <option key={option} value={option}>{option}</option>)}
                                 </select>
-                                <input value={draft.source_page ?? field?.source_page ?? ""} onChange={(e) => setFieldDrafts({ ...fieldDrafts, [key]: { ...draft, source_page: e.target.value } })} placeholder="Source page" className="bg-background border border-border rounded-sm px-3 min-h-11 font-mono text-xs" />
-                                <input value={draft.extraction_notes ?? field?.extraction_notes ?? ""} onChange={(e) => setFieldDrafts({ ...fieldDrafts, [key]: { ...draft, extraction_notes: e.target.value } })} placeholder="Extraction notes" className="bg-background border border-border rounded-sm px-3 min-h-11 font-mono text-xs" />
+                                <input disabled={!canPatch} value={draft.source_page ?? field?.source_page ?? ""} onChange={(e) => setFieldDrafts({ ...fieldDrafts, [key]: { ...draft, source_page: e.target.value } })} placeholder="Source page" className="bg-background border border-border rounded-sm px-3 min-h-11 font-mono text-xs disabled:opacity-60" />
+                                <input disabled={!canPatch} value={draft.extraction_notes ?? field?.extraction_notes ?? ""} onChange={(e) => setFieldDrafts({ ...fieldDrafts, [key]: { ...draft, extraction_notes: e.target.value } })} placeholder="Extraction notes" className="bg-background border border-border rounded-sm px-3 min-h-11 font-mono text-xs disabled:opacity-60" />
                               </div>
                             </div>
                           );

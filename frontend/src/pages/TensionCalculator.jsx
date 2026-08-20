@@ -10,10 +10,13 @@ import {
   strandTensionColor,
   strandTensionStatus,
 } from "../lib/beamSpec";
-import { Calculator, CheckCircle2, XCircle, Save, Loader2, Upload, ScanBarcode } from "lucide-react";
+import { Calculator, CheckCircle2, XCircle, Save, Loader2, ScanBarcode } from "lucide-react";
 import { toast } from "sonner";
 import { toastNcrFromResponse } from "../lib/ncr";
 import { useDevice } from "../context/DeviceContext";
+import { useOpenJob } from "../context/OpenJobContext";
+import StrandRolls from "./StrandRolls";
+import StrandQcPhotos from "./StrandQcPhotos";
 
 const STRAND_PRESETS = [
   { size: "0.5in oversize", area: 0.167 },
@@ -43,7 +46,9 @@ function SummaryChip({ label, value, color, testid }) {
 
 export default function TensionCalculator() {
   const device = useDevice();
-  const [params] = useSearchParams();
+  const [params, setParams] = useSearchParams();
+  const tab = params.get("tab") || "tension";
+  const { openJob, setActiveMark } = useOpenJob();
   const [beams, setBeams] = useState([]);
   const [selectedId, setSelectedId] = useState(params.get("beam") || "");
   const [twin, setTwin] = useState(null);
@@ -64,7 +69,7 @@ export default function TensionCalculator() {
   const [result, setResult] = useState(null);
 
   useEffect(() => {
-    api.get("/beams")
+    api.get("/beams", { params: openJob?.id ? { job_id: openJob.id } : {} })
       .then((r) => {
         setBeams(r.data || []);
         setSelectedId((cur) => cur || r.data?.[0]?.id || "");
@@ -82,7 +87,12 @@ export default function TensionCalculator() {
         console.error("[tension] beds load failed", err);
         toast.error(formatApiErrorDetail(err.response?.data?.detail) || "Failed to load beds");
       });
-  }, []);
+  }, [openJob?.id]);
+
+  useEffect(() => {
+    const mark = beams.find((item) => item.id === selectedId)?.mark || "";
+    setActiveMark(mark);
+  }, [beams, selectedId, setActiveMark]);
 
   const loadTwin = useCallback(async (id) => {
     if (!id) return;
@@ -258,33 +268,42 @@ export default function TensionCalculator() {
   return (
     <Layout>
       <PageHeader
-        title="Tension Twin"
-        subtitle="Tap any strand or I-beam hold-down — pattern locked from the shop drawing"
+        title="Tension / Strands"
+        subtitle={`${openJob?.job_number || "Open a job"} · mill tags, QC photos, and elongation on this pour`}
         right={
           <div className="flex flex-wrap gap-2 justify-end">
             <ARMeasureLink beamId={selectedId} purpose="layout" />
-            <Link
-              to="/rolls"
-              className="min-h-12 px-4 border border-[#1C2230] rounded-none flex items-center gap-2 text-sm font-semibold uppercase tracking-wider hover:border-primary hover:text-primary"
-            >
-              <ScanBarcode className="w-4 h-4" /> Rolls
-            </Link>
-            <Link
-              to="/drawings"
-              className="min-h-12 px-4 border border-[#1C2230] rounded-none flex items-center gap-2 text-sm font-semibold uppercase tracking-wider hover:border-primary hover:text-primary"
-            >
-              <Upload className="w-4 h-4" /> Drawings
-            </Link>
+            {[["tension", "Tension"], ["rolls", "Rolls"], ["photos", "QC Photos"]].map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                onClick={() => {
+                  const next = new URLSearchParams(params);
+                  if (value === "tension") next.delete("tab");
+                  else next.set("tab", value);
+                  setParams(next);
+                }}
+                className={`min-h-12 px-4 border rounded-none text-sm font-semibold uppercase tracking-wider ${tab === value ? "border-primary bg-primary text-white" : "border-[#1C2230] hover:border-primary hover:text-primary"}`}
+                data-testid={`tension-tab-${value}`}
+              >
+                {label}
+              </button>
+            ))}
           </div>
         }
       />
 
+      {tab === "rolls" ? (
+        <div className="p-4 sm:p-6 lg:p-8"><StrandRolls embedded /></div>
+      ) : tab === "photos" ? (
+        <div className="p-4 sm:p-6 lg:p-8"><StrandQcPhotos /></div>
+      ) : (
       <div className="p-4 sm:p-6 lg:p-8 space-y-4 sm:space-y-6">
         {gated && (
           <div className={`${cardClass} p-4 border-[#FF3366]`} data-testid="strand-gate-block">
             <div className="font-display font-bold uppercase tracking-wider text-[#FF3366]">Tensioning locked</div>
             <p className="text-sm text-muted-foreground mt-1">{gate.message || "Scan and confirm a mill tag before stressing this bed."}</p>
-            <Link to="/rolls" className="inline-flex mt-3 min-h-12 px-4 bg-primary text-white font-display font-bold uppercase tracking-widest items-center gap-2">
+            <Link to="/tension?tab=rolls" className="inline-flex mt-3 min-h-12 px-4 bg-primary text-white font-display font-bold uppercase tracking-widest items-center gap-2">
               <ScanBarcode className="w-4 h-4" /> Scan mill tag
             </Link>
           </div>
@@ -593,6 +612,7 @@ export default function TensionCalculator() {
           </div>
         </div>
       </div>
+      )}
     </Layout>
   );
 }

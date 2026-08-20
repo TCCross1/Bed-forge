@@ -6,6 +6,8 @@ import Layout, { PageHeader, Field, inputClass, cardClass } from "../components/
 import CylinderPrint from "../components/CylinderPrint";
 import { useAuth } from "../context/AuthContext";
 import { useCompany } from "../context/CompanyContext";
+import { useOpenJob } from "../context/OpenJobContext";
+import { jobListParams } from "../lib/jobAccess";
 import { toastNcrFromResponse } from "../lib/ncr";
 import {
   MAX_BEAMS, MAX_SLOTS, cleanBeams, emptyRun, padBeams,
@@ -47,6 +49,7 @@ function cloneRun(run, tech) {
 export default function CylinderTags() {
   const { user } = useAuth();
   const company = useCompany();
+  const { openJob } = useOpenJob();
   const tech = user?.name || "";
   const canBrand = user?.role === "admin" || user?.role === "executive" || user?.role === "qc_supervisor";
 
@@ -72,11 +75,12 @@ export default function CylinderTags() {
     try {
       const [jobRes, pourRes, beamRes, runRes] = await Promise.all([
         api.get("/jobs"),
-        api.get("/pours"),
-        api.get("/beams"),
+        api.get("/pours", { params: jobListParams(openJob) }),
+        api.get("/beams", { params: jobListParams(openJob) }),
         api.get("/cylinder-runs"),
       ]);
-      setJobs(jobRes.data || []);
+      const allJobs = jobRes.data || [];
+      setJobs(openJob?.id ? allJobs.filter((job) => job.id === openJob.id) : allJobs);
       setPours(pourRes.data || []);
       setBeams(beamRes.data || []);
       setRuns(runRes.data || []);
@@ -86,7 +90,7 @@ export default function CylinderTags() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [openJob?.id]);
 
   useEffect(() => {
     loadCatalog();
@@ -109,6 +113,10 @@ export default function CylinderTags() {
     const draft = emptyRun(tech);
     draft.slots[0].use_today = true;
     draft.slots[0].qc_tech = tech;
+    if (openJob?.id) {
+      draft.slots[0].job_id = openJob.id;
+      draft.slots[0].job_number = openJob.job_number || "";
+    }
     setRun(draft);
     setActiveSlot(1);
     setStep("setup");

@@ -3,22 +3,25 @@ import api from "../lib/api";
 import Layout, { PageHeader } from "../components/Layout";
 import { Loader2, ShieldAlert } from "lucide-react";
 import { toast } from "sonner";
+import { useOpenJob } from "../context/OpenJobContext";
+import { jobListParams } from "../lib/jobAccess";
 
 const STATES = ["open", "investigation", "corrective_action", "verification", "closed"];
 
 export default function NCRBoard() {
+  const { openJob } = useOpenJob();
   const [ncrs, setNcrs] = useState([]);
   const [beams, setBeams] = useState([]);
   const [form, setForm] = useState({ title: "", severity: "major", beam_id: "", owner: "" });
   const [saving, setSaving] = useState(false);
 
-  const load = () => Promise.all([api.get("/ncrs"), api.get("/beams")]).then(([ncrRes, beamRes]) => {
+  const load = () => Promise.all([api.get("/ncrs"), api.get("/beams", { params: jobListParams(openJob) })]).then(([ncrRes, beamRes]) => {
     setNcrs(ncrRes.data);
     setBeams(beamRes.data);
     setForm((current) => ({ ...current, beam_id: current.beam_id || beamRes.data[0]?.id || "" }));
   });
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [openJob?.id]);
 
   const create = async () => {
     if (!form.title || !form.beam_id) return toast.error("Title and beam are required");

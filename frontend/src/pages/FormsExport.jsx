@@ -3,6 +3,8 @@ import api from "../lib/api";
 import Layout, { PageHeader } from "../components/Layout";
 import { Download, FileSpreadsheet, FileText, Loader2 } from "lucide-react";
 import { toast } from "sonner";
+import { useOpenJob } from "../context/OpenJobContext";
+import { jobListParams } from "../lib/jobAccess";
 
 const LEGACY_FORMS = [
   { type: "qir", title: "QIR 2026.6.1", desc: "Quality Inspection Report — full section summary per beam", needsBeam: true },
@@ -18,6 +20,7 @@ const PACKAGE_TYPES = [
 ];
 
 export default function FormsExport() {
+  const { openJob } = useOpenJob();
   const [jobs, setJobs] = useState([]);
   const [pours, setPours] = useState([]);
   const [beds, setBeds] = useState([]);
@@ -29,23 +32,25 @@ export default function FormsExport() {
   const [busy, setBusy] = useState("");
 
   useEffect(() => {
+    const params = jobListParams(openJob);
     Promise.all([
       api.get("/jobs"),
-      api.get("/pours"),
+      api.get("/pours", { params }),
       api.get("/beds"),
-      api.get("/beams"),
+      api.get("/beams", { params }),
       api.get("/license"),
     ]).then(([jobsRes, poursRes, bedsRes, beamsRes, licenseRes]) => {
-      setJobs(jobsRes.data);
+      const allJobs = jobsRes.data || [];
+      setJobs(openJob?.id ? allJobs.filter((job) => job.id === openJob.id) : allJobs);
       setPours(poursRes.data);
       setBeds(bedsRes.data);
       setBeams(beamsRes.data);
       setLicense(licenseRes.data);
-      setJobId(jobsRes.data[0]?.id || "");
+      setJobId(openJob?.id || jobsRes.data[0]?.id || "");
       setPourId(poursRes.data[0]?.id || "");
       setBeamId(beamsRes.data[0]?.id || "");
     });
-  }, []);
+  }, [openJob?.id]);
 
   const selectedBeam = useMemo(() => beams.find((item) => item.id === beamId), [beams, beamId]);
 

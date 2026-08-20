@@ -14,6 +14,8 @@ import {
   applyScale, evaluateCalibration, formatRemaining, sanitizeEngine,
 } from "../lib/tapeCal";
 import { toast } from "sonner";
+import { useOpenJob } from "../context/OpenJobContext";
+import { jobListParams } from "../lib/jobAccess";
 import { Flashlight, Loader2, ScanLine, Sparkles } from "lucide-react";
 
 const PURPOSES = [
@@ -83,6 +85,7 @@ function scheduleTapePreview(timerRef, list, beamId, setCompare) {
 export default function ARMeasure() {
   const device = useDevice();
   const { measurements, refresh } = useSync();
+  const { openJob } = useOpenJob();
   const [params] = useSearchParams();
   const [beams, setBeams] = useState([]);
   const [beds, setBeds] = useState([]);
@@ -152,7 +155,7 @@ export default function ARMeasure() {
   };
 
   useEffect(() => {
-    api.get("/beams").then((r) => {
+    api.get("/beams", { params: jobListParams(openJob) }).then((r) => {
       setBeams(r.data || []);
       setBeamId((cur) => cur || r.data?.[0]?.id || "");
     }).catch((err) => {
@@ -164,7 +167,7 @@ export default function ARMeasure() {
       setBedId((cur) => cur || r.data?.[0]?.id || "");
     }).catch((err) => console.error("[measure] beds failed", err));
     loadCalibration();
-  }, []);
+  }, [openJob?.id]);
 
   useEffect(() => {
     if (!calStatus?.allowed) return undefined;
@@ -625,7 +628,7 @@ export default function ARMeasure() {
               <textarea className={`${inputClass} py-2`} rows={2} value={note} onChange={(e) => setNote(e.target.value)} placeholder="Header / line / pour notes" />
             </Field>
             {beamId && (
-              <Link to={`/twin?beam=${beamId}`} className="min-h-12 px-3 border border-[#1C2230] flex items-center justify-center font-semibold uppercase tracking-wider text-xs hover:border-primary hover:text-primary">
+              <Link to={`/job-specs?beam=${beamId}`} className="min-h-12 px-3 border border-[#1C2230] flex items-center justify-center font-semibold uppercase tracking-wider text-xs hover:border-primary hover:text-primary">
                 Open 3D twin / blueprints
               </Link>
             )}

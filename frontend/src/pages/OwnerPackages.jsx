@@ -3,8 +3,11 @@ import api, { formatApiErrorDetail } from "../lib/api";
 import Layout, { PageHeader, Field, inputClass, cardClass } from "../components/Layout";
 import { toast } from "sonner";
 import { Download, FileSpreadsheet, Loader2, Package } from "lucide-react";
+import { useOpenJob } from "../context/OpenJobContext";
+import { jobListParams } from "../lib/jobAccess";
 
 export default function OwnerPackages() {
+  const { openJob } = useOpenJob();
   const [pours, setPours] = useState([]);
   const [pourId, setPourId] = useState("");
   const [rows, setRows] = useState([]);
@@ -21,14 +24,14 @@ export default function OwnerPackages() {
   };
 
   useEffect(() => {
-    api.get("/pours").then((r) => {
+    api.get("/pours", { params: jobListParams(openJob) }).then((r) => {
       setPours(r.data || []);
       setPourId((cur) => cur || r.data?.[0]?.id || "");
     }).catch((err) => {
       console.error("[packages] pours failed", err);
       toast.error(formatApiErrorDetail(err.response?.data?.detail) || "Failed to load pours");
     });
-  }, []);
+  }, [openJob?.id]);
 
   useEffect(() => {
     load(pourId);

@@ -6,6 +6,8 @@ import { toast } from "sonner";
 import { Loader2, Truck } from "lucide-react";
 import { pickBeamId, useBeamQuery } from "../lib/useBeamQuery";
 import { useAuth } from "../context/AuthContext";
+import { useOpenJob } from "../context/OpenJobContext";
+import { jobListParams } from "../lib/jobAccess";
 import { toastNcrFromError, toastNcrFromResponse } from "../lib/ncr";
 
 const CHECKS = [
@@ -35,6 +37,7 @@ const EMPTY = {
 
 export default function PreDelivery() {
   const { user } = useAuth();
+  const { openJob } = useOpenJob();
   const queryBeam = useBeamQuery();
   const [beams, setBeams] = useState([]);
   const [beamId, setBeamId] = useState(queryBeam);
@@ -44,7 +47,7 @@ export default function PreDelivery() {
 
   useEffect(() => {
     let cancelled = false;
-    api.get("/beams")
+    api.get("/beams", { params: jobListParams(openJob) })
       .then((r) => {
         if (cancelled) return;
         setBeams(r.data);
@@ -58,7 +61,7 @@ export default function PreDelivery() {
     return () => {
       cancelled = true;
     };
-  }, [queryBeam]);
+  }, [queryBeam, openJob?.id]);
 
   useEffect(() => {
     if (!beamId) return undefined;

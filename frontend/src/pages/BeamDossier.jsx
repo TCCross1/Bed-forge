@@ -158,7 +158,7 @@ export default function BeamDossier() {
                 <div className="px-4 py-3 border-b border-[#1C2230] flex items-center justify-between">
                   <div className="font-display font-bold uppercase tracking-wider">3D Digital Twin</div>
                   {full && dossier.id && (
-                    <Link to={`/twin?beam=${dossier.id}`} className="text-xs font-semibold uppercase tracking-wider text-primary flex items-center gap-1">
+                    <Link to={`/job-specs?beam=${dossier.id}`} className="text-xs font-semibold uppercase tracking-wider text-primary flex items-center gap-1">
                       <Box className="w-4 h-4" /> Open interactive
                     </Link>
                   )}
@@ -270,7 +270,7 @@ export default function BeamDossier() {
                   </div>
                 )}
                 <div className="flex flex-wrap gap-2 pt-2">
-                  <Link to={`/twin?beam=${dossier.id}`} className="min-h-12 px-4 bg-primary text-white font-display font-bold uppercase tracking-widest flex items-center">
+                  <Link to={`/job-specs?beam=${dossier.id}`} className="min-h-12 px-4 bg-primary text-white font-display font-bold uppercase tracking-widest flex items-center">
                     Digital Twin
                   </Link>
                   <Link to={`/qr?beam=${dossier.id}`} className="min-h-12 px-4 border border-[#1C2230] font-semibold uppercase tracking-wider flex items-center gap-2 hover:border-primary hover:text-primary">
